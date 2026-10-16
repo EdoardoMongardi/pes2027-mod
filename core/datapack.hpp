@@ -45,6 +45,7 @@ bool activate(const Layout& L, const std::string& dataId, std::string& err);
 // Active data id (empty = none) and a quick structural check (all manifest files present with right size).
 std::string activeId(const Layout& L);
 bool quickVerify(const Layout& L, const std::string& dataId, std::string& err);
+bool quickVerify(const Layout& L, const std::string& dataId, const std::string& appVersion, const std::string& appBuild, const std::string& modVersion, std::string& err);
 bool loadInstalledManifest(const Layout& L, const std::string& dataId, Manifest& m, std::string& err);
 std::string dataDir(const Layout& L, const std::string& dataId);
 

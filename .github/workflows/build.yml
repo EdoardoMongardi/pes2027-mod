@@ -45,7 +45,7 @@ jobs:
             -std=c++17 -O2 -fobjc-arc -fvisibility=hidden -Wall -Wno-unused \
             -dynamiclib -install_name @executable_path/Frameworks/ZiruOffline.dylib \
             ios/ZiruOffline.mm core/jvalue.cpp core/codec.cpp core/store.cpp core/server.cpp core/zipread.cpp core/datapack.cpp \
-            -framework Foundation -framework UIKit -framework UniformTypeIdentifiers -framework Security \
+            -framework Foundation -framework UIKit -framework UniformTypeIdentifiers -framework Security -framework QuartzCore \
             -lz -lsqlite3 -o build/ZiruOffline.dylib 2> build/clang.log || {
               grep -E "error:" build/clang.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done
               grep -E "error:" -A3 build/clang.log | head -120 | while IFS= read -r l; do echo "::warning::$l"; done

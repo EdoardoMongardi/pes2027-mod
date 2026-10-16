@@ -104,13 +104,35 @@ bool inspectPack(const std::string& zipPath, Manifest& m, std::string& err) {
   return true;
 }
 
+static int compareSemver(const std::string& a, const std::string& b) {
+  size_t i = 0, j = 0;
+  while (i < a.size() || j < b.size()) {
+    while (i < a.size() && (a[i] == 'v' || a[i] == 'V')) i++;
+    while (j < b.size() && (b[j] == 'v' || b[j] == 'V')) j++;
+    long long numA = 0, numB = 0;
+    while (i < a.size() && a[i] >= '0' && a[i] <= '9') {
+      numA = numA * 10 + (a[i] - '0');
+      i++;
+    }
+    while (j < b.size() && b[j] >= '0' && b[j] <= '9') {
+      numB = numB * 10 + (b[j] - '0');
+      j++;
+    }
+    if (numA < numB) return -1;
+    if (numA > numB) return 1;
+    if (i < a.size() && (a[i] == '.' || a[i] == '-')) i++;
+    if (j < b.size() && (b[j] == '.' || b[j] == '-')) j++;
+  }
+  return 0;
+}
+
 bool checkCompatible(const Manifest& m, const std::string& appVersion, const std::string& appBuild, const std::string& modVersion,
                      std::string& err) {
   if (m.format != 1) { err = "Định dạng gói data không hỗ trợ (format " + std::to_string(m.format) + ")"; return false; }
   if (m.dataId.empty() || m.dataId.find('/') != std::string::npos || m.dataId[0] == '.') { err = "data_id không hợp lệ"; return false; }
   if (!appVersion.empty() && m.clientVersion != appVersion) { err = "Gói data dành cho bản " + m.clientVersion + ", ứng dụng là " + appVersion; return false; }
   if (!appBuild.empty() && !m.clientBuild.empty() && m.clientBuild != appBuild) { err = "Gói data dành cho build " + m.clientBuild + ", ứng dụng là " + appBuild; return false; }
-  if (!m.modVersion.empty() && !modVersion.empty() && m.modVersion > modVersion) { err = "Gói data cần bản mod " + m.modVersion + " trở lên"; return false; }
+  if (!m.modVersion.empty() && !modVersion.empty() && compareSemver(m.modVersion, modVersion) > 0) { err = "Gói data cần bản mod " + m.modVersion + " trở lên"; return false; }
   std::set<std::string> seen;
   bool havePak = false, haveCpk = false;
   for (auto& f : m.files) {
@@ -263,10 +285,11 @@ bool loadInstalledManifest(const Layout& L, const std::string& id, Manifest& m, 
   return parseManifest(js, m, err);
 }
 
-bool quickVerify(const Layout& L, const std::string& id, std::string& err) {
+bool quickVerify(const Layout& L, const std::string& id, const std::string& appVersion, const std::string& appBuild, const std::string& modVersion, std::string& err) {
   if (id.empty()) { err = "Chưa nhập data"; return false; }
   Manifest m;
   if (!loadInstalledManifest(L, id, m, err)) return false;
+  if (!checkCompatible(m, appVersion, appBuild, modVersion, err)) return false;
   for (auto& f : m.files) {
     struct stat st;
     std::string p = dataDir(L, id) + "/" + f.path;
@@ -284,6 +307,10 @@ bool quickVerify(const Layout& L, const std::string& id, std::string& err) {
     }
   }
   return linkDownloads(L, id, err);
+}
+
+bool quickVerify(const Layout& L, const std::string& id, std::string& err) {
+  return quickVerify(L, id, "", "", "", err);
 }
 
 }  // namespace zd
