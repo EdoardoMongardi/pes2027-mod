@@ -140,28 +140,39 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
 
     ipa = os.path.join(out, "PES2027.ipa")
     tmp = ipa + ".tmp"
-    skip_top = {"pak", "cpk", "_CodeSignature", "SC_Info", "embedded.mobileprovision"}
+    skip_names = {"pak", "cpk", "_CodeSignature", "SC_Info", "embedded.mobileprovision"}
     n = 0
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as z:
         root = "Payload/PESmobile.app/"
+        for d in ["Payload/", root, root + "Frameworks/", root + "ziru/", root + "ziru/responses/"]:
+            zi = zipfile.ZipInfo(d, time.localtime()[:6])
+            zi.external_attr = 0o040755 << 16
+            z.writestr(zi, b"")
+
         for dirpath, dirnames, filenames in os.walk(app):
             rel = os.path.relpath(dirpath, app).replace("\\", "/")
-            top = rel.split("/")[0]
-            if top in skip_top:
+            parts = rel.split("/")
+            if any(p in skip_names for p in parts):
                 dirnames[:] = []
                 continue
+            dirnames[:] = [d for d in dirnames if d not in skip_names]
             for fn in filenames:
+                if fn in {"embedded.mobileprovision", ".DS_Store"}:
+                    continue
                 p = os.path.join(dirpath, fn)
                 arc = root + (fn if rel == "." else f"{rel}/{fn}")
+                is_exec = (fn == "PESmobile" or fn.endswith(".dylib") or fn == "gadsme")
+                mode = 0o100755 if is_exec else 0o100644
+                zi = zipfile.ZipInfo(arc, time.localtime()[:6])
+                zi.external_attr = mode << 16
+                zi.compress_type = zipfile.ZIP_DEFLATED
                 if arc == root + "PESmobile":
-                    zi = zipfile.ZipInfo(arc, time.localtime()[:6])
-                    zi.external_attr = 0o100755 << 16
-                    zi.compress_type = zipfile.ZIP_DEFLATED
                     z.writestr(zi, bytes(data))
                 elif arc == root + "Info.plist":
-                    z.writestr(arc, plistlib.dumps(info, fmt=plistlib.FMT_BINARY))
+                    z.writestr(zi, plistlib.dumps(info, fmt=plistlib.FMT_XML))
                 else:
-                    z.write(p, arc)
+                    with open(p, "rb") as f:
+                        z.writestr(zi, f.read())
                 n += 1
         zi = zipfile.ZipInfo(root + "Frameworks/ZiruOffline.dylib", time.localtime()[:6])
         zi.external_attr = 0o100755 << 16
@@ -171,7 +182,11 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
         with zipfile.ZipFile(apk) as a:
             for e in a.infolist():
                 if e.filename.startswith("assets/responses/") and not e.is_dir():
-                    z.writestr(root + "ziru/responses/" + e.filename[len("assets/responses/"):], a.read(e))
+                    arc = root + "ziru/responses/" + e.filename[len("assets/responses/"):]
+                    zi = zipfile.ZipInfo(arc, time.localtime()[:6])
+                    zi.external_attr = 0o100644 << 16
+                    zi.compress_type = zipfile.ZIP_DEFLATED
+                    z.writestr(zi, a.read(e))
                     n += 1
     os.replace(tmp, ipa)
     report["outputs"]["ipa"] = {"path": ipa, "size": os.path.getsize(ipa), "sha256": sha256_file(ipa), "files": n}
