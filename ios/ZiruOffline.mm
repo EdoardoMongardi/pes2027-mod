@@ -995,6 +995,17 @@ static BOOL checkDirectFolderData(NSString** why) {
     if (!foundLivedata) foundLivedata = liveDocs;
   }
 
+  // Extra UI container bundled in the IPA (tools/make_extra_pak.py): standard card photos, emblems, kit thumbnails that
+  // exist only in Ziru's Android data. Linked into Documents/pak so the engine mounts it with the other containers.
+  NSString* bundleExtra = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru/pak_extra"];
+  if ([fm fileExistsAtPath:bundleExtra]) {
+    [fm createDirectoryAtPath:pakDir withIntermediateDirectories:YES attributes:nil error:nil];
+    for (NSString* f in [fm contentsOfDirectoryAtPath:bundleExtra error:nil]) {
+      ensureSymlink([pakDir stringByAppendingPathComponent:f], [bundleExtra stringByAppendingPathComponent:f]);
+    }
+    ZLog(@"[PAK_EXTRA] linked %lu files from ziru/pak_extra", (unsigned long)[fm contentsOfDirectoryAtPath:bundleExtra error:nil].count);
+  }
+
   // Create _mobile_ios symlinks for livedata files, and mount all epic paks/ucas/utoc into pak/ and cpk into cpk/
   // CRITICAL: Also link into Documents/Download/ because onlinemode::UtilityLiveData::GetLiveDataSaveDirPath()
   // returns Documents/Download/ where LiveDataVersionLoader, LiveDataHashChecker, and LiveDataBinder look for dt870 and pc9242..pc9259!

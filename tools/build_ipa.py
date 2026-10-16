@@ -177,7 +177,7 @@ def patch_executable(data: bytearray, report):
 
 
 # ------------------------------------------------------------------ IPA
-def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
+def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=None):
     exe = os.path.join(app, "PESmobile")
     info_path = os.path.join(app, "Info.plist")
     with open(info_path, "rb") as f:
@@ -334,6 +334,18 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
                     zi.compress_type = zipfile.ZIP_DEFLATED
                     z.writestr(zi, a.read(e))
                     n += 1
+        # Extra UI container (tools/make_extra_pak.py): card photos, emblems and kit thumbnails that Ziru's Android
+        # data has and the iOS data lacks. The dylib links ziru/pak_extra/* into Documents/pak at launch.
+        if extra_pak and os.path.isdir(extra_pak):
+            for fn in sorted(os.listdir(extra_pak)):
+                if not fn.endswith((".pak", ".utoc", ".ucas")):
+                    continue
+                zi = zipfile.ZipInfo(root + "ziru/pak_extra/" + fn, time.localtime()[:6])
+                zi.external_attr = 0o100644 << 16
+                zi.compress_type = zipfile.ZIP_STORED
+                z.writestr(zi, open(os.path.join(extra_pak, fn), "rb").read())
+                report.setdefault("extra_pak", []).append(fn)
+                n += 1
         fonts = make_ios_fonts(apk, report)
         if fonts:
             ensure_dir(root + "ziru/fonts/")
@@ -589,6 +601,7 @@ def main():
     ap.add_argument("--skip-ipa", action="store_true", help="only build/continue the data pack")
     ap.add_argument("--time-budget", type=float, default=0, help="seconds; stop cleanly and exit 3 when exceeded (run again to continue)")
     ap.add_argument("--no-livedata", action="store_true", help="do not ship Ziru's Android livedata in the data pack")
+    ap.add_argument("--extra-pak", default="", help="folder with pc7999_mobile_ios.{pak,utoc,ucas} from tools/make_extra_pak.py, bundled as ziru/pak_extra")
     ap.add_argument("--ziru-cpk", default="dt500", help="comma list of CPK stems taken from the Ziru APK instead of the IPA (default dt500; '' = none)")
     ap.add_argument("--commentary", default="", help="commentary CPK to install into the game's Download folder, e.g. D:\\Telegram\\dt510_eng_mobile_all.cpk (Vietnamese)")
     a = ap.parse_args()
@@ -601,7 +614,7 @@ def main():
               "patches": [], "outputs": {}}
     report_path = os.path.join(a.out, "build-report.json")
     if not a.skip_ipa:
-        build_ipa(a.app, a.dylib, a.apk, a.out, report, a.bundle_id, a.display_name)
+        build_ipa(a.app, a.dylib, a.apk, a.out, report, a.bundle_id, a.display_name, extra_pak=a.extra_pak or None)
         with open(report_path, "w") as f:
             json.dump(report, f, indent=1)
     else:
