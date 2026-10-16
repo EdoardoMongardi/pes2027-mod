@@ -20,10 +20,14 @@
 #import <sys/stat.h>
 #import <fcntl.h>
 #import <unistd.h>
+#import <mach/mach.h>
+#import <mach/vm_map.h>
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
+
+static thread_local bool gInHook = false;
 
 #include "../core/datapack.hpp"
 #include "../core/server.hpp"
@@ -106,6 +110,7 @@ static void initPaths() {
 static void crashHandler(int sig, siginfo_t* info, void* ucontext) {
   static volatile sig_atomic_t crashed = 0;
   if (crashed++) _exit(1);
+  gInHook = true;
 
   uintptr_t pc = 0, lr = 0, fp = 0, faultAddr = (uintptr_t)(info ? info->si_addr : 0);
 #if defined(__arm64__)
@@ -123,31 +128,37 @@ static void crashHandler(int sig, siginfo_t* info, void* ucontext) {
   uintptr_t relPC = (pc >= (uintptr_t)mainSlide) ? (pc - (uintptr_t)mainSlide) : 0;
   uintptr_t relLR = (lr >= (uintptr_t)mainSlide) ? (lr - (uintptr_t)mainSlide) : 0;
 
-  FILE* f = fopen(gCrashLogPath ? gCrashLogPath.fileSystemRepresentation : "/tmp/pes2027_crash.log", "a");
-  if (!f) f = stderr;
+  int fd = -1;
+  if (gCrashLogPath) {
+    fd = orig_open ? orig_open(gCrashLogPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644)
+                   : open(gCrashLogPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644);
+  }
+  if (fd < 0) fd = 2;
 
   time_t now = time(nullptr);
   char timeBuf[64];
   strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", localtime(&now));
 
-  fprintf(f, "\n==================== PES2027 CRASH REPORT ====================\n");
-  fprintf(f, "Timestamp: %s\n", timeBuf);
-  fprintf(f, "Signal: %d (%s)\n", sig, strsignal(sig));
-  fprintf(f, "Fault Address: 0x%lx\n", (unsigned long)faultAddr);
-  fprintf(f, "PC: 0x%lx (relative to %s: 0x%lx)\n", (unsigned long)pc, baseName, (unsigned long)relPC);
-  fprintf(f, "LR: 0x%lx (relative: 0x%lx)\n", (unsigned long)lr, (unsigned long)relLR);
-  fprintf(f, "FP: 0x%lx\n", (unsigned long)fp);
-  fprintf(f, "ASLR Slide: 0x%lx\n", (unsigned long)mainSlide);
-  fprintf(f, "\n--- Backtrace ---\n");
+  dprintf(fd, "\n==================== PES2027 CRASH REPORT ====================\n");
+  dprintf(fd, "Timestamp: %s\n", timeBuf);
+  dprintf(fd, "Signal: %d (%s)\n", sig, strsignal(sig));
+  dprintf(fd, "Fault Address: 0x%lx\n", (unsigned long)faultAddr);
+  dprintf(fd, "PC: 0x%lx (relative to %s: 0x%lx)\n", (unsigned long)pc, baseName, (unsigned long)relPC);
+  dprintf(fd, "LR: 0x%lx (relative: 0x%lx)\n", (unsigned long)lr, (unsigned long)relLR);
+  dprintf(fd, "FP: 0x%lx\n", (unsigned long)fp);
+  dprintf(fd, "ASLR Slide: 0x%lx\n", (unsigned long)mainSlide);
+  dprintf(fd, "\n--- Backtrace ---\n");
 
-  NSArray<NSString*>* syms = [NSThread callStackSymbols];
-  if (syms) {
-    for (NSUInteger i = 0; i < syms.count; ++i) {
-      fprintf(f, "#%02lu %s\n", (unsigned long)i, syms[i].UTF8String);
+  @try {
+    NSArray<NSString*>* syms = [NSThread callStackSymbols];
+    if (syms) {
+      for (NSUInteger i = 0; i < syms.count; ++i) {
+        dprintf(fd, "#%02lu %s\n", (unsigned long)i, syms[i].UTF8String);
+      }
     }
-  }
-  fprintf(f, "==============================================================\n\n");
-  if (f != stderr) fclose(f);
+  } @catch (...) {}
+  dprintf(fd, "==============================================================\n\n");
+  if (fd > 2) close(fd);
   _exit(128 + sig);
 }
 
@@ -205,6 +216,13 @@ static void z_perform_rebinding_with_section(struct z_rebindings_entry *rebindin
                                              uint32_t *indirect_symtab) {
   uint32_t *indirect_symbol_indices = indirect_symtab + sect->reserved1;
   void **indirect_symbol_bindings = (void **)((uintptr_t)slide + sect->addr);
+
+  // vm_protect to allow writing to read-only sections like __DATA_CONST
+  vm_address_t page_addr = (vm_address_t)indirect_symbol_bindings;
+  vm_size_t page_size = (vm_size_t)sect->size;
+  kern_return_t kr = vm_protect(mach_task_self(), page_addr, page_size, 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+  if (kr != KERN_SUCCESS) return;
+
   for (uint32_t i = 0; i < sect->size / sizeof(void *); i++) {
     uint32_t symtab_index = indirect_symbol_indices[i];
     if (symtab_index == INDIRECT_SYMBOL_ABS || symtab_index == INDIRECT_SYMBOL_LOCAL ||
@@ -285,20 +303,15 @@ static void z_rebind_symbols_for_image(struct z_rebindings_entry *rebindings,
   }
 }
 
-static void _z_rebind_symbols_for_image(const struct mach_header *header, intptr_t slide) {
-  z_rebind_symbols_for_image(_z_rebindings_head, header, slide);
-}
-
 static int z_rebind_symbols(struct z_rebinding rebindings[], size_t nel) {
   int r = z_prepend_rebindings(&_z_rebindings_head, rebindings, nel);
   if (r < 0) return r;
-  if (!_z_rebindings_head->next) {
-    _dyld_register_func_for_add_image(_z_rebind_symbols_for_image);
-  } else {
-    uint32_t c = _dyld_image_count();
-    for (uint32_t i = 0; i < c; i++) {
-      _z_rebind_symbols_for_image(_dyld_get_image_header(i), _dyld_get_image_vmaddr_slide(i));
-    }
+  // Rebind ONLY for the main executable PESmobile (image 0)
+  // NEVER hook dyld shared cache or system frameworks, which causes crash on iOS
+  const struct mach_header *header = _dyld_get_image_header(0);
+  intptr_t slide = _dyld_get_image_vmaddr_slide(0);
+  if (header) {
+    z_rebind_symbols_for_image(_z_rebindings_head, header, slide);
   }
   return 0;
 }
@@ -306,11 +319,12 @@ static int z_rebind_symbols(struct z_rebinding rebindings[], size_t nel) {
 // ---------------------------------------------------------------- file I/O interception & BLV protection
 static BOOL isTrackedPath(const char* path) {
   if (!path) return NO;
+  if (strstr(path, "PES2027-logs") || strstr(path, ".log") || strstr(path, "ZiruOffline")) return NO;
   if (strstr(path, "cpk") || strstr(path, "pak") || strstr(path, "Download") ||
       strstr(path, "dt510") || strstr(path, "dt500") || strstr(path, "dt2") ||
       strstr(path, "GameData") || strstr(path, "livedata") || strstr(path, "version") ||
       strstr(path, "manifest") || strstr(path, "sound") || strstr(path, ".acb") ||
-      strstr(path, ".awb") || strstr(path, "PES2027")) {
+      strstr(path, ".awb")) {
     return YES;
   }
   return NO;
@@ -321,22 +335,6 @@ static BOOL isCommentaryPath(const char* path) {
   return (strstr(path, "dt510") != nullptr || strstr(path, "dt510_eng_mobile_all.cpk") != nullptr);
 }
 
-static void logFileIo(const char* op, const char* path, int res, int err) {
-  if (!gFileIoLogPath || !isTrackedPath(path)) return;
-  std::lock_guard<std::mutex> g(gLogMu);
-  FILE* f = fopen(gFileIoLogPath.fileSystemRepresentation, "a");
-  if (!f) return;
-  time_t now = time(nullptr);
-  char tbuf[32];
-  strftime(tbuf, sizeof(tbuf), "%H:%M:%S", localtime(&now));
-  if (res == 0) {
-    fprintf(f, "%s [%s] OK: %s\n", tbuf, op, path);
-  } else {
-    fprintf(f, "%s [%s] FAIL(%d: %s): %s\n", tbuf, op, err, strerror(err), path);
-  }
-  fclose(f);
-}
-
 static int (*orig_open)(const char *path, int oflag, ...);
 static int (*orig_access)(const char *path, int amode);
 static int (*orig_stat)(const char *path, struct stat *buf);
@@ -345,12 +343,41 @@ static int (*orig_unlink)(const char *path);
 static int (*orig_unlinkat)(int fd, const char *path, int flag);
 static int (*orig_remove)(const char *path);
 
+static void logFileIo(const char* op, const char* path, int res, int err) {
+  if (!gFileIoLogPath || !isTrackedPath(path)) return;
+  if (gInHook) return;
+  gInHook = true;
+  {
+    std::lock_guard<std::mutex> g(gLogMu);
+    int fd = orig_open ? orig_open(gFileIoLogPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644)
+                       : open(gFileIoLogPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd >= 0) {
+      time_t now = time(nullptr);
+      char tbuf[32];
+      strftime(tbuf, sizeof(tbuf), "%H:%M:%S", localtime(&now));
+      char line[1024];
+      int len = 0;
+      if (res == 0) {
+        len = snprintf(line, sizeof(line), "%s [%s] OK: %s\n", tbuf, op, path);
+      } else {
+        len = snprintf(line, sizeof(line), "%s [%s] FAIL(%d: %s): %s\n", tbuf, op, err, strerror(err), path);
+      }
+      if (len > 0) {
+        write(fd, line, (size_t)len);
+      }
+      close(fd);
+    }
+  }
+  gInHook = false;
+}
+
 static int hook_unlink(const char *path) {
   if (isCommentaryPath(path)) {
     ZLog(@"[BLV_PROTECT] Prevented deletion (unlink) of commentary file: %s", path);
     logFileIo("UNLINK_PROTECTED", path, 0, 0);
     return 0; // Fake success
   }
+  if (gInHook) return orig_unlink ? orig_unlink(path) : unlink(path);
   int r = orig_unlink ? orig_unlink(path) : unlink(path);
   logFileIo("UNLINK", path, r, errno);
   return r;
@@ -362,6 +389,7 @@ static int hook_unlinkat(int fd, const char *path, int flag) {
     logFileIo("UNLINKAT_PROTECTED", path, 0, 0);
     return 0;
   }
+  if (gInHook) return orig_unlinkat ? orig_unlinkat(fd, path, flag) : unlinkat(fd, path, flag);
   int r = orig_unlinkat ? orig_unlinkat(fd, path, flag) : unlinkat(fd, path, flag);
   logFileIo("UNLINKAT", path, r, errno);
   return r;
@@ -373,6 +401,7 @@ static int hook_remove(const char *path) {
     logFileIo("REMOVE_PROTECTED", path, 0, 0);
     return 0;
   }
+  if (gInHook) return orig_remove ? orig_remove(path) : remove(path);
   int r = orig_remove ? orig_remove(path) : remove(path);
   logFileIo("REMOVE", path, r, errno);
   return r;
@@ -386,24 +415,30 @@ static int hook_open(const char *path, int oflag, ...) {
     mode = (mode_t)va_arg(ap, int);
     va_end(ap);
   }
+  if (gInHook) {
+    return orig_open ? orig_open(path, oflag, mode) : open(path, oflag, mode);
+  }
   int fd = orig_open ? orig_open(path, oflag, mode) : open(path, oflag, mode);
   logFileIo("OPEN", path, fd >= 0 ? 0 : -1, errno);
   return fd;
 }
 
 static int hook_access(const char *path, int amode) {
+  if (gInHook) return orig_access ? orig_access(path, amode) : access(path, amode);
   int r = orig_access ? orig_access(path, amode) : access(path, amode);
   logFileIo("ACCESS", path, r, errno);
   return r;
 }
 
 static int hook_stat(const char *path, struct stat *buf) {
+  if (gInHook) return orig_stat ? orig_stat(path, buf) : stat(path, buf);
   int r = orig_stat ? orig_stat(path, buf) : stat(path, buf);
   logFileIo("STAT", path, r, errno);
   return r;
 }
 
 static int hook_lstat(const char *path, struct stat *buf) {
+  if (gInHook) return orig_lstat ? orig_lstat(path, buf) : lstat(path, buf);
   int r = orig_lstat ? orig_lstat(path, buf) : lstat(path, buf);
   logFileIo("LSTAT", path, r, errno);
   return r;
@@ -914,10 +949,12 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
 
 - (void)checkTamper {
   // Enforce unremovable watermark "Made by iOSVN"
-  if (!self.watermarkLabel || self.watermarkLabel.hidden || self.watermarkLabel.alpha < 0.1 ||
-      ![self.watermarkLabel.text containsString:@"Made by iOSVN"]) {
-    NSLog(@"[CRITICAL ERROR] Integrity failure: Watermark Made by iOSVN was modified or removed.");
-    abort();
+  if (self.watermarkLabel) {
+    if (self.watermarkLabel.hidden || self.watermarkLabel.alpha < 0.1 ||
+        ![self.watermarkLabel.text containsString:@"Made by iOSVN"]) {
+      NSLog(@"[CRITICAL ERROR] Integrity failure: Watermark Made by iOSVN was modified or removed.");
+      abort();
+    }
   }
 }
 
@@ -1268,6 +1305,15 @@ __attribute__((constructor)) static void ziruInit() {
     initPaths();
     initCrashHandler();
     ZLog(@"ZiruOffline %s loaded, bundle=%@", ZIRU_MOD_VERSION, NSBundle.mainBundle.bundlePath);
+
+    // Initialize original function pointers via dlsym
+    orig_open = (int (*)(const char*, int, ...))dlsym(RTLD_DEFAULT, "open");
+    orig_access = (int (*)(const char*, int))dlsym(RTLD_DEFAULT, "access");
+    orig_stat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "stat");
+    orig_lstat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "lstat");
+    orig_unlink = (int (*)(const char*))dlsym(RTLD_DEFAULT, "unlink");
+    orig_unlinkat = (int (*)(int, const char*, int))dlsym(RTLD_DEFAULT, "unlinkat");
+    orig_remove = (int (*)(const char*))dlsym(RTLD_DEFAULT, "remove");
 
     // Register File I/O hooks via fishhook
     struct z_rebinding rebindings[] = {
