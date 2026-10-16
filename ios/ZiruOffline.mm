@@ -537,9 +537,21 @@ static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
   if (![fm fileExistsAtPath:targetPath]) return;
   NSString* curDest = [fm destinationOfSymbolicLinkAtPath:linkPath error:nil];
   if (curDest && [curDest isEqualToString:targetPath]) return;
-  if ([fm fileExistsAtPath:linkPath] || curDest != nil) {
+
+  BOOL isDir = NO;
+  if ([fm fileExistsAtPath:linkPath isDirectory:&isDir]) {
+    if (isDir && curDest == nil) {
+      NSArray* contents = [fm contentsOfDirectoryAtPath:linkPath error:nil];
+      if (contents.count > 0) {
+        ZLog(@"%@ is a non-empty directory, will not overwrite with symlink", linkPath.lastPathComponent);
+        return;
+      }
+    }
+    [fm removeItemAtPath:linkPath error:nil];
+  } else if (curDest != nil) {
     [fm removeItemAtPath:linkPath error:nil];
   }
+
   NSError* err = nil;
   if ([fm createSymbolicLinkAtPath:linkPath withDestinationPath:targetPath error:&err]) {
     ZLog(@"Linked %@ -> %@", linkPath.lastPathComponent, targetPath);
@@ -548,45 +560,98 @@ static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
   }
 }
 
+static NSString* findFolderNamed(NSString* root, NSString* targetName, int maxDepth) {
+  if (maxDepth < 0) return nil;
+  NSFileManager* fm = NSFileManager.defaultManager;
+  for (NSString* item in [fm contentsOfDirectoryAtPath:root error:nil]) {
+    NSString* full = [root stringByAppendingPathComponent:item];
+    BOOL isDir = NO;
+    if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+      if ([item.lowercaseString isEqualToString:targetName.lowercaseString]) {
+        return full;
+      }
+      NSString* found = findFolderNamed(full, targetName, maxDepth - 1);
+      if (found) return found;
+    }
+  }
+  return nil;
+}
+
 static BOOL checkDirectFolderData(NSString** why) {
   NSFileManager* fm = NSFileManager.defaultManager;
 
-  // Case 2: User copied a single folder like "PES2027-data" into Documents
-  NSString* subfolder = nil;
-  for (NSString* item in [fm contentsOfDirectoryAtPath:gDocs error:nil]) {
-    NSString* full = [gDocs stringByAppendingPathComponent:item];
-    BOOL isDir = NO;
-    if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
-      NSString* subPak = [full stringByAppendingPathComponent:@"pak"];
-      NSString* subCpk = [full stringByAppendingPathComponent:@"cpk"];
-      if ([fm fileExistsAtPath:subPak] || [fm fileExistsAtPath:subCpk]) {
-        subfolder = full;
+  // Search for pak, cpk, Download, livedata anywhere inside Documents (up to 3 levels deep)
+  NSString* foundPak = findFolderNamed(gDocs, @"pak", 3);
+  NSString* foundCpk = findFolderNamed(gDocs, @"cpk", 3);
+  NSString* foundDl = findFolderNamed(gDocs, @"Download", 3);
+  if (!foundDl) foundDl = findFolderNamed(gDocs, @"download", 3);
+  NSString* foundLivedata = findFolderNamed(gDocs, @"livedata", 3);
+
+  // If user dropped .pak/.ucas/.utoc files directly into Documents without folder:
+  if (!foundPak) {
+    for (NSString* item in [fm contentsOfDirectoryAtPath:gDocs error:nil]) {
+      if ([item.pathExtension.lowercaseString isEqualToString:@"pak"]) {
+        NSString* pakDir = [gDocs stringByAppendingPathComponent:@"pak"];
+        [fm createDirectoryAtPath:pakDir withIntermediateDirectories:YES attributes:nil error:nil];
+        for (NSString* f in [fm contentsOfDirectoryAtPath:gDocs error:nil]) {
+          NSString* ext = f.pathExtension.lowercaseString;
+          if ([ext isEqualToString:@"pak"] || [ext isEqualToString:@"ucas"] || [ext isEqualToString:@"utoc"]) {
+            ensureSymlink([pakDir stringByAppendingPathComponent:f], [gDocs stringByAppendingPathComponent:f]);
+          }
+        }
+        foundPak = pakDir;
         break;
       }
     }
   }
 
-  if (subfolder) {
-    ZLog(@"Found data subfolder: %@", subfolder);
-    for (NSString* name in @[@"pak", @"cpk", @"livedata"]) {
-      NSString* src = [subfolder stringByAppendingPathComponent:name];
-      NSString* dst = [gDocs stringByAppendingPathComponent:name];
-      ensureSymlink(dst, src);
-    }
-    NSString* subDl = [subfolder stringByAppendingPathComponent:@"download"];
-    if (![fm fileExistsAtPath:subDl]) subDl = [subfolder stringByAppendingPathComponent:@"Download"];
-    if ([fm fileExistsAtPath:subDl]) {
-      NSString* dlDir = [gDocs stringByAppendingPathComponent:@"Download"];
-      [fm createDirectoryAtPath:dlDir withIntermediateDirectories:YES attributes:nil error:nil];
-      for (NSString* f in [fm contentsOfDirectoryAtPath:subDl error:nil]) {
-        NSString* src = [subDl stringByAppendingPathComponent:f];
-        NSString* dst = [dlDir stringByAppendingPathComponent:f];
-        ensureSymlink(dst, src);
+  // If user dropped .cpk files directly into Documents without folder:
+  if (!foundCpk) {
+    for (NSString* item in [fm contentsOfDirectoryAtPath:gDocs error:nil]) {
+      if ([item.pathExtension.lowercaseString isEqualToString:@"cpk"] && ![item.lowercaseString containsString:@"dt510"]) {
+        NSString* cpkDir = [gDocs stringByAppendingPathComponent:@"cpk"];
+        [fm createDirectoryAtPath:cpkDir withIntermediateDirectories:YES attributes:nil error:nil];
+        for (NSString* f in [fm contentsOfDirectoryAtPath:gDocs error:nil]) {
+          if ([f.pathExtension.lowercaseString isEqualToString:@"cpk"] && ![f.lowercaseString containsString:@"dt510"]) {
+            ensureSymlink([cpkDir stringByAppendingPathComponent:f], [gDocs stringByAppendingPathComponent:f]);
+          }
+        }
+        foundCpk = cpkDir;
+        break;
       }
     }
   }
 
-  // Case 1: Direct folders pak and cpk in Documents
+  // Symlink found directories to gDocs/pak, gDocs/cpk, etc.
+  if (foundPak && ![foundPak isEqualToString:[gDocs stringByAppendingPathComponent:@"pak"]]) {
+    ensureSymlink([gDocs stringByAppendingPathComponent:@"pak"], foundPak);
+  }
+  if (foundCpk && ![foundCpk isEqualToString:[gDocs stringByAppendingPathComponent:@"cpk"]]) {
+    ensureSymlink([gDocs stringByAppendingPathComponent:@"cpk"], foundCpk);
+  }
+  if (foundLivedata && ![foundLivedata isEqualToString:[gDocs stringByAppendingPathComponent:@"livedata"]]) {
+    ensureSymlink([gDocs stringByAppendingPathComponent:@"livedata"], foundLivedata);
+  }
+
+  // Ensure Download folder exists
+  NSString* dlDir = [gDocs stringByAppendingPathComponent:@"Download"];
+  [fm createDirectoryAtPath:dlDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+  // For Download/download: link files individually into Documents/Download
+  if (foundDl && ![foundDl isEqualToString:dlDir]) {
+    for (NSString* f in [fm contentsOfDirectoryAtPath:foundDl error:nil]) {
+      NSString* src = [foundDl stringByAppendingPathComponent:f];
+      NSString* dst = [dlDir stringByAppendingPathComponent:f];
+      ensureSymlink(dst, src);
+    }
+  }
+
+  // If user dropped dt510_eng_mobile_all.cpk directly into Documents, link it to Download/
+  NSString* directBlv = [gDocs stringByAppendingPathComponent:@"dt510_eng_mobile_all.cpk"];
+  if ([fm fileExistsAtPath:directBlv]) {
+    ensureSymlink([dlDir stringByAppendingPathComponent:@"dt510_eng_mobile_all.cpk"], directBlv);
+  }
+
   NSString* pakDir = [gDocs stringByAppendingPathComponent:@"pak"];
   NSString* cpkDir = [gDocs stringByAppendingPathComponent:@"cpk"];
   BOOL isDir = NO;
@@ -605,10 +670,6 @@ static BOOL checkDirectFolderData(NSString** why) {
     if (why) *why = @"Thư mục pak hoặc cpk bị trống không có tệp dữ liệu";
     return NO;
   }
-
-  // Ensure Download folder exists
-  NSString* dlDir = [gDocs stringByAppendingPathComponent:@"Download"];
-  [fm createDirectoryAtPath:dlDir withIntermediateDirectories:YES attributes:nil error:nil];
 
   ZLog(@"Direct folder data ready: pak=%lu files, cpk=%lu files", (unsigned long)pakItems.count, (unsigned long)cpkItems.count);
   return YES;
@@ -1004,12 +1065,16 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
   cardStack.translatesAutoresizingMaskIntoConstraints = NO;
   [card addSubview:cardStack];
 
+  NSLayoutConstraint* cardWidth = [card.widthAnchor constraintEqualToConstant:440];
+  cardWidth.priority = UILayoutPriorityDefaultHigh;
+
   [NSLayoutConstraint activateConstraints:@[
     [card.topAnchor constraintEqualToAnchor:scroll.topAnchor constant:20],
     [card.bottomAnchor constraintEqualToAnchor:scroll.bottomAnchor constant:-20],
-    [card.centerXAnchor constraintEqualToAnchor:scroll.centerXAnchor],
-    [card.widthAnchor constraintEqualToConstant:440],
-    [card.widthAnchor constraintLessThanOrEqualToAnchor:self.view.widthAnchor constant:-32],
+    [card.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+    cardWidth,
+    [card.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:16],
+    [card.trailingAnchor constraintLessThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-16],
     [cardStack.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
     [cardStack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16],
     [cardStack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
@@ -1180,16 +1245,68 @@ static uint64_t freeBytes() {
 }
 @end
 
+static UIWindow* getAppWindow(id appDelegate) {
+  UIWindow* win = nil;
+  if ([appDelegate respondsToSelector:@selector(window)]) {
+    win = [(id)appDelegate window];
+    if (win) return win;
+  }
+  for (UIScene* scene in UIApplication.sharedApplication.connectedScenes) {
+    if ([scene isKindOfClass:UIWindowScene.class] && scene.activationState == UISceneActivationStateForegroundActive) {
+      UIWindowScene* ws = (UIWindowScene*)scene;
+      for (UIWindow* w in ws.windows) {
+        if (w.isKeyWindow) return w;
+      }
+      if (ws.windows.count > 0) return ws.windows.firstObject;
+    }
+  }
+  for (UIScene* scene in UIApplication.sharedApplication.connectedScenes) {
+    if ([scene isKindOfClass:UIWindowScene.class]) {
+      UIWindowScene* ws = (UIWindowScene*)scene;
+      if (ws.windows.count > 0) return ws.windows.firstObject;
+    }
+  }
+  if (UIApplication.sharedApplication.keyWindow) return UIApplication.sharedApplication.keyWindow;
+  if (UIApplication.sharedApplication.windows.count > 0) return UIApplication.sharedApplication.windows.firstObject;
+  return nil;
+}
+
+static __strong ZiruImportVC* gActiveImportVC = nil;
+
+static void showImporter(UIWindow* win, NSString* reason) {
+  if (gActiveImportVC || gGameStarted) return;
+  ZLog(@"Showing importer UI on window, reason: %@", reason);
+  ZiruImportVC* vc = [ZiruImportVC new];
+  UIViewController* root = win.rootViewController;
+  if (root) {
+    [root addChildViewController:vc];
+    vc.view.frame = root.view.bounds;
+    vc.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [root.view addSubview:vc.view];
+    [root.view bringSubviewToFront:vc.view];
+    [vc didMoveToParentViewController:root];
+  } else {
+    vc.view.frame = win.bounds;
+    vc.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [win addSubview:vc.view];
+    [win bringSubviewToFront:vc.view];
+  }
+  gActiveImportVC = vc;
+}
+
 static void startGame() {
   if (gGameStarted.exchange(true)) return;
   ZLog(@"Game starting, dismissing importer");
   dispatch_async(dispatch_get_main_queue(), ^{
-    UIWindow* win = nil;
-    if ([gDelegate respondsToSelector:@selector(window)]) win = [(id)gDelegate window];
-    if (!win) win = UIApplication.sharedApplication.keyWindow;
-    UIViewController* root = win.rootViewController;
-    if (root.presentedViewController) {
-      [root.presentedViewController dismissViewControllerAnimated:YES completion:nil];
+    if (gActiveImportVC) {
+      [UIView animateWithDuration:0.3 animations:^{
+        gActiveImportVC.view.alpha = 0;
+      } completion:^(BOOL finished) {
+        [gActiveImportVC willMoveToParentViewController:nil];
+        [gActiveImportVC.view removeFromSuperview];
+        [gActiveImportVC removeFromParentViewController];
+        gActiveImportVC = nil;
+      }];
     }
   });
 }
@@ -1210,27 +1327,32 @@ static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* o
     return res;
   }
 
-  // If data is NOT ready, present ZiruImportVC modally on rootViewController!
-  ZLog(@"Data not ready: %@ — presenting importer UI", why);
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-    UIWindow* win = nil;
-    if ([self respondsToSelector:@selector(window)]) {
-      win = [(id)self window];
+  // If data is NOT ready, present importer UI!
+  ZLog(@"Data not ready: %@ — scheduling importer UI", why);
+  void (^tryShow)(void) = ^{
+    if (gGameStarted || gActiveImportVC) return;
+    UIWindow* win = getAppWindow(self);
+    if (win) {
+      showImporter(win, why);
     }
-    if (!win) win = UIApplication.sharedApplication.keyWindow;
-    UIViewController* root = win.rootViewController;
-    if (root) {
-      ZiruImportVC* vc = [ZiruImportVC new];
-      vc.modalPresentationStyle = UIModalPresentationFullScreen;
-      [root presentViewController:vc animated:NO completion:nil];
-    }
-  });
+  };
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), tryShow);
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), tryShow);
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), tryShow);
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), tryShow);
 
   return res;
 }
 
 static void hookBecomeActive(id self, SEL _cmd, UIApplication* app) {
   if (gOrigBecomeActive) ((void (*)(id, SEL, id))gOrigBecomeActive)(self, _cmd, app);
+  if (!gGameStarted && !gActiveImportVC) {
+    NSString* why = nil;
+    if (!dataReady(&why)) {
+      UIWindow* win = getAppWindow(self);
+      if (win) showImporter(win, why);
+    }
+  }
 }
 static void hookResignActive(id self, SEL _cmd, UIApplication* app) {
   if (gOrigResignActive) ((void (*)(id, SEL, id))gOrigResignActive)(self, _cmd, app);
