@@ -552,6 +552,10 @@ def cleanup():
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(10)
+
     def log_message(self, *a):
         pass
 
@@ -578,9 +582,6 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(404, b"", "text/plain")
 
     def do_POST(self):
-        token = getattr(ARGS, "access_token", "")
-        if token and not hmac.compare_digest(self.headers.get("X-Ziru-Token", ""), token):
-            return self.reply(403, b"", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
@@ -588,6 +589,9 @@ class Handler(BaseHTTPRequestHandler):
         if n < 0 or n > MAX_REQUEST_BYTES:
             return self.reply(413, b"", "text/plain")
         body = self.rfile.read(n) if n else b""
+        token = getattr(ARGS, "access_token", "")
+        if token and not hmac.compare_digest(self.headers.get("X-Ziru-Token", ""), token):
+            return self.reply(403, b"", "text/plain")
         path = urllib.parse.urlparse(self.path).path
         cmd = path.rsplit("/", 1)[-1].replace("gate_", "").replace(".php", "")
         try:
