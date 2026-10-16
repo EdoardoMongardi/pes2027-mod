@@ -376,9 +376,12 @@ static int hook_unlink(const char *path) {
     logFileIo("UNLINK_PROTECTED", path, 0, 0);
     return 0; // Fake success
   }
-  if (gInHook) return orig_unlink ? orig_unlink(path) : unlink(path);
-  int r = orig_unlink ? orig_unlink(path) : unlink(path);
-  logFileIo("UNLINK", path, r, errno);
+  if (!orig_unlink) return -1;
+  if (gInHook) return orig_unlink(path);
+  int r = orig_unlink(path);
+  int savedErr = errno;
+  logFileIo("UNLINK", path, r, savedErr);
+  errno = savedErr;
   return r;
 }
 
@@ -388,9 +391,12 @@ static int hook_unlinkat(int fd, const char *path, int flag) {
     logFileIo("UNLINKAT_PROTECTED", path, 0, 0);
     return 0;
   }
-  if (gInHook) return orig_unlinkat ? orig_unlinkat(fd, path, flag) : unlinkat(fd, path, flag);
-  int r = orig_unlinkat ? orig_unlinkat(fd, path, flag) : unlinkat(fd, path, flag);
-  logFileIo("UNLINKAT", path, r, errno);
+  if (!orig_unlinkat) return -1;
+  if (gInHook) return orig_unlinkat(fd, path, flag);
+  int r = orig_unlinkat(fd, path, flag);
+  int savedErr = errno;
+  logFileIo("UNLINKAT", path, r, savedErr);
+  errno = savedErr;
   return r;
 }
 
@@ -400,9 +406,12 @@ static int hook_remove(const char *path) {
     logFileIo("REMOVE_PROTECTED", path, 0, 0);
     return 0;
   }
-  if (gInHook) return orig_remove ? orig_remove(path) : remove(path);
-  int r = orig_remove ? orig_remove(path) : remove(path);
-  logFileIo("REMOVE", path, r, errno);
+  if (!orig_remove) return -1;
+  if (gInHook) return orig_remove(path);
+  int r = orig_remove(path);
+  int savedErr = errno;
+  logFileIo("REMOVE", path, r, savedErr);
+  errno = savedErr;
   return r;
 }
 
@@ -414,32 +423,42 @@ static int hook_open(const char *path, int oflag, ...) {
     mode = (mode_t)va_arg(ap, int);
     va_end(ap);
   }
-  if (gInHook) {
-    return orig_open ? orig_open(path, oflag, mode) : open(path, oflag, mode);
-  }
-  int fd = orig_open ? orig_open(path, oflag, mode) : open(path, oflag, mode);
-  logFileIo("OPEN", path, fd >= 0 ? 0 : -1, errno);
+  if (!orig_open) return -1;
+  if (gInHook) return orig_open(path, oflag, mode);
+  int fd = orig_open(path, oflag, mode);
+  int savedErr = errno;
+  logFileIo("OPEN", path, fd >= 0 ? 0 : -1, savedErr);
+  errno = savedErr;
   return fd;
 }
 
 static int hook_access(const char *path, int amode) {
-  if (gInHook) return orig_access ? orig_access(path, amode) : access(path, amode);
-  int r = orig_access ? orig_access(path, amode) : access(path, amode);
-  logFileIo("ACCESS", path, r, errno);
+  if (!orig_access) return -1;
+  if (gInHook) return orig_access(path, amode);
+  int r = orig_access(path, amode);
+  int savedErr = errno;
+  logFileIo("ACCESS", path, r, savedErr);
+  errno = savedErr;
   return r;
 }
 
 static int hook_stat(const char *path, struct stat *buf) {
-  if (gInHook) return orig_stat ? orig_stat(path, buf) : stat(path, buf);
-  int r = orig_stat ? orig_stat(path, buf) : stat(path, buf);
-  logFileIo("STAT", path, r, errno);
+  if (!orig_stat) return -1;
+  if (gInHook) return orig_stat(path, buf);
+  int r = orig_stat(path, buf);
+  int savedErr = errno;
+  logFileIo("STAT", path, r, savedErr);
+  errno = savedErr;
   return r;
 }
 
 static int hook_lstat(const char *path, struct stat *buf) {
-  if (gInHook) return orig_lstat ? orig_lstat(path, buf) : lstat(path, buf);
-  int r = orig_lstat ? orig_lstat(path, buf) : lstat(path, buf);
-  logFileIo("LSTAT", path, r, errno);
+  if (!orig_lstat) return -1;
+  if (gInHook) return orig_lstat(path, buf);
+  int r = orig_lstat(path, buf);
+  int savedErr = errno;
+  logFileIo("LSTAT", path, r, savedErr);
+  errno = savedErr;
   return r;
 }
 
@@ -959,6 +978,7 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
 
 - (void)viewDidLoad {
   [super viewDidLoad];
+  self.view.backgroundColor = [UIColor colorWithRed:0.04 green:0.08 blue:0.13 alpha:1.0];
 
   // Pitch backdrop (PES21 stadium style)
   PESPitchBackdrop* backdrop = [[PESPitchBackdrop alloc] initWithFrame:self.view.bounds];
@@ -967,10 +987,10 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
 
   // Glass Card container
   UIView* card = [UIView new];
-  card.backgroundColor = [UIColor colorWithRed:0.035 green:0.065 blue:0.095 alpha:0.92];
-  card.layer.cornerRadius = 20;
-  card.layer.borderWidth = 1.4;
-  card.layer.borderColor = [PESCyan() colorWithAlphaComponent:0.25].CGColor;
+  card.backgroundColor = [UIColor colorWithRed:0.06 green:0.11 blue:0.17 alpha:0.96];
+  card.layer.cornerRadius = 18;
+  card.layer.borderWidth = 1.5;
+  card.layer.borderColor = [PESLime() colorWithAlphaComponent:0.6].CGColor;
   card.translatesAutoresizingMaskIntoConstraints = NO;
   [self.view addSubview:card];
 
@@ -993,10 +1013,10 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
 
   // Subtitle Badge Pill
   UIView* pill = [UIView new];
-  pill.backgroundColor = [PESLime() colorWithAlphaComponent:0.08];
+  pill.backgroundColor = [PESLime() colorWithAlphaComponent:0.12];
   pill.layer.cornerRadius = 11;
   pill.layer.borderWidth = 1;
-  pill.layer.borderColor = [PESLime() colorWithAlphaComponent:0.28].CGColor;
+  pill.layer.borderColor = [PESLime() colorWithAlphaComponent:0.35].CGColor;
   UILabel* pillText = [UILabel new];
   pillText.text = @"eFootball Ziru • iOS Mod v" ZIRU_MOD_VERSION;
   pillText.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -1011,8 +1031,8 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
   ]];
 
   self.status = [UILabel new];
-  self.status.textColor = [UIColor colorWithWhite:0.92 alpha:1];
-  self.status.font = [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
+  self.status.textColor = [UIColor colorWithWhite:0.95 alpha:1];
+  self.status.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
   self.status.numberOfLines = 0;
   self.status.textAlignment = NSTextAlignmentCenter;
 
@@ -1029,16 +1049,14 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
   self.bar.clipsToBounds = YES;
   self.bar.hidden = YES;
 
-  self.pick = makeButton(@"Chọn file (.zip) từ Tệp", YES);
+  self.rescan = makeButton(@"Quét thư mục data (3uTools / Tệp)", YES);
+  [self.rescan addTarget:self action:@selector(onRescan) forControlEvents:UIControlEventTouchUpInside];
+
+  self.pick = makeButton(@"Chọn file (.zip) từ Tệp", NO);
   [self.pick addTarget:self action:@selector(onPick) forControlEvents:UIControlEventTouchUpInside];
 
   self.local = makeButton(@"Nhập file .zip trong Documents", NO);
   [self.local addTarget:self action:@selector(onLocal) forControlEvents:UIControlEventTouchUpInside];
-
-  self.rescan = makeButton(@"Quét thư mục data (3uTools)", NO);
-  [self.rescan setTitleColor:PESLime() forState:UIControlStateNormal];
-  self.rescan.layer.borderColor = [PESLime() colorWithAlphaComponent:0.6].CGColor;
-  [self.rescan addTarget:self action:@selector(onRescan) forControlEvents:UIControlEventTouchUpInside];
 
   self.logs = makeButton(@"Xem nhật ký (Logs)", NO);
   self.logs.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
@@ -1049,10 +1067,10 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
 
   // Watermark "Made by iOSVN"
   UIView* wmContainer = [UIView new];
-  wmContainer.backgroundColor = [PESLime() colorWithAlphaComponent:0.07];
+  wmContainer.backgroundColor = [PESLime() colorWithAlphaComponent:0.08];
   wmContainer.layer.cornerRadius = 10;
   wmContainer.layer.borderWidth = 1;
-  wmContainer.layer.borderColor = [PESLime() colorWithAlphaComponent:0.3].CGColor;
+  wmContainer.layer.borderColor = [PESLime() colorWithAlphaComponent:0.35].CGColor;
   wmContainer.translatesAutoresizingMaskIntoConstraints = NO;
 
   self.watermarkLabel = [UILabel new];
@@ -1071,29 +1089,32 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
   ]];
 
   UIStackView* btnStack = [[UIStackView alloc] initWithArrangedSubviews:@[self.rescan, self.pick, self.local]];
-  btnStack.axis = UILayoutConstraintAxisHorizontal;
-  btnStack.alignment = UIStackViewAlignmentCenter;
-  btnStack.spacing = 10;
+  btnStack.axis = UILayoutConstraintAxisVertical;
+  btnStack.alignment = UIStackViewAlignmentFill;
+  btnStack.spacing = 8;
+  btnStack.translatesAutoresizingMaskIntoConstraints = NO;
 
   UIStackView* cardStack = [[UIStackView alloc] initWithArrangedSubviews:@[
     title, pill, self.status, self.bar, btnStack, self.detail, self.logs, wmContainer
   ]];
   cardStack.axis = UILayoutConstraintAxisVertical;
   cardStack.alignment = UIStackViewAlignmentCenter;
-  cardStack.spacing = 13;
+  cardStack.spacing = 11;
   cardStack.translatesAutoresizingMaskIntoConstraints = NO;
   [card addSubview:cardStack];
 
   UILayoutGuide* g = self.view.safeAreaLayoutGuide;
   [NSLayoutConstraint activateConstraints:@[
-    [card.centerXAnchor constraintEqualToAnchor:g.centerXAnchor],
-    [card.centerYAnchor constraintEqualToAnchor:g.centerYAnchor],
-    [card.widthAnchor constraintLessThanOrEqualToAnchor:g.widthAnchor multiplier:0.92],
-    [cardStack.topAnchor constraintEqualToAnchor:card.topAnchor constant:22],
-    [cardStack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-18],
-    [cardStack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:24],
-    [cardStack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-24],
-    [self.bar.widthAnchor constraintEqualToConstant:420],
+    [card.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+    [card.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+    [card.widthAnchor constraintEqualToConstant:460],
+    [card.widthAnchor constraintLessThanOrEqualToAnchor:g.widthAnchor constant:-24],
+    [cardStack.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
+    [cardStack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16],
+    [cardStack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
+    [cardStack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
+    [btnStack.widthAnchor constraintEqualToAnchor:cardStack.widthAnchor],
+    [self.bar.widthAnchor constraintEqualToAnchor:cardStack.widthAnchor],
   ]];
 
   [self refresh];
@@ -1282,9 +1303,25 @@ static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* o
     return ((BOOL(*)(id, SEL, id, id))gOrigDidFinish)(self, _cmd, app, opts);
   }
   ZLog(@"data not ready: %@ — showing importer", why);
-  gImportWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+  UIWindowScene* scene = nil;
+  for (UIScene* s in UIApplication.sharedApplication.connectedScenes) {
+    if ([s isKindOfClass:[UIWindowScene class]]) {
+      scene = (UIWindowScene*)s;
+      break;
+    }
+  }
+  if (scene) {
+    gImportWindow = [[UIWindow alloc] initWithWindowScene:scene];
+  } else {
+    gImportWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+  }
+  gImportWindow.backgroundColor = [UIColor colorWithRed:0.04 green:0.08 blue:0.13 alpha:1.0];
+  gImportWindow.windowLevel = UIWindowLevelNormal + 10;
   gImportWindow.rootViewController = [ZiruImportVC new];
   [gImportWindow makeKeyAndVisible];
+  if ([self respondsToSelector:@selector(setWindow:)]) {
+    [(id)self setWindow:gImportWindow];
+  }
   return YES;
 }
 
@@ -1308,8 +1345,10 @@ __attribute__((constructor)) static void ziruInit() {
     // Initialize original function pointers via dlsym
     orig_open = (int (*)(const char*, int, ...))dlsym(RTLD_DEFAULT, "open");
     orig_access = (int (*)(const char*, int))dlsym(RTLD_DEFAULT, "access");
-    orig_stat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "stat");
-    orig_lstat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "lstat");
+    orig_stat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "stat$INODE64");
+    if (!orig_stat) orig_stat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "stat");
+    orig_lstat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "lstat$INODE64");
+    if (!orig_lstat) orig_lstat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "lstat");
     orig_unlink = (int (*)(const char*))dlsym(RTLD_DEFAULT, "unlink");
     orig_unlinkat = (int (*)(int, const char*, int))dlsym(RTLD_DEFAULT, "unlinkat");
     orig_remove = (int (*)(const char*))dlsym(RTLD_DEFAULT, "remove");
@@ -1318,8 +1357,8 @@ __attribute__((constructor)) static void ziruInit() {
     struct z_rebinding rebindings[] = {
       {"open", (void*)hook_open, (void**)&orig_open},
       {"access", (void*)hook_access, (void**)&orig_access},
-      {"stat", (void*)hook_stat, (void**)&orig_stat},
-      {"lstat", (void*)hook_lstat, (void**)&orig_lstat},
+      {"stat$INODE64", (void*)hook_stat, (void**)&orig_stat},
+      {"lstat$INODE64", (void*)hook_lstat, (void**)&orig_lstat},
       {"unlink", (void*)hook_unlink, (void**)&orig_unlink},
       {"unlinkat", (void*)hook_unlinkat, (void**)&orig_unlinkat},
       {"remove", (void*)hook_remove, (void**)&orig_remove},
