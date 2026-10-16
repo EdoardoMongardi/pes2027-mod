@@ -260,8 +260,8 @@ Response handleZiruStartupAck(const std::string& msg) {
     ObjP req;
     if (ziruLastRequestBody && (req = decodeZiruRequestObject(ziruLastRequestBody))) rq = req->optLong("rqid", 0);
     ObjP jo = newObj();
-    if (msg == "CMD_GET_AGE_GATE_REQUIREMENTS") {
-      jo->put("is_eula_country", "YES");
+    if (msg == "CMD_GET_AGE_GATE_REQUIREMENTS" || msg == "CMD_SET_USER_EULA_INFO") {
+      jo->put("is_eula_country", "NO");
       jo->put("country_age_kind", "NONE");
     }
     jo->put("result", "NOERR");

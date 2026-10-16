@@ -16,10 +16,20 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     std::string msgid = req->optString("msgid", "");
     if (!msgid.empty()) jo->put("msgid", msgid);
   }
-  if (jo && name == "responses/CmdLogin.json") {
-    patchLocalLivedataUrls(jo);
+  if (jo && (name == "responses/CmdLogin.json" || name == "responses/get_user_eula_info.json")) {
+    if (name == "responses/CmdLogin.json") patchLocalLivedataUrls(jo);
     ObjP eula = jo->optJSONObject("user_eula_info");
-    if (eula) eula->put("eula_privacy_action", "NONE");
+    if (eula) {
+      eula->put("eula_privacy_action", "NONE");
+      eula->put("eula_country_age_kind", "NONE");
+      eula->put("eula_ip_country_a3", "VNM");
+      eula->put("eula_select_country_a3", "VNM");
+    }
+    jo->put("select_country_privacy_action", "NONE");
+    jo->put("country_status", "NO_CHANGE");
+  }
+  if (jo && (name == "responses/CmdGetServerEnv.json" || name == "responses/GateInfo.json")) {
+    jo->put("ip_country_code", "VNM");
   }
   if (jo && (name == "responses/get_myclub_commentary_info.json" || name == "responses/ZIRU_GET_COMMENTARY_DATA.json"))
     patchIosCommentaryData(jo);
