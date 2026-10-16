@@ -464,16 +464,14 @@ ObjP z27Home(const ObjP& active) {
   }
   home->put("player_list", out)->put("squad_gameplan", z27Copy(sq->getJSONObject("squad_gameplan")))->put("team_id", active->getJSONObject("home")->getInt("base_team_id"));
   ArrP co = sq->optJSONArray("coach");
-  if (co && co->length() > 0) {
-    int64_t cid = co->getJSONObject(0)->getJSONObject("coach_id")->getLong("id");
-    ArrP cl = z27Entry()->getJSONArray("coach_list");
-    bool found = false;
-    for (int i = 0; i < cl->length(); i++) {
-      ObjP c = cl->getJSONObject(i);
-      if (c->getJSONObject("coach_id")->getLong("id") == cid) { home->put("coach", z27Copy(c)); found = true; break; }
-    }
-    if (!found) throw IllegalState("Unknown HOME coach " + str(cid));
-  }
+  if (!co || co->length() == 0) throw IllegalState("Missing selected HOME coach");
+  ObjP ref = co->getJSONObject(0);
+  int64_t cid = ref->getJSONObject("coach_id")->getLong("id");
+  ObjP coach = resolveZiruCoachFromLoginV73(cid);
+  if (!coach) throw IllegalState("Unknown HOME coach " + str(cid));
+  // The serial identifies the selected owned instance, including duplicate coaches.
+  coach->put("coach_id", z27Copy(ref->getJSONObject("coach_id")));
+  home->put("coach", coach);
   return home;
 }
 
@@ -513,19 +511,19 @@ Response z27Start() {
     int64_t gid = req->optLong("game_id", act->getLong("game_id"));
     if (gid != act->getLong("game_id")) throw IllegalArg("Stale game_id");
     if (z27State()->getJSONObject("completed")->has(str(gid))) throw IllegalState("Match already completed");
-    bool reuse = false;
-    if (act->optBoolean("started", false)) {
-      int mainId = z27Main();
-      if (act->getInt("squad_id") == mainId) {
-        std::string u = z27Uniform(z27Base(mainId), z27SavedKits(mainId))->toString();
-        ObjP hu = act->optJSONObject("home_uniform");
-        if (hu && u == hu->toString()) reuse = true;
-      }
-    }
+    int mainId = z27Main();
+    ObjP current = z27Copy(act);
+    current->put("squad_id", mainId)->put("home", z27Base(mainId));
+    ObjP home = z27Home(current);
+    ObjP hu = z27Uniform(current->getJSONObject("home"), z27SavedKits(mainId));
+    bool reuse = act->optBoolean("started", false) && act->getInt("squad_id") == mainId &&
+        act->optJSONObject("home_squad") && act->optJSONObject("home_uniform") &&
+        act->getJSONObject("home_squad")->toString() == home->toString() &&
+        act->getJSONObject("home_uniform")->toString() == hu->toString() &&
+        act->getJSONObject("home")->toString() == current->getJSONObject("home")->toString();
     if (!reuse) {
-      act->put("squad_id", z27Main())->put("home", z27Base(z27Main()));
-      act->put("home_squad", z27Home(act));
-      ObjP hu = z27Uniform(act->getJSONObject("home"), z27SavedKits(z27Main()));
+      act->put("squad_id", mainId)->put("home", current->getJSONObject("home"));
+      act->put("home_squad", home);
       act->put("home_uniform", hu)->put("away_uniform", z27Uniform(act->getJSONObject("away"), z27AwayKits(act, hu)))->put("started", true);
       z27PutMeta("z27_active_match", act->toString());
     }
@@ -538,7 +536,8 @@ Response z27Start() {
     out->put("squad_data_away", Value::null());
     ObjP ci = out->optJSONObject("commentary_info");
     if (ci) ci->put("pre_division", act->getInt("division"));
-    logRequest("ZIRU_MATCH_START", "game=" + str(gid));
+    logRequest("ZIRU_MATCH_START", "game=" + str(gid) + " squad=" + str(mainId) + " coach=" +
+        home->getJSONObject("coach")->getJSONObject("coach_id")->toString() + " reused=" + str(reuse));
     return serveObjectAsEncryptedMsgPack(out);
   } catch (const std::exception& e) {
     return z27Error("CMD_START_GAME", e);
@@ -615,7 +614,7 @@ Response z27Result() {
       int gain;
       if (res == "WIN") gain = 3;
       else if (res == "DRAW") gain = 1;
-      else gain = (giveup && a == 0 && b == 0) ? 1 : 0;
+      else gain = 0;
       int np = pt + gain;
       int nm = st->getInt("matches") + 1;
       st->put("point", np)->put("matches", nm);
@@ -623,7 +622,10 @@ Response z27Result() {
       st->put(k, st->getInt(k) + 1);
       ObjP hist = z27History(act, req, a, b, res);
       st->put("sequence", st->getInt("sequence") + 1);
-      if (nm >= 10) {
+      // The menu advertises this point target. Do not hold an already qualified
+      // player in the same division until all ten fixtures have been played.
+      bool roundEnded = nm >= 10 || (div > 1 && np >= z27Promotion(div));
+      if (roundEnded) {
         int nd;
         if (np < z27Promotion(div) || div <= 1) nd = (np >= std::max(0, z27Promotion(div) + (-5)) || div >= 10) ? div : div + 1;
         else nd = div - 1;
@@ -647,12 +649,13 @@ Response z27Result() {
         if (!li) li = lm;
         li->put("is_promoted", st->getInt("division") < div ? "YES" : "NO")
             ->put("is_relegated", st->getInt("division") > div ? "YES" : "NO")
-            ->put("is_staying", (nm < 10 || st->getInt("division") != div) ? "NO" : "YES");
+            ->put("is_staying", (!roundEnded || st->getInt("division") != div) ? "NO" : "YES");
       }
       completed->put(key, true);
       ziruDb->saveMatchState(st->toString(), "z27_result_" + key, newObj()->put("history", hist)->put("response", z27Copy(resp))->toString());
       if (!z27Meta("z27_result_" + key)) throw IllegalState("Result transaction missing");
-      logRequest("ZIRU_RESULT_COMMIT", "game=" + str(gid) + " " + str(a) + "-" + str(b) + " " + res);
+      logRequest("ZIRU_RESULT_COMMIT", "game=" + str(gid) + " " + str(a) + "-" + str(b) + " " + res +
+          " division=" + str(div) + "->" + str(st->getInt("division")) + " points=" + str(np) + " round=" + str(nm));
     }
     resp->put("rqid", (long long)req->optLong("rqid", 1));
     return serveObjectAsEncryptedMsgPack(resp);

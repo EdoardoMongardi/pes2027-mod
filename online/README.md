@@ -47,3 +47,5 @@ Phần đã dò từ binary iOS 11.1.1, chưa kiểm chứng trên máy: thứ t
 Admin đọc trạng thái bằng `Authorization: Bearer <PES2027_ADMIN_TOKEN>`; token nằm trong file root-only `server.env`, không dùng query URL. Cấu hình/khóa/chứng chỉ không commit lên Git. Token chung là quyền truy cập cho nhóm bạn thử nghiệm, chưa phải hệ thống tài khoản công khai có xác thực từng người.
 
 Chạy kiểm tra mã hóa HTTP với hai client mô phỏng: `python -m unittest discover -s online -p test_online_server.py -v`. Các kiểm tra này bao gồm UID remap, phòng/mật khẩu, sẵn sàng hai phía, phiên trận, trao đổi TURN, kết quả và phân quyền phòng. Chúng chưa chứng minh game native bắt tay và chơi được trên hai iPhone.
+
+Kiểm tra deployment thật từ PC: `python online/smoke_online.py --config PRIVATE_CLIENT_JSON --output smoke-result.json`. Công cụ kiểm chứng certificate pin, luồng phòng hai client HTTPS và cấp/thu hồi TURN allocation UDP bằng thông tin xác thực từ API. Không in token hoặc mật khẩu TURN. Kết quả có `native_iphone_match_tested: false` để phân biệt với trận thật.

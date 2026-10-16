@@ -158,6 +158,14 @@ Response handleZiruMyLeagueStartGameV71() {
       }
     }
     JStr m = loadMeta("ziru_myleague_special_squad");
+    if (!m) {
+      // No custom MyLeague selection yet: use the owned squad's selected coach,
+      // rather than the unrelated coach baked into the response template.
+      ObjP selected = newObj()->put("squad_data", z27Squad(z27Main()));
+      hydrateZiruMyLeagueCoachV73(selected);
+      nn(jo)->getJSONObject("squad_data_home")->put("coach",
+          selected->getJSONObject("squad_data")->getJSONArray("coach")->getJSONObject(0));
+    }
     if (m) {
       ObjP sq = Object::parse(*m);
       hydrateZiruMyLeagueCoachV73(sq);
@@ -288,6 +296,7 @@ void hydrateZiruMyLeagueCoachV73(const ObjP& jo) {
     int64_t id = cid->optLong("id", 0);
     ObjP res;
     if (id == 0 || !(res = resolveZiruCoachFromLoginV73(id))) return;
+    res->put("coach_id", Object::parse(cid->toString()));
     co->put(0, res);
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V73_ML_COACH_HYDRATE_ERR] ") + e.what());
@@ -571,7 +580,12 @@ void patchZiruMyLeagueCommonState(const ObjP& jo) {
     JStr m = loadMeta("ziru_myleague_special_squad");
     if (!m) {
       ObjP sd = jo->optJSONObject("special_dream_squad_data");
-      if (sd) sd->put("rental_team_id", team);
+      if (sd) {
+        sd->put("rental_team_id", team);
+        ObjP data = sd->optJSONObject("squad_data");
+        if (data) data->put("coach", Array::parse(z27Squad(z27Main())->getJSONArray("coach")->toString()));
+        hydrateZiruMyLeagueCoachV73(sd);
+      }
       return;
     }
     if (jo->has("special_dream_squad_data")) {

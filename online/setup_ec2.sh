@@ -57,6 +57,7 @@ fingerprint
 use-auth-secret
 static-auth-secret=$PES2027_TURN_SECRET
 realm=pes2027
+userdb=/run/pes2027-turn/turndb
 cert=$CONF/cert.pem
 pkey=$CONF/key.pem
 no-cli

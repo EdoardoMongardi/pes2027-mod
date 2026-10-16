@@ -85,8 +85,8 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     applyZiruSkillTrainingResponse(jo);
   }
   if (jo && name == "responses/CmdLogin.json") filterZiruSoldPlayersFromLogin(jo);
-  if (jo && name == "responses/CmdLogin.json") normalizeZiruAllLoginPlayers(jo);
   if (jo && name == "responses/CmdLogin.json") applyZiruSquadStateToLogin(jo);
+  if (jo && name == "responses/CmdLogin.json") normalizeZiruAllLoginPlayers(jo);
   if (jo && (name == "responses/CmdGetMyclubAgentlist.json" || name == "responses/get_myclub_mainmenu_info.json")) applyZiruRemainingCounts(jo);
   if (jo && name == "responses/get_myclub_mainmenu_info.json") {
     jo->put("gp", 99999999999LL);
@@ -232,7 +232,6 @@ Response serveInner(Request& r) {
     return handleZiruLeagueStatic("responses/ZIRU_IS_FIRST_LEAGUE.json");
   }
   if (contains(uri, "CMD_GET_LEAGUE_COM_INFO")) {
-    logAlmanacAgentRequestBody(r);
     return handleZiruLeagueInfo();
   }
   if (contains(uri, "CMD_GET_GAMERESULT_LIST")) return handleZiruLeagueHistoryDynamic();

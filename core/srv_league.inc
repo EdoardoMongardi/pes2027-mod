@@ -1,5 +1,9 @@
 // ---- part 2 (OfflineServer.java ~800-1440): history item, leaderboards, request decoders, careerplan ----
 
+// Offline progression bonus, shared by login, recruitment, spending and reset.
+// Derive it from the level limit instead of adding to saved balances on every login.
+int ziruProgressionBudget(int limit) { return std::max(0, limit - 1) * 2 + 60; }
+
 ObjP buildZiruLeagueHistoryItem(int64_t gameId, int32_t s0, int32_t s1) {
   try {
     ObjP tpl = loadZiruJsonAssetObject("responses/ZIRU_GET_GAMERESULT_LIST.json");
@@ -117,7 +121,7 @@ ObjP buildZiruResetPlayer(int64_t playerId, int64_t serial) {
       ObjP li = Object::parse(bl->toString());
       int lim = li->optInt("level_limit", 1);
       li->put("level", lim);
-      li->put("customize_point", (lim - 1) * 2);
+      li->put("customize_point", ziruProgressionBudget(lim));
       li->put("exp_current_level", 0);
       li->put("exp_to_next_level", 0);
       jo->put("level_info", li);
@@ -396,7 +400,7 @@ ObjP getZiruPlayerWrapper(const Value& obj, bool warehouse) {
       li->put("level", lim);
       li->put("exp_current_level", 0);
       li->put("exp_to_next_level", 0);
-      li->put("customize_point", (lim - 1) * 2);
+      li->put("customize_point", ziruProgressionBudget(lim));
     }
     return jo;
   } catch (const std::exception& e) {
@@ -471,7 +475,7 @@ Response handleZiruCareerplan(Request& r) {
                 if (!res) fail = true;
               } else {
                 ObjP li = jo->optJSONObject("level_info");
-                if (li && ziruCareerSpent > (li->optInt("level_limit", 1) - 1) * 2) fail = true;
+                if (!li || ziruCareerSpent > ziruProgressionBudget(li->optInt("level_limit", 1))) fail = true;
                 else {
                   ArrP params = ziruCareerParameters;
                   res = jo;
@@ -485,7 +489,7 @@ Response handleZiruCareerplan(Request& r) {
             if (!fail) {
               ObjP li = res->optJSONObject("level_info");
               if (li) {
-                int cp = (li->optInt("level_limit", 1) - 1) * 2 - ziruCareerSpent;
+                int cp = ziruProgressionBudget(li->optInt("level_limit", 1)) - ziruCareerSpent;
                 if (cp < 0) cp = 0;
                 li->put("customize_point", cp);
               }

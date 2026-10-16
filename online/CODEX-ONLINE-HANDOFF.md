@@ -1,4 +1,6 @@
 # Báo Cáo Bàn Giao Kỹ Thuật: Tính Năng Online Friend Match (Mod v1.1.0)
+
+> Cập nhật Codex 17/10/2026: đây là bàn giao ban đầu, không phải bằng chứng online đã chạy hoàn chỉnh trên iPhone. Đã bổ sung kiểm tra phòng/phiên, token deployment, certificate pin, trạng thái membership, test HTTP có mã hóa với hai client và công cụ smoke HTTPS/TURN. Dịch vụ được bố trí riêng để dùng chung EC2 GTA theo yêu cầu người dùng. Hướng dẫn vận hành hiện hành nằm trong online/README.md; cấu hình riêng ở ngoài Git. Trận native giữa hai iPhone vẫn cần kiểm chứng.
 **Thời gian lập:** 17/10/2026 00:25 (+07)  
 **Tác giả bàn giao:** Claude (nghiên cứu & phát triển) → Gemini (tổng hợp bàn giao)  
 **Người tiếp nhận:** Codex / Kỹ sư phụ trách tiếp theo  

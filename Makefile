@@ -1,6 +1,9 @@
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -O1 -g -Wall -Wno-unused
 CORE = core/jvalue.cpp core/codec.cpp core/store.cpp core/server.cpp core/zipread.cpp
+build/gameplaytest: $(CORE) test/gameplaytest.cpp core/*.hpp core/*.inc
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -o $@ $(CORE) test/gameplaytest.cpp -lz -lsqlite3 -lcrypto
 build/runcpp: $(CORE) test/runcpp.cpp core/*.hpp core/*.inc
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ $(CORE) test/runcpp.cpp -lz -lsqlite3 -lcrypto

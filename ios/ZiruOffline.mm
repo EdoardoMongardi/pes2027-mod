@@ -45,7 +45,7 @@ static DIR* (*orig_opendir)(const char *name);
 #include "ZiruFontPak.h"
 #include "ZiruWebView.h"
 
-#define ZIRU_MOD_VERSION "1.1.0"
+#define ZIRU_MOD_VERSION "1.1.1"
 
 // ---------------------------------------------------------------- theme colors (PES21)
 static inline UIColor* PESLime() { return [UIColor colorWithRed:0.77 green:0.98 blue:0.22 alpha:1.0]; }

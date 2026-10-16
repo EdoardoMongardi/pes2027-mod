@@ -35,14 +35,10 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           li->put("exp_total", 0);
           li->put("exp_current_level", 0);
           li->put("exp_to_next_level", 0);
-          int cp = (lim - 1) * 2;
+          int cp = ziruProgressionBudget(lim);
           if (serial > 0) {
             JStr pr = loadProgression(serial);
-            if (!pr || pr->empty()) {
-              ArrP a = cur->optJSONArray("parameters");
-              ArrP b = base->optJSONArray("parameters");
-              if (a && b && a->toString() != b->toString()) cp = 0;
-            } else {
+            if (pr && !pr->empty()) {
               cp -= Object::parse(*pr)->optInt("_spent_total", 0);
               if (cp < 0) cp = 0;
             }
@@ -68,7 +64,7 @@ ObjP resolveZiruCoachFromLoginV73(int64_t id) {
     for (int i = 0; i < cl->length(); i++) {
       ObjP c = cl->optJSONObject(i);
       ObjP cid;
-      if (c && (cid = c->optJSONObject("coach_id")) && cid->optLong("id", 0) == id) return c;
+      if (c && (cid = c->optJSONObject("coach_id")) && cid->optLong("id", 0) == id) return Object::parse(c->toString());
     }
     return nullptr;
   } catch (const std::exception& e) {
