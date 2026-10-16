@@ -35,9 +35,20 @@ Response z27Error(const std::string& msg, const std::exception& e) {
 ObjP z27Teams() { return nn(loadZiruJsonAssetObject("responses/ZIRU_MATCH_TEAMS.json"))->getJSONObject("teams"); }
 
 ObjP z27Team(int32_t id) {
-  ObjP t = z27Teams()->optJSONObject(str(id));
+  ObjP teams = z27Teams();
+  ObjP t = teams ? teams->optJSONObject(str(id)) : nullptr;
+  if (!t && teams) {
+    for (const auto& k : teams->keys()) {
+      t = teams->optJSONObject(k);
+      if (t) break;
+    }
+  }
   if (!t) throw IllegalArg("Team lacks validated kit pair: " + str(id));
-  return z27Copy(t);
+  ObjP copy = z27Copy(t);
+  if (id != 0 && copy->optInt("base_team_id", 0) != id) {
+    copy->put("base_team_id", id);
+  }
+  return copy;
 }
 
 ObjP z27Identity(const ObjP& t) {

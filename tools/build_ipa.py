@@ -64,6 +64,15 @@ PATCHES = [
 
     # FrameRateController table: Mode 0 set to 120 FPS
     (0x1057461F8, 0x0000003C, 0x00000078, "FrameRateController table: 60 -> 120 fps"),
+
+    # Prevent match start crash in IMatchDataStoreObserver::execMatchCameraTypeChanged on null observer Context (x19 == 0)
+    (0x1014D52E0, 0xF9400268, 0x14CF5920, "CameraChanged: ldr x8,[x19] -> b 0x1048ab760"),
+    (0x1048AB760, 0x910063E0, 0xB40000B3, "camera trampoline: cbz x19, 0x1048ab774"),
+    (0x1048AB764, 0x97FFFE10, 0xF9400268, "camera trampoline: ldr x8, [x19]"),
+    (0x1048AB768, 0x910063E0, 0xF9400108, "camera trampoline: ldr x8, [x8]"),
+    (0x1048AB76C, 0x910003E1, 0xAA1303E0, "camera trampoline: mov x0, x19"),
+    (0x1048AB770, 0x97FFFE2D, 0xD63F0100, "camera trampoline: blr x8"),
+    (0x1048AB774, 0xAA1403E0, 0x1730A6DF, "camera trampoline: b 0x1014d52f0"),
 ]
 
 
