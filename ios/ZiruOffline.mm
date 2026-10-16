@@ -28,6 +28,13 @@
 #include <string>
 
 static thread_local bool gInHook = false;
+static int (*orig_open)(const char *path, int oflag, ...);
+static int (*orig_access)(const char *path, int amode);
+static int (*orig_stat)(const char *path, struct stat *buf);
+static int (*orig_lstat)(const char *path, struct stat *buf);
+static int (*orig_unlink)(const char *path);
+static int (*orig_unlinkat)(int fd, const char *path, int flag);
+static int (*orig_remove)(const char *path);
 
 #include "../core/datapack.hpp"
 #include "../core/server.hpp"
@@ -334,14 +341,6 @@ static BOOL isCommentaryPath(const char* path) {
   if (!path) return NO;
   return (strstr(path, "dt510") != nullptr || strstr(path, "dt510_eng_mobile_all.cpk") != nullptr);
 }
-
-static int (*orig_open)(const char *path, int oflag, ...);
-static int (*orig_access)(const char *path, int amode);
-static int (*orig_stat)(const char *path, struct stat *buf);
-static int (*orig_lstat)(const char *path, struct stat *buf);
-static int (*orig_unlink)(const char *path);
-static int (*orig_unlinkat)(int fd, const char *path, int flag);
-static int (*orig_remove)(const char *path);
 
 static void logFileIo(const char* op, const char* path, int res, int err) {
   if (!gFileIoLogPath || !isTrackedPath(path)) return;
