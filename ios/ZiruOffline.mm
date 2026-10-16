@@ -22,6 +22,8 @@
 #import <unistd.h>
 #import <mach/mach.h>
 #import <mach/vm_map.h>
+#import <Security/Security.h>
+#import <CommonCrypto/CommonDigest.h>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -43,7 +45,7 @@ static DIR* (*orig_opendir)(const char *name);
 #include "ZiruFontPak.h"
 #include "ZiruWebView.h"
 
-#define ZIRU_MOD_VERSION "1.0.1"
+#define ZIRU_MOD_VERSION "1.1.0"
 
 // ---------------------------------------------------------------- theme colors (PES21)
 static inline UIColor* PESLime() { return [UIColor colorWithRed:0.77 green:0.98 blue:0.22 alpha:1.0]; }
@@ -613,6 +615,119 @@ static NSURLSession* cdnSession() {
   return s;
 }
 
+// ---------------------------------------------------------------- online (mod 1.1): Friend Match via the AWS server
+// myClub stays on the on-device server; room / game-session / TURN / match-progress commands go to the online server
+// configured in PESmobile.app/ziru/online.json, overridable by Documents/PES2027-online.json:
+//   {"server": "https://1.2.3.4:8443", "name": "Long", "enabled": true}
+// Every device plays Ziru's account (user_id 359042717); the server tells devices apart by X-Ziru-Uid.
+static NSString* gOnlineServer;   // nil = online disabled
+static NSString* gOnlineName;
+static NSString* gOnlineToken;
+static NSString* gOnlineCertSha256;
+static uint32_t gOnlineUid;
+static std::atomic<bool> gOnlineInRoom{false};
+
+static void loadOnlineConfig() {
+  NSMutableDictionary* cfg = [NSMutableDictionary dictionary];
+  for (NSString* f in @[ [gBundleAssets stringByAppendingPathComponent:@"online.json"],
+                          [gDocs stringByAppendingPathComponent:@"PES2027-online.json"] ]) {
+    NSData* d = [NSData dataWithContentsOfFile:f];
+    id j = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
+    if ([j isKindOfClass:NSDictionary.class]) [cfg addEntriesFromDictionary:j];
+  }
+  NSString* server = [cfg[@"server"] isKindOfClass:NSString.class] ? cfg[@"server"] : nil;
+  BOOL enabled = cfg[@"enabled"] ? [cfg[@"enabled"] boolValue] : YES;
+  while ([server hasSuffix:@"/"]) server = [server substringToIndex:server.length - 1];
+  gOnlineServer = (enabled && server.length) ? server : nil;
+  NSURL* onlineURL = gOnlineServer ? [NSURL URLWithString:gOnlineServer] : nil;
+  if (gOnlineServer && (![onlineURL.scheme.lowercaseString isEqualToString:@"https"] || !onlineURL.host.length ||
+                       onlineURL.user.length || onlineURL.password.length || onlineURL.query.length ||
+                       onlineURL.fragment.length || onlineURL.path.length)) {
+    ZLog(@"[ONLINE] invalid server origin; HTTPS host and optional port required");
+    gOnlineServer = nil;
+  }
+  gOnlineToken = [cfg[@"token"] isKindOfClass:NSString.class] ? cfg[@"token"] : nil;
+  gOnlineCertSha256 = [cfg[@"cert_sha256"] isKindOfClass:NSString.class] ? [cfg[@"cert_sha256"] lowercaseString] : nil;
+  NSUserDefaults* ud = NSUserDefaults.standardUserDefaults;
+  gOnlineUid = (uint32_t)[ud integerForKey:@"ZiruOnlineUid"];
+  if (!gOnlineUid) {
+    gOnlineUid = 1000000000u + arc4random_uniform(1000000000u);
+    [ud setInteger:gOnlineUid forKey:@"ZiruOnlineUid"];
+  }
+  NSString* name = [cfg[@"name"] isKindOfClass:NSString.class] ? cfg[@"name"] : nil;
+  gOnlineName = name.length ? name : [NSString stringWithFormat:@"Player%04u", gOnlineUid % 10000];
+  if (gOnlineServer) ZLog(@"[ONLINE] server %@ uid %u name %@", gOnlineServer, gOnlineUid, gOnlineName);
+  else ZLog(@"[ONLINE] disabled (no server in ziru/online.json or Documents/PES2027-online.json)");
+}
+
+static NSString* gateCommand(NSURL* url) {
+  NSString* last = url.path.lastPathComponent;
+  if (![last hasPrefix:@"gate_"] || ![last hasSuffix:@".php"]) return nil;
+  return [last substringWithRange:NSMakeRange(5, last.length - 9)];
+}
+
+static BOOL isOnlineCommand(NSString* cmd) {
+  static NSSet* always, *inRoom;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    always = [NSSet setWithArray:@[
+      @"CMD_CREATEJOIN_ROOM", @"CMD_JOIN_ROOM", @"CMD_GET_ROOM_INFO", @"CMD_GET_ROOM_LIST", @"CMD_LEAVE_ROOM",
+      @"CMD_SET_ROOM_MATCH_READY", @"CMD_UNSET_ROOM_MATCH_READY", @"CMD_SET_ROOM_SETTINGS", @"CMD_SET_ROOM_USER_ENTRY_SIDE",
+      @"CMD_SET_ROOM_USER_SQUAD_ENABLE", @"CMD_SET_ROOM_USER_COMMENT", @"CMD_RETURN_ROOM", @"CMD_KICK_ROOM_USER",
+      @"CMD_SEND_JOIN_ROOM_REQUEST", @"CMD_GET_REQUESTED_JOIN_ROOM_INFO", @"CMD_ADD_ROOM_GUEST", @"CMD_DELETE_ROOM_GUEST",
+      @"CMD_GET_COMMUNITY_ROOM_LIST", @"CMD_SEND_JOIN_COMMUNITY_ROOM_REQUEST", @"CMD_WATCH_ROOM_CONNECTION",
+      @"CMD_GET_TURN_SERVER_LIST", @"CMD_SEND_TURN_ADDRESS_DATA", @"CMD_GET_TURN_ADDRESS_DATA", @"CMD_WATCH_TURN_ADDRESS_DATA",
+      @"CMD_GET_GAME_SESSION", @"CMD_GET_SESSION_ID", @"CMD_SEND_SESSION_ID", @"CMD_SET_GAME_SESSION_CHECK_RES",
+      @"CMD_GET_GAME_SESSION_CHECK_RES", @"CMD_SEND_SESSION_FAILED_NOTICE", @"CMD_MATCH_SETTINGS"]];
+    // used by offline matches too: only online while this device is in an online room
+    inRoom = [NSSet setWithArray:@[ @"CMD_CHANGE_GAMEPHASE", @"CMD_ADD_SCORE", @"CMD_ADD_FOUL", @"CMD_SET_GAME_RESULT",
+                                    @"CMD_GET_GAME_RESULT", @"CMD_CHECK_GAME_RESULT", @"CMD_ALIGN_PROGRESS" ]];
+  });
+  if (!gOnlineServer || !cmd) return NO;
+  return [always containsObject:cmd] || (gOnlineInRoom && [inRoom containsObject:cmd]);
+}
+
+@interface ZiruOnlineDelegate : NSObject <NSURLSessionDelegate>
+@end
+@implementation ZiruOnlineDelegate
+// A self-signed endpoint must match the certificate fingerprint bundled with its configuration.
+- (void)URLSession:(NSURLSession*)session didReceiveChallenge:(NSURLAuthenticationChallenge*)challenge
+    completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential*))completionHandler {
+  NSURLProtectionSpace* ps = challenge.protectionSpace;
+  if ([ps.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust] &&
+      [ps.host isEqualToString:[NSURL URLWithString:gOnlineServer].host] && gOnlineCertSha256.length) {
+    SecCertificateRef cert = ps.serverTrust ? SecTrustGetCertificateAtIndex(ps.serverTrust, 0) : nullptr;
+    NSData* der = cert ? CFBridgingRelease(SecCertificateCopyData(cert)) : nil;
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH] = {0};
+    if (der) CC_SHA256(der.bytes, (CC_LONG)der.length, digest);
+    NSMutableString* fingerprint = [NSMutableString stringWithCapacity:64];
+    for (unsigned char b : digest) [fingerprint appendFormat:@"%02x", b];
+    if (der && [fingerprint isEqualToString:gOnlineCertSha256])
+      completionHandler(NSURLSessionAuthChallengeUseCredential, [NSURLCredential credentialForTrust:ps.serverTrust]);
+    else
+      completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, nil);
+    return;
+  }
+  completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
+}
+@end
+
+static NSURLSession* onlineSession() {
+  static NSURLSession* s;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    NSURLSessionConfiguration* c = gOrigEphemeralCfg
+        ? ((NSURLSessionConfiguration * (*)(id, SEL)) gOrigEphemeralCfg)(NSURLSessionConfiguration.class, @selector(ephemeralSessionConfiguration))
+        : NSURLSessionConfiguration.ephemeralSessionConfiguration;
+    NSMutableArray* p = [NSMutableArray arrayWithArray:c.protocolClasses ?: @[]];
+    [p removeObject:NSClassFromString(@"ZiruURLProtocol")];
+    c.protocolClasses = p;
+    c.timeoutIntervalForRequest = 15;
+    s = [NSURLSession sessionWithConfiguration:c delegate:[ZiruOnlineDelegate new] delegateQueue:nil];
+  });
+  return s;
+}
+
 @interface ZiruURLProtocol : NSURLProtocol
 @end
 
@@ -692,11 +807,57 @@ static NSData* bodyOf(NSURLRequest* r) {
   [_cdnTask resume];
 }
 
+- (void)forwardOnline:(NSString*)cmd {
+  NSURLRequest* rq = self.request;
+  NSURL* target = [NSURL URLWithString:[gOnlineServer stringByAppendingString:rq.URL.path]];
+  NSMutableURLRequest* f = [NSMutableURLRequest requestWithURL:target cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
+  f.HTTPMethod = rq.HTTPMethod ?: @"POST";
+  f.HTTPBody = bodyOf(rq);
+  NSString* ct = rq.allHTTPHeaderFields[@"Content-Type"];
+  if (ct) [f setValue:ct forHTTPHeaderField:@"Content-Type"];
+  [f setValue:[NSString stringWithFormat:@"%u", gOnlineUid] forHTTPHeaderField:@"X-Ziru-Uid"];
+  [f setValue:[gOnlineName stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] forHTTPHeaderField:@"X-Ziru-Name"];
+  [f setValue:@"1.1" forHTTPHeaderField:@"X-Ziru-Ver"];
+  [f setValue:@"IOS" forHTTPHeaderField:@"X-Ziru-Platform"];
+  if (gOnlineToken.length) [f setValue:gOnlineToken forHTTPHeaderField:@"X-Ziru-Token"];
+  CFRunLoopRef rl = CFRunLoopGetCurrent();
+  CFRetain(rl);
+  __weak ZiruURLProtocol* weakSelf = self;
+  CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
+  _cdnTask = [onlineSession() dataTaskWithRequest:f completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
+    NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse*)response).statusCode : 0;
+    ZLog(@"[ONLINE] %@ -> %ld %lu bytes (%.0f ms)%@", cmd, (long)status, (unsigned long)data.length,
+         (CFAbsoluteTimeGetCurrent() - t0) * 1000.0, error ? [@" error: " stringByAppendingString:error.localizedDescription] : @"");
+    if (status == 200) {
+      NSString* inRoom = [((NSHTTPURLResponse*)response) valueForHTTPHeaderField:@"X-Ziru-In-Room"];
+      if ([inRoom isEqualToString:@"YES"]) gOnlineInRoom = true;
+      else if ([inRoom isEqualToString:@"NO"]) gOnlineInRoom = false;
+    }
+    CFRunLoopPerformBlock(rl, kCFRunLoopCommonModes, ^{
+      CFRelease(rl);
+      ZiruURLProtocol* me = weakSelf;
+      if (!me) return;
+      if (error || !status) {
+        [me.client URLProtocol:me didFailWithError:error ?: [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorBadServerResponse userInfo:nil]];
+        return;
+      }
+      [me finishWithStatus:status headers:@{@"Content-Type" : @"application/x-msgpack", @"Content-Length" : [NSString stringWithFormat:@"%lu", (unsigned long)data.length]} data:data];
+    });
+    CFRunLoopWakeUp(rl);
+  }];
+  [_cdnTask resume];
+}
+
 - (void)startLoading {
   NSURLRequest* rq = self.request;
   NSURL* url = rq.URL;
   if (isCdnAssetURL(url)) {
     [self loadCdnAsset];
+    return;
+  }
+  NSString* gcmd = gateCommand(url);
+  if (isOnlineCommand(gcmd)) {
+    [self forwardOnline:gcmd];
     return;
   }
   zsv::Request r;
@@ -1772,6 +1933,7 @@ __attribute__((constructor)) static void ziruInit() {
     zfont::install([gBundleAssets stringByAppendingPathComponent:@"fonts"].fileSystemRepresentation,
                    gDocs.fileSystemRepresentation, [](const char* line) { ZLog(@"%s", line); });
     zweb::install([](const char* line) { ZLog(@"%s", line); });
+    loadOnlineConfig();
     checkDirectFolderData(nil); // Automatically link folders right at launch!
     ZLog(@"ZiruOffline %s loaded, bundle=%@", ZIRU_MOD_VERSION, NSBundle.mainBundle.bundlePath);
 

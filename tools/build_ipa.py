@@ -24,7 +24,7 @@ import argparse, hashlib, json, os, plistlib, shutil, struct, sys, time, zipfile
 EXPECTED_EXE_SHA256 = "0cf9bacd9a9f049587f78a5fb8646b4ed5b87abe40a761d1f8f6337cafa9a0de"
 EXPECTED_VERSION = ("11.1.1", "11.1.101")
 DYLIB_INSTALL_NAME = b"@executable_path/Frameworks/ZiruOffline.dylib"
-MOD_VERSION = "1.0.1"
+MOD_VERSION = "1.1.0"
 
 # basic::PathGet(PathType): types 6 (cpk) and 7 (pak) are built from GetAppBundlePath() (x20).
 # Switch them to GetDocumentsPath() (x21) so the game reads Documents/cpk and Documents/pak,
@@ -177,7 +177,7 @@ def patch_executable(data: bytearray, report):
 
 
 # ------------------------------------------------------------------ IPA
-def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=None):
+def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=None, online_server="", online_config=None):
     exe = os.path.join(app, "PESmobile")
     info_path = os.path.join(app, "Info.plist")
     with open(info_path, "rb") as f:
@@ -346,6 +346,13 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=N
                 z.writestr(zi, open(os.path.join(extra_pak, fn), "rb").read())
                 report.setdefault("extra_pak", []).append(fn)
                 n += 1
+        # Online (1.1): default server for Friend Match; players can override it in Documents/PES2027-online.json
+        if online_server:
+            zi = zipfile.ZipInfo(root + "ziru/online.json", time.localtime()[:6])
+            zi.external_attr = 0o100644 << 16
+            z.writestr(zi, json.dumps({**(online_config or {}), "server": online_server, "enabled": True}))
+            report["online_server"] = online_server
+            n += 1
         fonts = make_ios_fonts(apk, report)
         if fonts:
             ensure_dir(root + "ziru/fonts/")
@@ -601,10 +608,14 @@ def main():
     ap.add_argument("--skip-ipa", action="store_true", help="only build/continue the data pack")
     ap.add_argument("--time-budget", type=float, default=0, help="seconds; stop cleanly and exit 3 when exceeded (run again to continue)")
     ap.add_argument("--no-livedata", action="store_true", help="do not ship Ziru's Android livedata in the data pack")
+    ap.add_argument("--online-server", default="", help="default online server URL for Friend Match (mod 1.1), e.g. https://1.2.3.4:8443")
+    ap.add_argument("--online-config", default="", help="local JSON with server/token/cert_sha256; keep this file outside Git")
     ap.add_argument("--extra-pak", default="", help="folder with pc7999_mobile_ios.{pak,utoc,ucas} from tools/make_extra_pak.py, bundled as ziru/pak_extra")
     ap.add_argument("--ziru-cpk", default="dt500", help="comma list of CPK stems taken from the Ziru APK instead of the IPA (default dt500; '' = none)")
     ap.add_argument("--commentary", default="", help="commentary CPK to install into the game's Download folder, e.g. D:\\Telegram\\dt510_eng_mobile_all.cpk (Vietnamese)")
     a = ap.parse_args()
+    online_config = json.load(open(a.online_config, encoding="utf-8")) if a.online_config else {}
+    a.online_server = a.online_server or online_config.get("server", "")
     os.makedirs(a.out, exist_ok=True)
     if a.time_budget:
         DEADLINE[0] = time.time() + a.time_budget
@@ -614,7 +625,7 @@ def main():
               "patches": [], "outputs": {}}
     report_path = os.path.join(a.out, "build-report.json")
     if not a.skip_ipa:
-        build_ipa(a.app, a.dylib, a.apk, a.out, report, a.bundle_id, a.display_name, extra_pak=a.extra_pak or None)
+        build_ipa(a.app, a.dylib, a.apk, a.out, report, a.bundle_id, a.display_name, extra_pak=a.extra_pak or None, online_server=a.online_server, online_config=online_config)
         with open(report_path, "w") as f:
             json.dump(report, f, indent=1)
     else:

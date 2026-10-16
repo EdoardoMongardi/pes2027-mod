@@ -3,3 +3,6 @@ __pycache__/
 *.ipa
 *.zip
 /out/
+/online/logs/
+/online/server.env
+/online/client.json
