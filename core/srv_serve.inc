@@ -93,6 +93,15 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
       }
     }
   }
+  if (jo && name == "responses/get_user_eula_info.json") {
+    ObjP uei = jo->optJSONObject("user_eula_info");
+    if (uei) {
+      uei->put("eula_privacy_action", "NONE");
+      uei->put("eula_country_age_kind", "NONE");
+    }
+    jo->put("select_country_privacy_action", "NONE");
+    jo->put("country_status", "NO_CHANGE");
+  }
   if (jo) {
     z27Restore(jo);
     z27RepairLoginRoster(jo);
