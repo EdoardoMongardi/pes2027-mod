@@ -820,15 +820,32 @@ static BOOL checkDirectFolderData(NSString** why) {
     ensureSymlink([gDocs stringByAppendingPathComponent:@"livedata"], foundLivedata);
   }
 
-  // Create _mobile_ios symlinks for livedata files named _mobile_and
+  NSString* pakDir = [gDocs stringByAppendingPathComponent:@"pak"];
+  NSString* cpkDir = [gDocs stringByAppendingPathComponent:@"cpk"];
+
+  // Create _mobile_ios symlinks for livedata files, and mount all epic paks/ucas/utoc into pak/ and cpk into cpk/
   NSString* liveDir = [gDocs stringByAppendingPathComponent:@"livedata"];
   if ([fm fileExistsAtPath:liveDir]) {
     for (NSString* f in [fm contentsOfDirectoryAtPath:liveDir error:nil]) {
+      NSString* target = [liveDir stringByAppendingPathComponent:f];
+      NSString* ext = f.pathExtension.lowercaseString;
       if ([f containsString:@"_mobile_and"]) {
         NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
-        NSString* target = [liveDir stringByAppendingPathComponent:f];
         NSString* link = [liveDir stringByAppendingPathComponent:iosName];
         ensureSymlink(link, target);
+      }
+      if ([ext isEqualToString:@"pak"] || [ext isEqualToString:@"ucas"] || [ext isEqualToString:@"utoc"]) {
+        ensureSymlink([pakDir stringByAppendingPathComponent:f], target);
+        if ([f containsString:@"_mobile_and"]) {
+          NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
+          ensureSymlink([pakDir stringByAppendingPathComponent:iosName], target);
+        }
+      } else if ([ext isEqualToString:@"cpk"]) {
+        ensureSymlink([cpkDir stringByAppendingPathComponent:f], target);
+        if ([f containsString:@"_mobile_and"]) {
+          NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
+          ensureSymlink([cpkDir stringByAppendingPathComponent:iosName], target);
+        }
       }
     }
   }
@@ -852,8 +869,6 @@ static BOOL checkDirectFolderData(NSString** why) {
     ensureSymlink([dlDir stringByAppendingPathComponent:@"dt510_eng_mobile_all.cpk"], directBlv);
   }
 
-  NSString* pakDir = [gDocs stringByAppendingPathComponent:@"pak"];
-  NSString* cpkDir = [gDocs stringByAppendingPathComponent:@"cpk"];
   BOOL isDir = NO;
   if (![fm fileExistsAtPath:pakDir isDirectory:&isDir]) {
     if (why) *why = @"Chưa tìm thấy thư mục 'pak' trong Documents hoặc PES2027-data";

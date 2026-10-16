@@ -31,11 +31,39 @@ MOD_VERSION = "1.0.1"
 # which the dylib links to Library/Application Support/PES2027/GameData/<data_id>/.
 TEXT_VMADDR = 0x100000000
 PATCHES = [
-    # (vmaddr, expected little-endian u32, new u32, description)
+    # basic::PathGet(PathType): types 6 (cpk) and 7 (pak) redirected to Documents/
     (0x1000155BC, 0xF9000FF4, 0xF9000FF5, "PathGet cpk: str x20,[sp,#0x18] -> str x21"),
     (0x1000155C0, 0xAA1403E0, 0xAA1503E0, "PathGet cpk: mov x0,x20 -> mov x0,x21"),
     (0x10001561C, 0xF9000FF4, 0xF9000FF5, "PathGet pak: str x20,[sp,#0x18] -> str x21"),
     (0x100015620, 0xAA1403E0, 0xAA1503E0, "PathGet pak: mov x0,x20 -> mov x0,x21"),
+
+    # Permanently bypass EULA & Privacy Policy on startup
+    # 1. Client UI skip check: UUEMenuEulaAgree::IsSkip() unconditionally returns true (1)
+    (0x100CD1618, 0xA9BF7BFD, 0x52800020, "IsSkip: stp -> mov w0, #1"),
+    (0x100CD161C, 0x910003FD, 0xD65F03C0, "IsSkip: mov fp, sp -> ret"),
+    # 2. Login subtask check: onlinemode::UtilityEula::SetupBeforeEulaAgree() unconditionally sets *out = false (0)
+    (0x1048AB730, 0xD10143FF, 0x3900001F, "SetupBeforeEulaAgree: sub sp -> strb wzr, [x0]"),
+    (0x1048AB734, 0xA9034FF4, 0xD65F03C0, "SetupBeforeEulaAgree: stp -> ret"),
+
+    # String "120 fps\0" placed in dead code space of SetupBeforeEulaAgree
+    (0x1048AB738, 0xA9047BFD, 0x20303231, "120fps string part 1: '120 '"),
+    (0x1048AB73C, 0x910103FD, 0x00737066, "120fps string part 2: 'fps\\0'"),
+
+    # Trampoline for stringdb::StringDataManager::GetString: if strId == 0x04710169, return "120 fps"
+    (0x1048AB740, 0xAA0003F3, 0x52802D28, "trampoline: mov w8, #0x169"),
+    (0x1048AB744, 0x9404A059, 0x72A08E28, "trampoline: movk w8, #0x471, lsl #16"),
+    (0x1048AB748, 0xB40003E0, 0x6B08003F, "trampoline: cmp w1, w8"),
+    (0x1048AB74C, 0xF9400414, 0x54000061, "trampoline: b.ne 0x1048ab758"),
+    (0x1048AB750, 0xA901FFFF, 0x10FFFF40, "trampoline: adr x0, 0x1048ab738"),
+    (0x1048AB754, 0xF90017FF, 0xD65F03C0, "trampoline: ret"),
+    (0x1048AB758, 0xA9007FFF, 0xD10103FF, "trampoline: sub sp, sp, #0x40"),
+    (0x1048AB75C, 0xF9000BFF, 0x140B210A, "trampoline: b 0x104b73b84"),
+
+    # Hook entry of stringdb::StringDataManager::GetString -> jump to trampoline
+    (0x104B73B80, 0xD10103FF, 0x17F4DEF0, "GetString: sub sp -> b 0x1048ab740"),
+
+    # FrameRateController table: Mode 0 set to 120 FPS
+    (0x1057461F8, 0x0000003C, 0x00000078, "FrameRateController table: 60 -> 120 fps"),
 ]
 
 
