@@ -35,6 +35,20 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     if (name == "responses/CmdResetMyclubAgent.json") applyZiruResetBox(jo);
     if (name == "responses/CmdUseMyclubAgent.json") {
       applyZiruDynamicRecruit(jo);
+      // The client refreshes its pack list from this response's agent_list. Ziru's file always carries one entry
+      // (agent 1368) whatever pack was opened, so after one pull every other pack (BIG TIME 1348, SHOW TIME 1374 ...)
+      // vanished from the client's list and its banner opened an empty page ("%s"). Send the whole pack list with
+      // the current remaining counts instead.
+      try {
+        ObjP al = loadZiruJsonAssetObject("responses/CmdGetMyclubAgentlist.json");
+        ArrP full = al ? al->optJSONArray("agent_list") : nullptr;
+        if (full && full->length()) {
+          jo->put("agent_list", Array::parse(full->toString()));
+          applyZiruRemainingCounts(jo);
+        }
+      } catch (const std::exception& e) {
+        zs::loge("OFFLINE_SERVER", std::string("[IOS_AGENT] agent_list refresh failed ") + e.what());
+      }
       ObjP ci = jo->optJSONObject("coin_info");
       if (ci) ci->put("coin", 9999999);
     }
