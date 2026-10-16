@@ -72,6 +72,16 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     jo->put("gp", 99999999999LL);
     ObjP ci = jo->optJSONObject("coin_info");
     if (ci) ci->put("coin", 9999999LL);
+    ArrP bl = jo->optJSONArray("banner_list");
+    if (bl) {
+      for (int i = 0; i < bl->length(); i++) {
+        ObjP b = bl->optJSONObject(i);
+        if (b && b->optString("announcement_type", "") == "AGENT") {
+          b->put("announcement_type", "NONE");
+          b->put("entity_id", 0);
+        }
+      }
+    }
   }
   if (jo) {
     z27Restore(jo);
