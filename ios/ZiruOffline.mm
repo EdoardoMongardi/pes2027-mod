@@ -17,9 +17,12 @@
 #import <mach-o/nlist.h>
 #import <dlfcn.h>
 #import <execinfo.h>
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
 #import <signal.h>
 #import <sys/stat.h>
-#import <ucontext.h>
+#import <sys/ucontext.h>
 #import <fcntl.h>
 #import <unistd.h>
 #include <atomic>
