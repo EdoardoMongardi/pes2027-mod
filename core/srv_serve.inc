@@ -79,26 +79,38 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     ObjP ci = jo->optJSONObject("coin_info");
     if (ci) ci->put("coin", 9999999LL);
     // Main-menu banners of type AGENT are the entry points to Ziru's packs (EPIC 1368, BIG TIME 1348, SHOW TIME 1374).
-    // ab162b9 turned every one into NONE, which removed the packs from the menu. Only neutralize a banner whose agent
-    // is not in the agent list (a dangling entity is what can crash the menu).
+    // The client's EAnnouncementType has only AGENT(0) EVENT CAMPAIGN PACK COMPETITION COMEBACK_ACHIEVEMENT
+    // (CmdGetMainmenuInfo literals); there is no NONE, so "NONE" falls back to AGENT 0 and tapping the banner opens an
+    // empty pack page ("%s"). Ziru's "ZIRU OFFICIAL" banner is NONE, and ab162b9 made every pack banner NONE.
+    // A banner whose type is unknown, or an AGENT banner whose agent does not exist, now opens Ziru's first pack.
     ArrP bl = jo->optJSONArray("banner_list");
     if (bl) {
+      std::vector<long long> order;
       std::set<long long> agents;
       try {
         ObjP al = loadZiruJsonAssetObject("responses/get_myclub_agentlist.json");
         ArrP l = al ? al->optJSONArray("agent_list") : nullptr;
         for (int i = 0; l && i < l->length(); i++) {
           ObjP a = l->optJSONObject(i);
-          if (a) agents.insert(a->optLong("agent_id", 0));
+          long long id = a ? a->optLong("agent_id", 0) : 0;
+          if (id && agents.insert(id).second) order.push_back(id);
         }
       } catch (const std::exception&) {
       }
+      static const std::set<std::string> known = {"AGENT", "EVENT", "CAMPAIGN", "PACK", "COMPETITION", "COMEBACK_ACHIEVEMENT"};
       for (int i = 0; i < bl->length(); i++) {
         ObjP b = bl->optJSONObject(i);
-        if (b && b->optString("announcement_type", "") == "AGENT" && !agents.count(b->optLong("entity_id", 0))) {
-          logRequest("IOS_BANNER", "[IOS_BANNER] AGENT banner without agent " + str(b->optLong("entity_id", 0)) + " -> NONE");
-          b->put("announcement_type", "NONE");
-          b->put("entity_id", 0);
+        if (!b) continue;
+        std::string type = b->optString("announcement_type", "");
+        long long id = b->optLong("entity_id", 0);
+        if (known.count(type) && (type != "AGENT" || agents.count(id))) continue;
+        if (!order.empty()) {
+          logRequest("IOS_BANNER", "[IOS_BANNER] banner '" + b->optString("title_text", "") + "' " + type + " " + std::to_string(id) +
+                                       " -> AGENT " + std::to_string(order[0]));
+          b->put("announcement_type", "AGENT");
+          b->put("entity_id", order[0]);
+        } else {
+          bl->remove(i--);  // no pack to open: drop the banner rather than show an empty page
         }
       }
     }
