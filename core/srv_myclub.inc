@@ -90,6 +90,20 @@ void applyZiruDynamicRecruit(const ObjP& jo) {
   }
 }
 
+static inline int z27GetPositionIndexByName(const std::string& name) {
+  static const char* const names[] = {
+    "", "CF", "ST", "LWG", "RWG", "OMF", "DMF", "CMF", "LMF", "RMF", "CB", "LSB", "RSB"
+  };
+  for (int i = 1; i <= 12; i++) {
+    if (name == names[i]) return i;
+  }
+  if (name == "SS") return 2;
+  if (name == "AMF") return 5;
+  if (name == "LB") return 11;
+  if (name == "RB") return 12;
+  return -1;
+}
+
 void applyZiruPositionTrainingResponse(const ObjP& jo) {
   try {
     if (!(ziruItemType && *ziruItemType == "POSITION_TRAINING")) return;
@@ -108,32 +122,109 @@ void applyZiruPositionTrainingResponse(const ObjP& jo) {
       } else {
         p = Object::parse(*lp);
       }
-      ArrP params = nn(p)->optJSONArray("parameters");
+      if (!p) {
+        logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_V26_FAIL] missing player");
+        return;
+      }
+      ArrP params = p->optJSONArray("parameters");
       if (params && params->length() >= 14) {
         if (params->optInt(0) != 0) {
-          int i = ziruTrainingIndex == 1 ? 7 : 1;
-          for (int i2 = 0; i2 < 12; i2++) {
-            if (i > 12) i -= 12;
-            if (params->optInt(i) < 2) {
-              params->put(i, 2);
-              static const char* names[] = {"", "CF", "ST", "LWG", "RWG", "OMF", "DMF", "CMF", "LMF", "RMF", "CB", "LSB", "RSB"};
-              std::string pos = (i >= 1 && i <= 11) ? names[i] : "RSB";
-              ArrP add = p->optJSONArray("additional_position");
-              if (!add) { add = newArr(); p->put("additional_position", add); }
-              int i3 = ziruTrainingIndex;
-              if (i3 < 0 || i3 >= 2) i3 = 0;
-              add->put(i3, pos);
-              saveZiruPlayerToDb(p);
-              ObjP res = jo->optJSONObject("position_training_result");
-              if (!res) { res = newObj(); jo->put("position_training_result", res); }
-              res->put("additional_position", pos);
-              res->put("is_success", "YES");
-              logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_V26] serial=" + str(j) + " position=" + pos);
-              return;
-            }
-            i++;
+          static const char* const names[] = {
+            "", "CF", "ST", "LWG", "RWG", "OMF", "DMF", "CMF", "LMF", "RMF", "CB", "LSB", "RSB"
+          };
+          ArrP add = p->optJSONArray("additional_position");
+          if (!add) { add = newArr(); p->put("additional_position", add); }
+
+          int slot = ziruTrainingIndex;
+          if (slot != 0 && slot != 1) {
+            slot = (add->length() == 0) ? 0 : 1;
           }
+          if (add->length() == 0) {
+            slot = 0;
+          }
+
+          ObjP baseWrapper = getZiruPlayerWrapper(Value((long long)ziruTargetPlayerId), false);
+          ObjP baseP;
+          ArrP baseParams;
+          if (baseWrapper && (baseP = baseWrapper->optJSONObject("gameplayer"))) {
+            baseParams = baseP->optJSONArray("parameters");
+          }
+
+          int other_slot = (slot == 0) ? 1 : 0;
+          std::string other_pos = (other_slot < add->length()) ? add->optString(other_slot, "") : "";
+          int other_pos_idx = z27GetPositionIndexByName(other_pos);
+
+          if (baseParams && baseParams->length() >= 14) {
+            for (int k = 1; k <= 12; k++) {
+              params->put(k, baseParams->optInt(k));
+            }
+          } else {
+            std::string old_pos = (slot < add->length()) ? add->optString(slot, "") : "";
+            int old_idx = z27GetPositionIndexByName(old_pos);
+            if (old_idx >= 1 && old_idx <= 12) {
+              params->put(old_idx, 0);
+            }
+          }
+
+          if (other_pos_idx >= 1 && other_pos_idx <= 12) {
+            params->put(other_pos_idx, 2);
+          }
+
+          std::vector<int> candidates;
+          for (int k = 1; k <= 12; k++) {
+            if (k == other_pos_idx) continue;
+            if (baseParams && baseParams->length() >= 14 && baseParams->optInt(k) >= 2) continue;
+            if ((!baseParams || baseParams->length() < 14) && params->optInt(k) >= 2) continue;
+            candidates.push_back(k);
+          }
+
+          if (candidates.empty()) {
+            for (int k = 1; k <= 12; k++) {
+              if (k != other_pos_idx) candidates.push_back(k);
+            }
+          }
+
+          int chosen_idx = candidates[rand() % candidates.size()];
+          std::string chosen_pos = names[chosen_idx];
+
+          params->put(chosen_idx, 2);
+
+          if (slot == 0) {
+            if (add->length() == 0) add->put(chosen_pos);
+            else add->put(0, chosen_pos);
+          } else {
+            if (add->length() == 0) {
+              add->put(chosen_pos);
+            } else if (add->length() == 1) {
+              add->put(chosen_pos);
+            } else {
+              add->put(1, chosen_pos);
+            }
+          }
+
+          saveZiruPlayerToDb(p);
+
+          ObjP res = jo->optJSONObject("position_training_result");
+          if (!res) { res = newObj(); jo->put("position_training_result", res); }
+          res->put("additional_position", chosen_pos);
+          res->put("is_success", "YES");
+
+          ArrP items = jo->optJSONArray("item_list");
+          if (items) {
+            for (int i8 = 0; i8 < items->length(); i8++) {
+              ObjP it = items->optJSONObject(i8);
+              ObjP item;
+              if (it && (item = it->optJSONObject("item"))) {
+                std::string t = item->optString("item_type", "");
+                if (t == "POSITION_TRAINING") it->put("inventory_num", 999999);
+              }
+            }
+          }
+
+          logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_V26] serial=" + str(j) + " slot=" + str(slot) + " position=" + chosen_pos);
+          return;
         }
+
         ObjP res = jo->optJSONObject("position_training_result");
         if (!res) { res = newObj(); jo->put("position_training_result", res); }
         res->put("additional_position", "");
