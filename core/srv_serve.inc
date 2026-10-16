@@ -244,6 +244,7 @@ Response serveInner(Request& r) {
     jo->put("rqid", rq);
     jo->put("msgid", "CMD_CREATE_MYCLUB_SQUAD");
     jo->put("squad_id", nextId);
+    jo->put("squad_data", newSquad);
     return serveObjectAsEncryptedMsgPack(jo);
   }
   if (contains(uri, "CMD_GET_EVENT_LIST_AND_LOG")) {

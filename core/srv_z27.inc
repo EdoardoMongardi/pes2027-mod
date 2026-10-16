@@ -251,7 +251,22 @@ void z27Restore(const ObjP& jo) {
     }
     if (!found)
       squads->put(newObj()->put("squad_id", mainId)->put("name", "Dream Team")->put("squad_data", z27Squad(mainId))->put("base_team", newArr()->put(z27Base(mainId))));
+    std::set<int> present;
+    for (int i = 0; i < squads->length(); i++) present.insert(squads->getJSONObject(i)->getInt("squad_id"));
+    for (int id = 1; id <= 20; id++) {
+      if (present.find(id) == present.end() && loadSquad(id)) {
+        ObjP sq = z27Squad(id);
+        std::string sname = sq->optString("squad_name", "Tactics " + str(id));
+        squads->put(newObj()->put("squad_id", id)->put("name", sname)->put("squad_data", sq)->put("base_team", newArr()->put(z27Base(id))));
+      }
+    }
     target->put("main_squad_id", mainId);
+    target->put("current_gameplayer_warehouse_list_max", 900);
+    target->put("warehouse_player_max", 900);
+    target->put("current_gameplayer_list_max", 900);
+    target->put("gameplayer_list_max", 900);
+    target->put("unlock_gameplayer_frame", 900);
+    target->put("unlock_gameplayer_warehouse_frame", 900);
     JStr kits = loadMeta("z27_kits_" + str(mainId));
     target->put("set_uniform_list", z27Uniform(z27Base(mainId), kits ? Array::parse(*kits) : nullptr)->getJSONArray("uniform_list"));
     ArrP gl = target->optJSONArray("gameplayer_list");
