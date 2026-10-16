@@ -27,11 +27,6 @@
 #include <mutex>
 #include <string>
 
-static thread_local bool gInHook = false;
-static int (*orig_open)(const char *path, int oflag, ...);
-static int (*orig_access)(const char *path, int amode);
-static int (*orig_stat)(const char *path, struct stat *buf);
-static int (*orig_lstat)(const char *path, struct stat *buf);
 static int (*orig_unlink)(const char *path);
 static int (*orig_unlinkat)(int fd, const char *path, int flag);
 static int (*orig_remove)(const char *path);
@@ -117,7 +112,6 @@ static void initPaths() {
 static void crashHandler(int sig, siginfo_t* info, void* ucontext) {
   static volatile sig_atomic_t crashed = 0;
   if (crashed++) _exit(1);
-  gInHook = true;
 
   uintptr_t pc = 0, lr = 0, fp = 0, faultAddr = (uintptr_t)(info ? info->si_addr : 0);
 #if defined(__arm64__)
@@ -137,8 +131,7 @@ static void crashHandler(int sig, siginfo_t* info, void* ucontext) {
 
   int fd = -1;
   if (gCrashLogPath) {
-    fd = orig_open ? orig_open(gCrashLogPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644)
-                   : open(gCrashLogPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    fd = open(gCrashLogPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644);
   }
   if (fd < 0) fd = 2;
 
@@ -324,142 +317,37 @@ static int z_rebind_symbols(struct z_rebinding rebindings[], size_t nel) {
 }
 
 // ---------------------------------------------------------------- file I/O interception & BLV protection
-static BOOL isTrackedPath(const char* path) {
-  if (!path) return NO;
-  if (strstr(path, "PES2027-logs") || strstr(path, ".log") || strstr(path, "ZiruOffline")) return NO;
-  if (strstr(path, "cpk") || strstr(path, "pak") || strstr(path, "Download") ||
-      strstr(path, "dt510") || strstr(path, "dt500") || strstr(path, "dt2") ||
-      strstr(path, "GameData") || strstr(path, "livedata") || strstr(path, "version") ||
-      strstr(path, "manifest") || strstr(path, "sound") || strstr(path, ".acb") ||
-      strstr(path, ".awb")) {
-    return YES;
-  }
-  return NO;
-}
-
+// ---------------------------------------------------------------- Commentary (BLV) protection
 static BOOL isCommentaryPath(const char* path) {
   if (!path) return NO;
   return (strstr(path, "dt510") != nullptr || strstr(path, "dt510_eng_mobile_all.cpk") != nullptr);
 }
 
-static void logFileIo(const char* op, const char* path, int res, int err) {
-  if (!gFileIoLogPath || !isTrackedPath(path)) return;
-  if (gInHook) return;
-  gInHook = true;
-  {
-    std::lock_guard<std::mutex> g(gLogMu);
-    int fd = orig_open ? orig_open(gFileIoLogPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644)
-                       : open(gFileIoLogPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (fd >= 0) {
-      time_t now = time(nullptr);
-      char tbuf[32];
-      strftime(tbuf, sizeof(tbuf), "%H:%M:%S", localtime(&now));
-      char line[1024];
-      int len = 0;
-      if (res == 0) {
-        len = snprintf(line, sizeof(line), "%s [%s] OK: %s\n", tbuf, op, path);
-      } else {
-        len = snprintf(line, sizeof(line), "%s [%s] FAIL(%d: %s): %s\n", tbuf, op, err, strerror(err), path);
-      }
-      if (len > 0) {
-        write(fd, line, (size_t)len);
-      }
-      close(fd);
-    }
-  }
-  gInHook = false;
-}
-
 static int hook_unlink(const char *path) {
   if (isCommentaryPath(path)) {
-    ZLog(@"[BLV_PROTECT] Prevented deletion (unlink) of commentary file: %s", path);
-    logFileIo("UNLINK_PROTECTED", path, 0, 0);
+    ZLog(@"[BLV_PROTECT] Prevented deletion (unlink) of commentary: %s", path);
     return 0; // Fake success
   }
   if (!orig_unlink) return -1;
-  if (gInHook) return orig_unlink(path);
-  int r = orig_unlink(path);
-  int savedErr = errno;
-  logFileIo("UNLINK", path, r, savedErr);
-  errno = savedErr;
-  return r;
+  return orig_unlink(path);
 }
 
 static int hook_unlinkat(int fd, const char *path, int flag) {
   if (isCommentaryPath(path)) {
-    ZLog(@"[BLV_PROTECT] Prevented deletion (unlinkat) of commentary file: %s", path);
-    logFileIo("UNLINKAT_PROTECTED", path, 0, 0);
+    ZLog(@"[BLV_PROTECT] Prevented deletion (unlinkat) of commentary: %s", path);
     return 0;
   }
   if (!orig_unlinkat) return -1;
-  if (gInHook) return orig_unlinkat(fd, path, flag);
-  int r = orig_unlinkat(fd, path, flag);
-  int savedErr = errno;
-  logFileIo("UNLINKAT", path, r, savedErr);
-  errno = savedErr;
-  return r;
+  return orig_unlinkat(fd, path, flag);
 }
 
 static int hook_remove(const char *path) {
   if (isCommentaryPath(path)) {
-    ZLog(@"[BLV_PROTECT] Prevented deletion (remove) of commentary file: %s", path);
-    logFileIo("REMOVE_PROTECTED", path, 0, 0);
+    ZLog(@"[BLV_PROTECT] Prevented deletion (remove) of commentary: %s", path);
     return 0;
   }
   if (!orig_remove) return -1;
-  if (gInHook) return orig_remove(path);
-  int r = orig_remove(path);
-  int savedErr = errno;
-  logFileIo("REMOVE", path, r, savedErr);
-  errno = savedErr;
-  return r;
-}
-
-static int hook_open(const char *path, int oflag, ...) {
-  mode_t mode = 0;
-  if (oflag & O_CREAT) {
-    va_list ap;
-    va_start(ap, oflag);
-    mode = (mode_t)va_arg(ap, int);
-    va_end(ap);
-  }
-  if (!orig_open) return -1;
-  if (gInHook) return orig_open(path, oflag, mode);
-  int fd = orig_open(path, oflag, mode);
-  int savedErr = errno;
-  logFileIo("OPEN", path, fd >= 0 ? 0 : -1, savedErr);
-  errno = savedErr;
-  return fd;
-}
-
-static int hook_access(const char *path, int amode) {
-  if (!orig_access) return -1;
-  if (gInHook) return orig_access(path, amode);
-  int r = orig_access(path, amode);
-  int savedErr = errno;
-  logFileIo("ACCESS", path, r, savedErr);
-  errno = savedErr;
-  return r;
-}
-
-static int hook_stat(const char *path, struct stat *buf) {
-  if (!orig_stat) return -1;
-  if (gInHook) return orig_stat(path, buf);
-  int r = orig_stat(path, buf);
-  int savedErr = errno;
-  logFileIo("STAT", path, r, savedErr);
-  errno = savedErr;
-  return r;
-}
-
-static int hook_lstat(const char *path, struct stat *buf) {
-  if (!orig_lstat) return -1;
-  if (gInHook) return orig_lstat(path, buf);
-  int r = orig_lstat(path, buf);
-  int savedErr = errno;
-  logFileIo("LSTAT", path, r, savedErr);
-  errno = savedErr;
-  return r;
+  return orig_remove(path);
 }
 
 // ---------------------------------------------------------------- NSFileManager swizzling
@@ -468,7 +356,6 @@ static IMP gOrigFmRemovePath, gOrigFmRemoveURL;
 static BOOL hookFmRemovePath(id self, SEL _cmd, NSString* path, NSError** error) {
   if (path && isCommentaryPath(path.fileSystemRepresentation)) {
     ZLog(@"[BLV_PROTECT] Prevented NSFileManager removeItemAtPath: %@", path);
-    logFileIo("NSFileManager.remove_PROTECTED", path.fileSystemRepresentation, 0, 0);
     return YES;
   }
   return ((BOOL(*)(id, SEL, NSString*, NSError**))gOrigFmRemovePath)(self, _cmd, path, error);
@@ -477,7 +364,6 @@ static BOOL hookFmRemovePath(id self, SEL _cmd, NSString* path, NSError** error)
 static BOOL hookFmRemoveURL(id self, SEL _cmd, NSURL* url, NSError** error) {
   if (url.path && isCommentaryPath(url.path.fileSystemRepresentation)) {
     ZLog(@"[BLV_PROTECT] Prevented NSFileManager removeItemAtURL: %@", url.path);
-    logFileIo("NSFileManager.removeURL_PROTECTED", url.path.fileSystemRepresentation, 0, 0);
     return YES;
   }
   return ((BOOL(*)(id, SEL, NSURL*, NSError**))gOrigFmRemoveURL)(self, _cmd, url, error);
@@ -646,6 +532,22 @@ static __strong id gDelegate;
 static __strong UIWindow* gImportWindow;
 static void startGame();
 
+static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
+  NSFileManager* fm = NSFileManager.defaultManager;
+  if (![fm fileExistsAtPath:targetPath]) return;
+  NSString* curDest = [fm destinationOfSymbolicLinkAtPath:linkPath error:nil];
+  if (curDest && [curDest isEqualToString:targetPath]) return;
+  if ([fm fileExistsAtPath:linkPath] || curDest != nil) {
+    [fm removeItemAtPath:linkPath error:nil];
+  }
+  NSError* err = nil;
+  if ([fm createSymbolicLinkAtPath:linkPath withDestinationPath:targetPath error:&err]) {
+    ZLog(@"Linked %@ -> %@", linkPath.lastPathComponent, targetPath);
+  } else {
+    ZLog(@"Failed to link %@: %@", linkPath.lastPathComponent, err);
+  }
+}
+
 static BOOL checkDirectFolderData(NSString** why) {
   NSFileManager* fm = NSFileManager.defaultManager;
 
@@ -655,31 +557,21 @@ static BOOL checkDirectFolderData(NSString** why) {
     NSString* full = [gDocs stringByAppendingPathComponent:item];
     BOOL isDir = NO;
     if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
-      if ([item.lowercaseString containsString:@"pes2027-data"] || [item.lowercaseString isEqualToString:@"data"]) {
-        NSString* subPak = [full stringByAppendingPathComponent:@"pak"];
-        NSString* subCpk = [full stringByAppendingPathComponent:@"cpk"];
-        if ([fm fileExistsAtPath:subPak] && [fm fileExistsAtPath:subCpk]) {
-          subfolder = full;
-          break;
-        }
+      NSString* subPak = [full stringByAppendingPathComponent:@"pak"];
+      NSString* subCpk = [full stringByAppendingPathComponent:@"cpk"];
+      if ([fm fileExistsAtPath:subPak] || [fm fileExistsAtPath:subCpk]) {
+        subfolder = full;
+        break;
       }
     }
   }
 
   if (subfolder) {
     ZLog(@"Found data subfolder: %@", subfolder);
-    for (NSString* name in @[@"pak", @"cpk"]) {
-      NSString* link = [gDocs stringByAppendingPathComponent:name];
-      NSString* target = [subfolder stringByAppendingPathComponent:name];
-      NSDictionary* attr = [fm attributesOfItemAtPath:link error:nil];
-      if (attr) {
-        if ([attr[NSFileType] isEqualToString:NSFileTypeSymbolicLink]) {
-          [fm removeItemAtPath:link error:nil];
-          [fm createSymbolicLinkAtPath:link withDestinationPath:target error:nil];
-        }
-      } else {
-        [fm createSymbolicLinkAtPath:link withDestinationPath:target error:nil];
-      }
+    for (NSString* name in @[@"pak", @"cpk", @"livedata"]) {
+      NSString* src = [subfolder stringByAppendingPathComponent:name];
+      NSString* dst = [gDocs stringByAppendingPathComponent:name];
+      ensureSymlink(dst, src);
     }
     NSString* subDl = [subfolder stringByAppendingPathComponent:@"download"];
     if (![fm fileExistsAtPath:subDl]) subDl = [subfolder stringByAppendingPathComponent:@"Download"];
@@ -689,9 +581,7 @@ static BOOL checkDirectFolderData(NSString** why) {
       for (NSString* f in [fm contentsOfDirectoryAtPath:subDl error:nil]) {
         NSString* src = [subDl stringByAppendingPathComponent:f];
         NSString* dst = [dlDir stringByAppendingPathComponent:f];
-        if (![fm fileExistsAtPath:dst]) {
-          [fm createSymbolicLinkAtPath:dst withDestinationPath:src error:nil];
-        }
+        ensureSymlink(dst, src);
       }
     }
   }
@@ -700,13 +590,19 @@ static BOOL checkDirectFolderData(NSString** why) {
   NSString* pakDir = [gDocs stringByAppendingPathComponent:@"pak"];
   NSString* cpkDir = [gDocs stringByAppendingPathComponent:@"cpk"];
   BOOL isDir = NO;
-  if (![fm fileExistsAtPath:pakDir isDirectory:&isDir]) return NO;
-  if (![fm fileExistsAtPath:cpkDir isDirectory:&isDir]) return NO;
+  if (![fm fileExistsAtPath:pakDir isDirectory:&isDir]) {
+    if (why) *why = @"Chưa tìm thấy thư mục 'pak' trong Documents hoặc PES2027-data";
+    return NO;
+  }
+  if (![fm fileExistsAtPath:cpkDir isDirectory:&isDir]) {
+    if (why) *why = @"Chưa tìm thấy thư mục 'cpk' trong Documents hoặc PES2027-data";
+    return NO;
+  }
 
   NSArray* pakItems = [fm contentsOfDirectoryAtPath:pakDir error:nil];
   NSArray* cpkItems = [fm contentsOfDirectoryAtPath:cpkDir error:nil];
-  if (pakItems.count < 3 || cpkItems.count < 3) {
-    if (why) *why = @"Thư mục pak hoặc cpk trong Documents thiếu file dữ liệu";
+  if (pakItems.count == 0 || cpkItems.count == 0) {
+    if (why) *why = @"Thư mục pak hoặc cpk bị trống không có tệp dữ liệu";
     return NO;
   }
 
@@ -985,6 +881,11 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
   backdrop.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   [self.view addSubview:backdrop];
 
+  UIScrollView* scroll = [[UIScrollView alloc] initWithFrame:self.view.bounds];
+  scroll.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+  scroll.alwaysBounceVertical = YES;
+  [self.view addSubview:scroll];
+
   // Glass Card container
   UIView* card = [UIView new];
   card.backgroundColor = [UIColor colorWithRed:0.06 green:0.11 blue:0.17 alpha:0.96];
@@ -992,7 +893,7 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
   card.layer.borderWidth = 1.5;
   card.layer.borderColor = [PESLime() colorWithAlphaComponent:0.6].CGColor;
   card.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.view addSubview:card];
+  [scroll addSubview:card];
 
   // Title Header: "PES 2027" + "OFFLINE"
   NSMutableAttributedString* mat = [[NSMutableAttributedString alloc]
@@ -1103,12 +1004,12 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
   cardStack.translatesAutoresizingMaskIntoConstraints = NO;
   [card addSubview:cardStack];
 
-  UILayoutGuide* g = self.view.safeAreaLayoutGuide;
   [NSLayoutConstraint activateConstraints:@[
-    [card.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-    [card.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
-    [card.widthAnchor constraintEqualToConstant:460],
-    [card.widthAnchor constraintLessThanOrEqualToAnchor:g.widthAnchor constant:-24],
+    [card.topAnchor constraintEqualToAnchor:scroll.topAnchor constant:20],
+    [card.bottomAnchor constraintEqualToAnchor:scroll.bottomAnchor constant:-20],
+    [card.centerXAnchor constraintEqualToAnchor:scroll.centerXAnchor],
+    [card.widthAnchor constraintEqualToConstant:440],
+    [card.widthAnchor constraintLessThanOrEqualToAnchor:self.view.widthAnchor constant:-32],
     [cardStack.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
     [cardStack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16],
     [cardStack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
@@ -1281,84 +1182,81 @@ static uint64_t freeBytes() {
 
 static void startGame() {
   if (gGameStarted.exchange(true)) return;
-  ZLog(@"starting UE4 (didFinishLaunching)");
-  if (gImportWindow) {
-    gImportWindow.hidden = YES;
-    gImportWindow.rootViewController = nil;
-    gImportWindow = nil;
-  }
-  ((BOOL(*)(id, SEL, id, id))gOrigDidFinish)(gDelegate, @selector(application:didFinishLaunchingWithOptions:), gLaunchApp, gLaunchOptions);
-  if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive && gOrigBecomeActive)
-    ((void (*)(id, SEL, id))gOrigBecomeActive)(gDelegate, @selector(applicationDidBecomeActive:), gLaunchApp);
+  ZLog(@"Game starting, dismissing importer");
+  dispatch_async(dispatch_get_main_queue(), ^{
+    UIWindow* win = nil;
+    if ([gDelegate respondsToSelector:@selector(window)]) win = [(id)gDelegate window];
+    if (!win) win = UIApplication.sharedApplication.keyWindow;
+    UIViewController* root = win.rootViewController;
+    if (root.presentedViewController) {
+      [root.presentedViewController dismissViewControllerAnimated:YES completion:nil];
+    }
+  });
 }
 
 static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* opts) {
   gDelegate = self;
   gLaunchApp = app;
   gLaunchOptions = opts;
+
+  // Let UE4 initialize its window and Metal graphics first!
+  BOOL res = ((BOOL(*)(id, SEL, id, id))gOrigDidFinish)(self, _cmd, app, opts);
+
+  // Check if direct data exists
   NSString* why = nil;
   if (dataReady(&why)) {
-    ZLog(@"data ready (%s), launching directly", zd::activeId(layout()).c_str());
+    ZLog(@"Data ready, launching game directly");
     gGameStarted = true;
-    return ((BOOL(*)(id, SEL, id, id))gOrigDidFinish)(self, _cmd, app, opts);
+    return res;
   }
-  ZLog(@"data not ready: %@ — showing importer", why);
-  UIWindowScene* scene = nil;
-  for (UIScene* s in UIApplication.sharedApplication.connectedScenes) {
-    if ([s isKindOfClass:[UIWindowScene class]]) {
-      scene = (UIWindowScene*)s;
-      break;
+
+  // If data is NOT ready, present ZiruImportVC modally on rootViewController!
+  ZLog(@"Data not ready: %@ — presenting importer UI", why);
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    UIWindow* win = nil;
+    if ([self respondsToSelector:@selector(window)]) {
+      win = [(id)self window];
     }
-  }
-  if (scene) {
-    gImportWindow = [[UIWindow alloc] initWithWindowScene:scene];
-  } else {
-    gImportWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-  }
-  gImportWindow.backgroundColor = [UIColor colorWithRed:0.04 green:0.08 blue:0.13 alpha:1.0];
-  gImportWindow.windowLevel = UIWindowLevelNormal + 10;
-  gImportWindow.rootViewController = [ZiruImportVC new];
-  [gImportWindow makeKeyAndVisible];
-  if ([self respondsToSelector:@selector(setWindow:)]) {
-    [(id)self setWindow:gImportWindow];
-  }
-  return YES;
+    if (!win) win = UIApplication.sharedApplication.keyWindow;
+    UIViewController* root = win.rootViewController;
+    if (root) {
+      ZiruImportVC* vc = [ZiruImportVC new];
+      vc.modalPresentationStyle = UIModalPresentationFullScreen;
+      [root presentViewController:vc animated:NO completion:nil];
+    }
+  });
+
+  return res;
 }
 
-#define GATED(NAME, ORIG)                                                  \
-  static void NAME(id self, SEL _cmd, UIApplication* app) {                \
-    if (!gGameStarted) return;                                             \
-    if (ORIG) ((void (*)(id, SEL, id))ORIG)(self, _cmd, app);              \
-  }
-GATED(hookBecomeActive, gOrigBecomeActive)
-GATED(hookResignActive, gOrigResignActive)
-GATED(hookEnterBg, gOrigEnterBg)
-GATED(hookEnterFg, gOrigEnterFg)
+static void hookBecomeActive(id self, SEL _cmd, UIApplication* app) {
+  if (gOrigBecomeActive) ((void (*)(id, SEL, id))gOrigBecomeActive)(self, _cmd, app);
+}
+static void hookResignActive(id self, SEL _cmd, UIApplication* app) {
+  if (gOrigResignActive) ((void (*)(id, SEL, id))gOrigResignActive)(self, _cmd, app);
+}
+static void hookEnterBg(id self, SEL _cmd, UIApplication* app) {
+  if (gOrigEnterBg) ((void (*)(id, SEL, id))gOrigEnterBg)(self, _cmd, app);
+}
+static void hookEnterFg(id self, SEL _cmd, UIApplication* app) {
+  if (gOrigEnterFg) ((void (*)(id, SEL, id))gOrigEnterFg)(self, _cmd, app);
+}
 
 // ---------------------------------------------------------------- entry
 __attribute__((constructor)) static void ziruInit() {
   @autoreleasepool {
     initPaths();
     initCrashHandler();
+    checkDirectFolderData(nil); // Automatically link folders right at launch!
     ZLog(@"ZiruOffline %s loaded, bundle=%@", ZIRU_MOD_VERSION, NSBundle.mainBundle.bundlePath);
 
     // Initialize original function pointers via dlsym
-    orig_open = (int (*)(const char*, int, ...))dlsym(RTLD_DEFAULT, "open");
-    orig_access = (int (*)(const char*, int))dlsym(RTLD_DEFAULT, "access");
-    orig_stat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "stat$INODE64");
-    if (!orig_stat) orig_stat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "stat");
-    orig_lstat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "lstat$INODE64");
-    if (!orig_lstat) orig_lstat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "lstat");
     orig_unlink = (int (*)(const char*))dlsym(RTLD_DEFAULT, "unlink");
     orig_unlinkat = (int (*)(int, const char*, int))dlsym(RTLD_DEFAULT, "unlinkat");
     orig_remove = (int (*)(const char*))dlsym(RTLD_DEFAULT, "remove");
 
-    // Register File I/O hooks via fishhook
+    // Register ONLY commentary protection hooks via fishhook
     struct z_rebinding rebindings[] = {
-      {"open", (void*)hook_open, (void**)&orig_open},
-      {"access", (void*)hook_access, (void**)&orig_access},
-      {"stat$INODE64", (void*)hook_stat, (void**)&orig_stat},
-      {"lstat$INODE64", (void*)hook_lstat, (void**)&orig_lstat},
       {"unlink", (void*)hook_unlink, (void**)&orig_unlink},
       {"unlinkat", (void*)hook_unlinkat, (void**)&orig_unlinkat},
       {"remove", (void*)hook_remove, (void**)&orig_remove},
