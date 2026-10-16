@@ -26,6 +26,21 @@ EXPECTED_VERSION = ("11.1.1", "11.1.101")
 DYLIB_INSTALL_NAME = b"@executable_path/Frameworks/ZiruOffline.dylib"
 MOD_VERSION = "1.1.1"
 
+DEFAULT_COMMANDLINE = (
+    b"-t.MaxFPS=120 -FPS=120 -rhi.SyncInterval=0"
+    b" -r.ScreenPercentage=100"
+    b" -r.Tonemapper.Sharpen=0.75"
+    b" -r.PostProcessAAQuality=4"
+    b" -r.TemporalAAFilterSize=1.0"
+    b" -r.SkeletalMeshLODBias=0"
+    b" -r.StaticMeshLODDistanceScale=2.0"
+    b" -r.ContactShadows=1"
+    b" -r.Shadow.DistanceScale=1.8"
+    b" -r.ShadowQuality=3"
+    b" -r.MaxAnisotropy=8"
+    b" -r.Streaming.PoolSize=384\n"
+)
+
 # basic::PathGet(PathType): types 6 (cpk) and 7 (pak) are built from GetAppBundlePath() (x20).
 # Switch them to GetDocumentsPath() (x21) so the game reads Documents/cpk and Documents/pak,
 # which the dylib links to Library/Application Support/PES2027/GameData/<data_id>/.
@@ -252,7 +267,7 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=N
                 elif arc == root + "Info.plist":
                     z.writestr(zi, plistlib.dumps(info, fmt=plistlib.FMT_XML))
                 elif fn in ("ue4commandline.txt", "uecommandline.txt"):
-                    z.writestr(zi, b"-t.MaxFPS=120 -FPS=120 -rhi.SyncInterval=0\n")
+                    z.writestr(zi, DEFAULT_COMMANDLINE)
                 elif fn.endswith(".plist"):
                     try:
                         with open(p, "rb") as pf:
@@ -271,7 +286,7 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=N
                 zi = zipfile.ZipInfo(cl_arc, time.localtime()[:6])
                 zi.external_attr = 0o100644 << 16
                 zi.compress_type = zipfile.ZIP_DEFLATED
-                z.writestr(zi, b"-t.MaxFPS=120 -FPS=120 -rhi.SyncInterval=0\n")
+                z.writestr(zi, DEFAULT_COMMANDLINE)
                 n += 1
         zi = zipfile.ZipInfo(root + "Frameworks/ZiruOffline.dylib", time.localtime()[:6])
         zi.external_attr = 0o100755 << 16

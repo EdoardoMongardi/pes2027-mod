@@ -1016,6 +1016,54 @@ static void hookSetPreferredFrameRateRange(CADisplayLink* self, SEL _cmd, CAFram
   }
 }
 
+// ---------------------------------------------------------------- UE4 Graphics Enhancements (Phase 1)
+typedef void (*FCommandLineAppendFn)(const char16_t*);
+static void setupGraphicsEnhancements() {
+  FCommandLineAppendFn appendFn = (FCommandLineAppendFn)dlsym(RTLD_DEFAULT, "_ZN12FCommandLine6AppendEPKDs");
+  if (!appendFn) {
+    ZLog(@"[GRAPHICS] FCommandLine::Append symbol not resolved — using bundle ue4commandline.txt preset");
+    return;
+  }
+
+  // Check if user has a custom commandline override in Documents/ue4commandline.txt
+  NSString* userCmdPath = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
+  if ([NSFileManager.defaultManager fileExistsAtPath:userCmdPath]) {
+    NSString* customArgs = [NSString stringWithContentsOfFile:userCmdPath encoding:NSUTF8StringEncoding error:nil];
+    if (customArgs.length > 0) {
+      std::u16string u16(customArgs.length + 2, u' ');
+      u16[0] = u' ';
+      for (NSUInteger i = 0; i < customArgs.length; i++) {
+        u16[i + 1] = (char16_t)[customArgs characterAtIndex:i];
+      }
+      u16[customArgs.length + 1] = u'\0';
+      appendFn(u16.data());
+      ZLog(@"[GRAPHICS] Injected custom commandline from Documents/ue4commandline.txt (%lu chars)", (unsigned long)customArgs.length);
+      return;
+    }
+  }
+
+  // Built-in Phase 1 Console-Grade Graphics preset:
+  // - 100% Native Retina Resolution & CAS Sharpening
+  // - High Quality TAA & 8x Anisotropy
+  // - LOD Lock Level 0 (no blurry player face/mesh pop-in at wide camera angles)
+  // - Contact Shadows & 1.8x Shadow Distance
+  const char16_t* kPhase1Graphics =
+      u" -r.ScreenPercentage=100"
+      u" -r.Tonemapper.Sharpen=0.75"
+      u" -r.PostProcessAAQuality=4"
+      u" -r.TemporalAAFilterSize=1.0"
+      u" -r.SkeletalMeshLODBias=0"
+      u" -r.StaticMeshLODDistanceScale=2.0"
+      u" -r.ContactShadows=1"
+      u" -r.Shadow.DistanceScale=1.8"
+      u" -r.ShadowQuality=3"
+      u" -r.MaxAnisotropy=8"
+      u" -r.Streaming.PoolSize=384";
+
+  appendFn(kPhase1Graphics);
+  ZLog(@"[GRAPHICS] Injected Phase 1 Ultra Graphics CVars (ScreenPercentage=100, LODBias=0, ContactShadows=1, MaxAnisotropy=8)");
+}
+
 // ---------------------------------------------------------------- launch gating
 static std::atomic<bool> gGameStarted{false};
 static IMP gOrigDidFinish, gOrigBecomeActive, gOrigResignActive, gOrigEnterBg, gOrigEnterFg;
@@ -1990,6 +2038,7 @@ __attribute__((constructor)) static void ziruInit() {
       ZLog(@"[120FPS] CADisplayLink 120 FPS hooks installed");
     }
     enableDynamicMaxFps();
+    setupGraphicsEnhancements();
     startFpsMeter();
   }
 }
