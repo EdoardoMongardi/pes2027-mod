@@ -220,10 +220,32 @@ static bool relink(const std::string& link, const std::string& target, std::stri
   return true;
 }
 
+// Files shipped under download/ (e.g. commentary dt510_eng_mobile_all.cpk) belong in the game's
+// download path (basic::PathGet type 5 = Documents/Download/); link each file individually so the
+// game can keep writing its own downloads (livedata) into the real directory.
+static bool linkDownloads(const Layout& L, const std::string& id, std::string& err) {
+  Manifest m;
+  if (!loadInstalledManifest(L, id, m, err)) return false;
+  std::string dl = L.documents + "/Download";
+  mkdirs(dl);
+  char buf[4096];
+  for (auto& f : m.files) {
+    if (f.path.rfind("download/", 0) != 0) continue;
+    std::string name = f.path.substr(9);
+    if (name.find('/') != std::string::npos) continue;
+    std::string link = dl + "/" + name, want = dataDir(L, id) + "/" + f.path;
+    ssize_t r = readlink(link.c_str(), buf, sizeof buf - 1);
+    if (r > 0 && std::string(buf, (size_t)r) == want) continue;
+    if (!relink(link, want, err)) return false;
+  }
+  return true;
+}
+
 bool activate(const Layout& L, const std::string& id, std::string& err) {
   std::string dir = dataDir(L, id);
   if (!relink(L.documents + "/pak", dir + "/pak", err)) return false;
   if (!relink(L.documents + "/cpk", dir + "/cpk", err)) return false;
+  if (!linkDownloads(L, id, err)) return false;
   std::string a = "{\"data_id\":" + zj::quote(id) + "}";
   if (!writeFile(L.gameDataRoot + "/active.json", a)) { err = "Không ghi được active.json"; return false; }
   return true;
@@ -261,7 +283,7 @@ bool quickVerify(const Layout& L, const std::string& id, std::string& err) {
       if (!relink(link, want, e2)) { err = e2; return false; }
     }
   }
-  return true;
+  return linkDownloads(L, id, err);
 }
 
 }  // namespace zd

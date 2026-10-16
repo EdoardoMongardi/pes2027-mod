@@ -16,7 +16,8 @@ Outputs
 
 Usage (Windows PowerShell):
   python build_ipa.py --app D:\\Telegram\\Payload\\PESmobile.app --dylib ZiruOffline.dylib `
-      --apk "D:\\Efootball 2027 Offline Full Epic - Bigtime by Ziru\\Efootball_Offline_VH.apk" --out D:\\PES2027\\out
+      --apk "D:\\Efootball 2027 Offline Full Epic - Bigtime by Ziru\\Efootball_Offline_VH.apk" `
+      --commentary D:\\Telegram\\dt510_eng_mobile_all.cpk --out D:\\PES2027\\out
 """
 import argparse, hashlib, json, os, plistlib, shutil, struct, sys, time, zipfile
 
@@ -167,12 +168,22 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
 
 
 # ------------------------------------------------------------------ data pack
-def build_data(app, apk, out, report, include_livedata=True):
+def build_data(app, apk, out, report, include_livedata=True, ziru_cpk=("dt500",), commentary=None):
     files = []  # (arcname, source spec)
+    apk_names = set(zipfile.ZipFile(apk).namelist())
     for sub in ("pak", "cpk"):
         d = os.path.join(app, sub)
         for fn in sorted(os.listdir(d)):
-            files.append((f"{sub}/{fn}", ("fs", os.path.join(d, fn))))
+            stem = fn.split("_mobile_")[0]
+            src = ("fs", os.path.join(d, fn))
+            if sub == "cpk" and stem in ziru_cpk and fn.endswith("_mobile_all.cpk") and f"assets/{fn}" in apk_names:
+                # Ziru's CPK (platform-independent "mobile_all"): dt500 carries 604 extra uniform files
+                src = ("apk", f"assets/{fn}")
+                report.setdefault("cpk_from_ziru", []).append(fn)
+            files.append((f"{sub}/{fn}", src))
+    if commentary:
+        files.append(("download/" + os.path.basename(commentary), ("fs", commentary)))
+        report["commentary"] = os.path.abspath(commentary)
     if include_livedata:
         with zipfile.ZipFile(apk) as a:
             for e in a.infolist():
@@ -185,8 +196,11 @@ def build_data(app, apk, out, report, include_livedata=True):
         if kind == "fs":
             size, sha = os.path.getsize(src), sha256_file(src)
         else:
-            b = apkz.read(src)
-            size, sha = len(b), hashlib.sha256(b).hexdigest()
+            h = hashlib.sha256(); size = 0
+            with apkz.open(src) as fi:
+                for b in iter(lambda: fi.read(1 << 20), b""):
+                    h.update(b); size += len(b)
+            sha = h.hexdigest()
         recs.append({"path": arc, "size": size, "sha256": sha})
     digest = hashlib.sha256(json.dumps(recs, sort_keys=True).encode()).hexdigest()[:12]
     data_id = f"pes2027-{EXPECTED_VERSION[1]}-{digest}"
@@ -201,7 +215,9 @@ def build_data(app, apk, out, report, include_livedata=True):
             if kind == "fs":
                 z.write(src, arc)
             else:
-                z.writestr(zipfile.ZipInfo(arc, time.localtime()[:6]), apkz.read(src))
+                zi = zipfile.ZipInfo(arc, time.localtime()[:6])
+                with apkz.open(src) as fi, z.open(zi, "w", force_zip64=True) as fo:
+                    shutil.copyfileobj(fi, fo, 1 << 20)
     os.replace(tmp, path)
     with open(os.path.join(out, "data-manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)
@@ -220,6 +236,8 @@ def main():
     ap.add_argument("--display-name", default="PES 2027")
     ap.add_argument("--skip-data", action="store_true", help="only build the IPA")
     ap.add_argument("--no-livedata", action="store_true", help="do not ship Ziru's Android livedata in the data pack")
+    ap.add_argument("--ziru-cpk", default="dt500", help="comma list of CPK stems taken from the Ziru APK instead of the IPA (default dt500; '' = none)")
+    ap.add_argument("--commentary", default="", help="commentary CPK to install into the game's Download folder, e.g. D:\\Telegram\\dt510_eng_mobile_all.cpk (Vietnamese)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     report = {"tool": "build_ipa.py", "mod_version": MOD_VERSION, "time": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -228,7 +246,8 @@ def main():
               "patches": [], "outputs": {}}
     build_ipa(a.app, a.dylib, a.apk, a.out, report, a.bundle_id, a.display_name)
     if not a.skip_data:
-        build_data(a.app, a.apk, a.out, report, include_livedata=not a.no_livedata)
+        build_data(a.app, a.apk, a.out, report, include_livedata=not a.no_livedata,
+                   ziru_cpk=tuple(x for x in a.ziru_cpk.split(",") if x), commentary=a.commentary or None)
     with open(os.path.join(a.out, "build-report.json"), "w") as f:
         json.dump(report, f, indent=1)
     log("done. Sign PES2027.ipa with your usual tool (Sideloadly/ESign/…), install, then import the data zip in the app.")
