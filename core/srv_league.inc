@@ -480,18 +480,16 @@ Response handleZiruCareerplan(Request& r) {
                 else {
                   ArrP params = ziruCareerParameters;
                   res = jo;
-                  if (!params || params->length() < 145) {
-                    ObjP baseWrapper = getZiruPlayerWrapper(Value((long long)ziruCareerPlayerId), false);
-                    ArrP bp = (baseWrapper && baseWrapper->optJSONObject("gameplayer")) ?
-                              baseWrapper->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
-                    if (!bp) bp = jo->optJSONArray("parameters");
-                    if (bp) {
-                      ArrP np = Array::parse(bp->toString());
-                      z27ApplyProgressionPoints(np, ziruCareerProgression, bp);
-                      z28PreserveCareerTraining(jo, np);
-                      jo->put("parameters", np);
-                    }
-                  } else {
+                  ObjP baseWrapper = getZiruPlayerWrapper(Value((long long)ziruCareerPlayerId), false);
+                  ArrP bp = (baseWrapper && baseWrapper->optJSONObject("gameplayer")) ?
+                            baseWrapper->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
+                  if (!bp) bp = jo->optJSONArray("parameters");
+                  ArrP np = bp ? Array::parse(bp->toString()) : params;
+                  if (np && bp) {
+                    z27ApplyProgressionPoints(np, ziruCareerProgression, bp);
+                    z28PreserveCareerTraining(jo, np);
+                    jo->put("parameters", np);
+                  } else if (params) {
                     z28PreserveCareerTraining(jo, params);
                     jo->put("parameters", params);
                   }

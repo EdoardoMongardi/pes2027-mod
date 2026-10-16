@@ -15,7 +15,7 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     }
   }
 
-  // 2. Fix appearance parameters [49:65] if all zeroes (chalk-white albino bug)
+  // 2. Fix appearance parameters [49:65] if all zeroes or pitch black/albino (skin 6 / 0 bug)
   ArrP params = cur->optJSONArray("parameters");
   if (params && params->length() >= 65) {
     bool allZero = true;
@@ -25,7 +25,9 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
         break;
       }
     }
-    if (allZero || (params->optInt(49, 0) == 6 && params->optInt(50, 0) == 1 && params->optInt(51, 0) == 1)) {
+    int skin = params->optInt(49, 0);
+    bool pitchBlackOrAlbino = (skin == 6 || skin == 0);
+    if (allZero || pitchBlackOrAlbino) {
       auto it = kAppearancePresets.find(base_id);
       if (it != kAppearancePresets.end()) {
         for (int i = 0; i < 16; i++) {
@@ -33,7 +35,7 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
         }
       } else {
         // Natural default skin tone and appearance so player is never chalk white or pitch black
-        static const int32_t kDefAppearance[16] = {7, 1, 1, 1, 4, 0, 4, 18, 4, 8, 142, 0, 14, 0, 1, 1};
+        static const int32_t kDefAppearance[16] = {3, 1, 1, 1, 4, 0, 4, 18, 4, 8, 142, 0, 14, 0, 1, 1};
         for (int i = 0; i < 16; i++) {
           params->put(49 + i, kDefAppearance[i]);
         }
@@ -57,58 +59,58 @@ void z27ApplyProgressionPoints(const ArrP& params, const ObjP& prog, const ArrP&
   int gk2Count      = ziruCountFromSpent(prog->optInt("GK2", 0));
   int gk3Count      = ziruCountFromSpent(prog->optInt("GK3", 0));
 
-  int deltas[40] = {0};
+  int deltas[45] = {0};
 
-  // STRENGTH -> Speed (24), Kicking Power (26), Stamina (30)
-  deltas[24] += strengthCount;
-  deltas[26] += strengthCount;
-  deltas[30] += strengthCount;
-
-  // SHOOT -> Finishing (20), Place Kicking (22), Curl (23)
+  // SHOOT -> Finishing (20), Place Kicking (27), Curl (28)
   deltas[20] += shootCount;
-  deltas[22] += shootCount;
-  deltas[23] += shootCount;
+  deltas[27] += shootCount;
+  deltas[28] += shootCount;
 
-  // PASS -> Low Pass (18), Lofted Pass (19)
-  deltas[18] += passCount;
-  deltas[19] += passCount;
+  // PASS -> Low Pass (21), Lofted Pass (22)
+  deltas[21] += passCount;
+  deltas[22] += passCount;
 
-  // DRIBBLE -> Ball Control (15), Dribble (16), Tight Possession (17)
-  deltas[15] += dribbleCount;
-  deltas[16] += dribbleCount;
+  // DRIBBLE -> Ball Control (17), Dribble (18), Tight Possession (19)
   deltas[17] += dribbleCount;
+  deltas[18] += dribbleCount;
+  deltas[19] += dribbleCount;
 
-  // QUICKNESS -> Offensive Awareness (14), Acceleration (25), Balance (29)
+  // QUICKNESS -> Offensive Awareness (14), Acceleration (35), Balance (36)
   deltas[14] += quickCount;
-  deltas[25] += quickCount;
-  deltas[29] += quickCount;
+  deltas[35] += quickCount;
+  deltas[36] += quickCount;
 
-  // AERIAL -> Heading (21), Jump (27), Physical Contact (28)
-  deltas[21] += aerialCount;
-  deltas[27] += aerialCount;
-  deltas[28] += aerialCount;
+  // STRENGTH -> Speed (34), Kicking Power (37), Stamina (40)
+  deltas[34] += strengthCount;
+  deltas[37] += strengthCount;
+  deltas[40] += strengthCount;
 
-  // DEFENCE -> Defensive Awareness (31), Tackling (32), Aggression (33), Defensive Engagement (34)
-  deltas[31] += defCount;
-  deltas[32] += defCount;
-  deltas[33] += defCount;
-  deltas[34] += defCount;
+  // AERIAL -> Heading (23), Jump (38), Physical Contact (39)
+  deltas[23] += aerialCount;
+  deltas[38] += aerialCount;
+  deltas[39] += aerialCount;
 
-  // GK1 -> GK Awareness (35), Jump (27)
-  deltas[35] += gk1Count;
-  deltas[27] += gk1Count;
+  // DEFENCE -> Defensive Awareness (15), Tackling (24), Aggression (25), Defensive Engagement (26)
+  deltas[15] += defCount;
+  deltas[24] += defCount;
+  deltas[25] += defCount;
+  deltas[26] += defCount;
 
-  // GK2 -> GK Clearing (37), GK Reach (39)
-  deltas[37] += gk2Count;
+  // GK1 -> GK Awareness (15), Jump (38)
+  deltas[15] += gk1Count;
+  deltas[38] += gk1Count;
+
+  // GK2 -> GK Clearing (24), GK Reach (39)
+  deltas[24] += gk2Count;
   deltas[39] += gk2Count;
 
-  // GK3 -> GK Catching (36), GK Reflexes (38)
-  deltas[36] += gk3Count;
-  deltas[38] += gk3Count;
+  // GK3 -> GK Catching (25), GK Reflexes (26)
+  deltas[25] += gk3Count;
+  deltas[26] += gk3Count;
 
-  for (int idx = 14; idx <= 39; idx++) {
+  for (int idx = 14; idx <= 40; idx++) {
     int baseVal = src->optInt(idx, 0);
-    int newVal = std::min(99, baseVal + deltas[idx]);
+    int newVal = std::min(105, baseVal + deltas[idx]);
     params->put(idx, newVal);
   }
 }
