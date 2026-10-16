@@ -291,10 +291,12 @@ void ziruPatchAgentBoxInfo(const ObjP& jo) {
     if (j > 0) {
       ziruAttachResetCounts(jo, j);
       std::string s = sp("almanac_state").getString("ziru_remaining_" + str(j), "");
-      if (s.empty()) return;
-      int len = Array::parse(s)->length();
+      int len = 23;
+      if (!s.empty()) {
+        try { len = Array::parse(s)->length(); } catch (...) {}
+      }
       ArrP a = newArr();
-      a->put(0); a->put(0); a->put(len); a->put(0); a->put(0);
+      a->put(0); a->put(0); a->put(0); a->put(0); a->put(len);
       jo->put("remaining_player_count", a);
     }
   } catch (const std::exception&) {

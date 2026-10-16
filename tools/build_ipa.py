@@ -323,6 +323,17 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
             z.writestr(zi, body.encode())
             report.setdefault("builtin_responses", []).append(fn)
             n += 1
+        # Embed livedata (all 55 Epic/BigTime paks/ucas/utoc and dt870) directly into the IPA
+        with zipfile.ZipFile(apk) as a:
+            for e in a.infolist():
+                if e.filename.startswith("assets/livedata/") and not e.is_dir():
+                    arc = root + "ziru/livedata/" + e.filename[len("assets/livedata/"):]
+                    ensure_dir(os.path.dirname(arc))
+                    zi = zipfile.ZipInfo(arc, time.localtime()[:6])
+                    zi.external_attr = 0o100644 << 16
+                    zi.compress_type = zipfile.ZIP_DEFLATED
+                    z.writestr(zi, a.read(e))
+                    n += 1
         fonts = make_ios_fonts(apk, report)
         if fonts:
             ensure_dir(root + "ziru/fonts/")

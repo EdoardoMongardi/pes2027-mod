@@ -229,7 +229,12 @@ Response serveInner(Request& r) {
     zs::logw("OFFLINE_SERVER", " [SERVER_NOT_FOUND] No match for: " + uri);
     logRequest(uri, "GENERIC_NO_RESPONSE");
     if (uri.find("/prd/banner/") != std::string::npos || uri.find(".png") != std::string::npos || uri.find(".jpg") != std::string::npos || uri.find(".webp") != std::string::npos) {
-      return newFixed(404, "text/plain", {});
+      try {
+        std::string png = readAsset("responses/ziru_blank.png");
+        return newFixed(200, "image/png", {png.begin(), png.end()});
+      } catch (...) {
+        return newFixed(404, "text/plain", {});
+      }
     }
     return handleZiruProtocolAckV81(std::nullopt);
   } catch (const std::exception& e) {

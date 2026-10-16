@@ -371,6 +371,31 @@ static int hook_remove(const char *path) {
 }
 
 // ---------------------------------------------------------------- pak / cpk / Download file redirection
+static void resolveAltName(char* buffer, size_t bufSize) {
+  if (access(buffer, F_OK) == 0) return;
+  char alt[1024];
+  strncpy(alt, buffer, sizeof(alt) - 1);
+  alt[sizeof(alt) - 1] = '\0';
+  char* iosPtr = strstr(alt, "_mobile_ios");
+  if (iosPtr) {
+    memcpy(iosPtr, "_mobile_and", 11);
+    if (access(alt, F_OK) == 0) {
+      strncpy(buffer, alt, bufSize - 1);
+      buffer[bufSize - 1] = '\0';
+      return;
+    }
+  }
+  char* andPtr = strstr(alt, "_mobile_and");
+  if (andPtr) {
+    memcpy(andPtr, "_mobile_ios", 11);
+    if (access(alt, F_OK) == 0) {
+      strncpy(buffer, alt, bufSize - 1);
+      buffer[bufSize - 1] = '\0';
+      return;
+    }
+  }
+}
+
 static const char* redirectPath(const char* path, char* buffer, size_t bufSize) {
   if (!path || !path[0] || !gDocsUTF8[0]) return path;
 
@@ -380,7 +405,10 @@ static const char* redirectPath(const char* path, char* buffer, size_t bufSize) 
   if (p) {
     const char* rel = (p == path - 1) ? (path + 4) : (p + 5);
     int n = snprintf(buffer, bufSize, "%s/pak/%s", gDocsUTF8, rel);
-    if (n > 0 && (size_t)n < bufSize) return buffer;
+    if (n > 0 && (size_t)n < bufSize) {
+      resolveAltName(buffer, bufSize);
+      return buffer;
+    }
   }
   size_t len = strlen(path);
   if ((len >= 4 && strcmp(path + len - 4, "/pak") == 0) || strcmp(path, "pak") == 0) {
@@ -394,7 +422,10 @@ static const char* redirectPath(const char* path, char* buffer, size_t bufSize) 
   if (p) {
     const char* rel = (p == path - 1) ? (path + 4) : (p + 5);
     int n = snprintf(buffer, bufSize, "%s/cpk/%s", gDocsUTF8, rel);
-    if (n > 0 && (size_t)n < bufSize) return buffer;
+    if (n > 0 && (size_t)n < bufSize) {
+      resolveAltName(buffer, bufSize);
+      return buffer;
+    }
   }
   if ((len >= 4 && strcmp(path + len - 4, "/cpk") == 0) || strcmp(path, "cpk") == 0) {
     int n = snprintf(buffer, bufSize, "%s/cpk", gDocsUTF8);
@@ -408,7 +439,10 @@ static const char* redirectPath(const char* path, char* buffer, size_t bufSize) 
   if (p) {
     const char* rel = (p == path - 1) ? (path + 9) : (p + 10);
     int n = snprintf(buffer, bufSize, "%s/Download/%s", gDocsUTF8, rel);
-    if (n > 0 && (size_t)n < bufSize) return buffer;
+    if (n > 0 && (size_t)n < bufSize) {
+      resolveAltName(buffer, bufSize);
+      return buffer;
+    }
   }
   if ((len >= 9 && strcasecmp(path + len - 9, "/download") == 0) || strcasecmp(path, "download") == 0) {
     int n = snprintf(buffer, bufSize, "%s/Download", gDocsUTF8);
@@ -422,19 +456,7 @@ static const char* redirectPath(const char* path, char* buffer, size_t bufSize) 
     const char* rel = (p == path - 1) ? (path + 9) : (p + 10);
     int n = snprintf(buffer, bufSize, "%s/livedata/%s", gDocsUTF8, rel);
     if (n > 0 && (size_t)n < bufSize) {
-      if (access(buffer, F_OK) != 0) {
-        char alt[1024];
-        strncpy(alt, buffer, sizeof(alt) - 1);
-        alt[sizeof(alt) - 1] = '\0';
-        char* iosPtr = strstr(alt, "_mobile_ios");
-        if (iosPtr) {
-          memcpy(iosPtr, "_mobile_and", 11);
-          if (access(alt, F_OK) == 0) {
-            strncpy(buffer, alt, bufSize - 1);
-            buffer[bufSize - 1] = '\0';
-          }
-        }
-      }
+      resolveAltName(buffer, bufSize);
       return buffer;
     }
   }
@@ -822,8 +844,25 @@ static BOOL checkDirectFolderData(NSString** why) {
 
   NSString* pakDir = [gDocs stringByAppendingPathComponent:@"pak"];
   NSString* cpkDir = [gDocs stringByAppendingPathComponent:@"cpk"];
+  NSString* dlDir = [gDocs stringByAppendingPathComponent:@"Download"];
+  [fm createDirectoryAtPath:dlDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+  // If livedata is bundled in IPA (PESmobile.app/ziru/livedata), extract/link into Documents/livedata
+  NSString* bundleLivedata = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru/livedata"];
+  if ([fm fileExistsAtPath:bundleLivedata]) {
+    NSString* liveDocs = [gDocs stringByAppendingPathComponent:@"livedata"];
+    [fm createDirectoryAtPath:liveDocs withIntermediateDirectories:YES attributes:nil error:nil];
+    for (NSString* f in [fm contentsOfDirectoryAtPath:bundleLivedata error:nil]) {
+      NSString* src = [bundleLivedata stringByAppendingPathComponent:f];
+      NSString* dst = [liveDocs stringByAppendingPathComponent:f];
+      ensureSymlink(dst, src);
+    }
+    if (!foundLivedata) foundLivedata = liveDocs;
+  }
 
   // Create _mobile_ios symlinks for livedata files, and mount all epic paks/ucas/utoc into pak/ and cpk into cpk/
+  // CRITICAL: Also link into Documents/Download/ because onlinemode::UtilityLiveData::GetLiveDataSaveDirPath()
+  // returns Documents/Download/ where LiveDataVersionLoader, LiveDataHashChecker, and LiveDataBinder look for dt870 and pc9242..pc9259!
   NSString* liveDir = [gDocs stringByAppendingPathComponent:@"livedata"];
   if ([fm fileExistsAtPath:liveDir]) {
     for (NSString* f in [fm contentsOfDirectoryAtPath:liveDir error:nil]) {
@@ -836,23 +875,23 @@ static BOOL checkDirectFolderData(NSString** why) {
       }
       if ([ext isEqualToString:@"pak"] || [ext isEqualToString:@"ucas"] || [ext isEqualToString:@"utoc"]) {
         ensureSymlink([pakDir stringByAppendingPathComponent:f], target);
+        ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
         if ([f containsString:@"_mobile_and"]) {
           NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
           ensureSymlink([pakDir stringByAppendingPathComponent:iosName], target);
+          ensureSymlink([dlDir stringByAppendingPathComponent:iosName], target);
         }
       } else if ([ext isEqualToString:@"cpk"]) {
         ensureSymlink([cpkDir stringByAppendingPathComponent:f], target);
+        ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
         if ([f containsString:@"_mobile_and"]) {
           NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
           ensureSymlink([cpkDir stringByAppendingPathComponent:iosName], target);
+          ensureSymlink([dlDir stringByAppendingPathComponent:iosName], target);
         }
       }
     }
   }
-
-  // Ensure Download folder exists
-  NSString* dlDir = [gDocs stringByAppendingPathComponent:@"Download"];
-  [fm createDirectoryAtPath:dlDir withIntermediateDirectories:YES attributes:nil error:nil];
 
   // For Download/download: link files individually into Documents/Download
   if (foundDl && ![foundDl isEqualToString:dlDir]) {
