@@ -62,6 +62,9 @@ int main() {
     asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
     {
       OfflineServer s(cfg);
+      check(s.z27State()->getInt("division") == 1, "unlocked D1 by default");
+      s.ziruDb->saveMeta("z27_division_state", R"({"division":10,"best":10,"point":0,"matches":0,"win":0,"draw":0,"lose":0,"sequence":0,"completed":{}})");
+      s.ziruDb->saveMeta("z27_div1_set", "1");
       auto first = call(s, "CMD_GET_VSCOM_OPPONENT"); auto id = first->getLong("game_id");
       check(coachId(call(s, "CMD_START_GAME", newObj()->put("game_id", (long long)id))) == 100, "selected coach on first start");
       call(s, "CMD_SET_MYCLUB_SQUAD_INFO", newObj()->put("squad_id", 9)->put("squad_data", newObj()->put("coach", newArr()->put(coachRef(200, 2222)))));

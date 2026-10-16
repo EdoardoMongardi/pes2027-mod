@@ -250,13 +250,16 @@ Response serveInner(Request& r) {
   if (contains(uri, "CMD_GET_EVENT_LIST_AND_LOG")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;
-    ObjP jo = newObj();
+    ObjP jo = loadZiruJsonAssetObject("responses/ZIRU_EVENT_LIST.json");
+    if (!jo) {
+      jo = newObj();
+      jo->put("event_list", newArr());
+      jo->put("event_log_list", newArr());
+      jo->put("event_num", 0);
+    }
     jo->put("result", "NOERR");
     jo->put("rqid", rq);
     jo->put("msgid", "CMD_GET_EVENT_LIST_AND_LOG");
-    jo->put("event_list", newArr());
-    jo->put("event_log_list", newArr());
-    jo->put("event_num", 0);
     return serveObjectAsEncryptedMsgPack(jo);
   }
   if (contains(uri, "CMD_CREATEJOIN_ROOM") || contains(uri, "CMD_JOIN_ROOM") ||

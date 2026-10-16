@@ -305,8 +305,22 @@ void z27Restore(const ObjP& jo) {
 
 ObjP z27State() {
   ObjP m = z27Meta("z27_division_state");
-  if (m) return m;
-  int div = std::max(1, std::min(10, z27Int("ziru_league_division", 10)));
+  if (m) {
+    if (!z27Meta("z27_div1_set")) {
+      m->put("division", 1);
+      m->put("best", 1);
+      m->put("point", 0);
+      m->put("matches", 0);
+      m->put("win", 0);
+      m->put("draw", 0);
+      m->put("lose", 0);
+      z27PutMeta("z27_division_state", m->toString());
+      z27PutMeta("z27_div1_set", "1");
+    }
+    return m;
+  }
+  z27PutMeta("z27_div1_set", "1");
+  int div = std::max(1, std::min(10, z27Int("ziru_league_division", 1)));
   return newObj()
       ->put("division", div)
       ->put("best", std::min(div, z27Int("ziru_league_best_division", div)))
@@ -396,6 +410,19 @@ ObjP z27Opponent(const ObjP& active) {
   for (int i = 0; i < 40; i++) order->put(i < 23 ? i : 255);
   plan->getJSONObject("match_plan_settings")->put("order", order)->put("captain", 1)->put("set_piece_taker", Array::parse("[7,7,10,7,7,7]"));
   sd->put("player_list", refs);
+  int div = active->optInt("division", 10);
+  if (div <= 3) {
+    for (int i = 0; i < players->length(); i++) {
+      ObjP p = players->getJSONObject(i);
+      ObjP li = p->optJSONObject("level_info");
+      if (li) {
+        int lim = li->optInt("level_limit", li->optInt("level", 1));
+        li->put("level", lim);
+        li->put("exp_current_level", 0);
+        li->put("exp_to_next_level", 0);
+      }
+    }
+  }
   tpl->put("player_list", players)
       ->put("team_data", z27Copy(active->getJSONObject("away")))
       ->put("game_id", (long long)active->getLong("game_id"))
