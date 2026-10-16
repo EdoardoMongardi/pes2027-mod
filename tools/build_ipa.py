@@ -381,18 +381,22 @@ def make_ios_fonts(apk, report):
     """The four UI fonts (OpenType, full Vietnamese) from Ziru's ZFont_Orginal.pak, as {name: bytes}.
     The dylib serves them in place of the iOS fonts; no pak is mounted on the device."""
     import struct, zlib
-    with zipfile.ZipFile(apk) as a:
+    apks_to_try = [apk, r"D:\Efootball 2027 Offline Full Epic - Bigtime by Ziru\Efootball_Offline_VH.apk"]
+    d = None
+    for cand in apks_to_try:
+        if not os.path.exists(cand): continue
         try:
-            obb = a.open(ZIRU_OBB_IN_APK)
-        except KeyError:
-            log("font: Ziru OBB not in APK – Vietnamese font fix skipped")
-            return {}
-        with zipfile.ZipFile(obb) as o:
-            try:
-                d = o.read(ZIRU_FONT_PAK)
-            except KeyError:
-                log("font: ZFont_Orginal.pak not found – Vietnamese font fix skipped")
-                return {}
+            with zipfile.ZipFile(cand) as a:
+                if ZIRU_OBB_IN_APK in a.namelist():
+                    with zipfile.ZipFile(a.open(ZIRU_OBB_IN_APK)) as o:
+                        if ZIRU_FONT_PAK in o.namelist():
+                            d = o.read(ZIRU_FONT_PAK)
+                            break
+        except Exception:
+            pass
+    if not d:
+        log("font: ZFont_Orginal.pak not found – Vietnamese font fix skipped")
+        return {}
     magic = d.rfind(struct.pack("<I", 0x5A6F12E1))
     ver, = struct.unpack_from("<I", d, magic + 4)
     ioff, isz = struct.unpack_from("<QQ", d, magic + 8)
