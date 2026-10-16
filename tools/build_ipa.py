@@ -144,10 +144,25 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
     n = 0
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as z:
         root = "Payload/PESmobile.app/"
-        for d in ["Payload/", root, root + "Frameworks/", root + "ziru/", root + "ziru/responses/"]:
-            zi = zipfile.ZipInfo(d, time.localtime()[:6])
-            zi.external_attr = 0o040755 << 16
-            z.writestr(zi, b"")
+        added_dirs = set()
+
+        def ensure_dir(d):
+            if not d.endswith("/"):
+                d += "/"
+            cur = ""
+            for p in d.rstrip("/").split("/"):
+                cur += p + "/"
+                if cur not in added_dirs:
+                    zi = zipfile.ZipInfo(cur, time.localtime()[:6])
+                    zi.external_attr = 0o040755 << 16
+                    z.writestr(zi, b"")
+                    added_dirs.add(cur)
+
+        ensure_dir("Payload/")
+        ensure_dir(root)
+        ensure_dir(root + "Frameworks/")
+        ensure_dir(root + "ziru/")
+        ensure_dir(root + "ziru/responses/")
 
         for dirpath, dirnames, filenames in os.walk(app):
             rel = os.path.relpath(dirpath, app).replace("\\", "/")
@@ -156,6 +171,8 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
                 dirnames[:] = []
                 continue
             dirnames[:] = [d for d in dirnames if d not in skip_names]
+            if rel != ".":
+                ensure_dir(root + rel)
             for fn in filenames:
                 if fn in {"embedded.mobileprovision", ".DS_Store"}:
                     continue
@@ -170,6 +187,14 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
                     z.writestr(zi, bytes(data))
                 elif arc == root + "Info.plist":
                     z.writestr(zi, plistlib.dumps(info, fmt=plistlib.FMT_XML))
+                elif fn.endswith(".plist"):
+                    try:
+                        with open(p, "rb") as pf:
+                            sub_pl = plistlib.load(pf)
+                        z.writestr(zi, plistlib.dumps(sub_pl, fmt=plistlib.FMT_XML))
+                    except Exception:
+                        with open(p, "rb") as pf:
+                            z.writestr(zi, pf.read())
                 else:
                     with open(p, "rb") as f:
                         z.writestr(zi, f.read())
@@ -183,6 +208,7 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
             for e in a.infolist():
                 if e.filename.startswith("assets/responses/") and not e.is_dir():
                     arc = root + "ziru/responses/" + e.filename[len("assets/responses/"):]
+                    ensure_dir(os.path.dirname(arc))
                     zi = zipfile.ZipInfo(arc, time.localtime()[:6])
                     zi.external_attr = 0o100644 << 16
                     zi.compress_type = zipfile.ZIP_DEFLATED
