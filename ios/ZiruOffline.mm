@@ -27,9 +27,16 @@
 #include <mutex>
 #include <string>
 
+#import <dirent.h>
+
 static int (*orig_unlink)(const char *path);
 static int (*orig_unlinkat)(int fd, const char *path, int flag);
 static int (*orig_remove)(const char *path);
+static int (*orig_open)(const char *path, int oflag, ...);
+static int (*orig_stat)(const char *path, struct stat *buf);
+static int (*orig_access)(const char *path, int amode);
+static FILE* (*orig_fopen)(const char *filename, const char *mode);
+static DIR* (*orig_opendir)(const char *name);
 
 #include "../core/datapack.hpp"
 #include "../core/server.hpp"
@@ -44,6 +51,7 @@ static inline UIColor* PESMuted() { return [UIColor colorWithRed:0.65 green:0.73
 
 // ---------------------------------------------------------------- paths & logs
 static NSString* gDocs;
+static char gDocsUTF8[1024] = {0};
 static NSString* gSupport;   // Library/Application Support/PES2027
 static NSString* gLogPath;
 static NSString* gFileIoLogPath;
@@ -80,6 +88,9 @@ static zd::Layout layout() {
 
 static void initPaths() {
   gDocs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+  if (gDocs) {
+    strncpy(gDocsUTF8, gDocs.fileSystemRepresentation, sizeof(gDocsUTF8) - 1);
+  }
   NSString* lib = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
   gSupport = [lib stringByAppendingPathComponent:@"PES2027"];
   NSFileManager* fm = NSFileManager.defaultManager;
@@ -218,10 +229,11 @@ static void z_perform_rebinding_with_section(struct z_rebindings_entry *rebindin
   void **indirect_symbol_bindings = (void **)((uintptr_t)slide + sect->addr);
 
   // vm_protect to allow writing to read-only sections like __DATA_CONST
-  vm_address_t page_addr = (vm_address_t)indirect_symbol_bindings;
-  vm_size_t page_size = (vm_size_t)sect->size;
-  kern_return_t kr = vm_protect(mach_task_self(), page_addr, page_size, 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
-  if (kr != KERN_SUCCESS) return;
+  size_t psize = (size_t)getpagesize();
+  vm_address_t page_start = ((vm_address_t)indirect_symbol_bindings) & ~(psize - 1);
+  vm_address_t page_end = (((vm_address_t)indirect_symbol_bindings) + sect->size + psize - 1) & ~(psize - 1);
+  vm_size_t page_size = (vm_size_t)(page_end - page_start);
+  vm_protect(mach_task_self(), page_start, page_size, 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
 
   for (uint32_t i = 0; i < sect->size / sizeof(void *); i++) {
     uint32_t symtab_index = indirect_symbol_indices[i];
@@ -348,6 +360,96 @@ static int hook_remove(const char *path) {
   }
   if (!orig_remove) return -1;
   return orig_remove(path);
+}
+
+// ---------------------------------------------------------------- pak / cpk / Download file redirection
+static const char* redirectPath(const char* path, char* buffer, size_t bufSize) {
+  if (!path || !path[0] || !gDocsUTF8[0]) return path;
+
+  // 1. Check for pak: /pak/ or pak/ or path ending with /pak or path == "pak"
+  const char* p = strstr(path, "/pak/");
+  if (!p && strncmp(path, "pak/", 4) == 0) p = path - 1;
+  if (p) {
+    const char* rel = (p == path - 1) ? (path + 4) : (p + 5);
+    int n = snprintf(buffer, bufSize, "%s/pak/%s", gDocsUTF8, rel);
+    if (n > 0 && (size_t)n < bufSize) return buffer;
+  }
+  size_t len = strlen(path);
+  if ((len >= 4 && strcmp(path + len - 4, "/pak") == 0) || strcmp(path, "pak") == 0) {
+    int n = snprintf(buffer, bufSize, "%s/pak", gDocsUTF8);
+    if (n > 0 && (size_t)n < bufSize) return buffer;
+  }
+
+  // 2. Check for cpk: /cpk/ or cpk/ or path ending with /cpk or path == "cpk"
+  p = strstr(path, "/cpk/");
+  if (!p && strncmp(path, "cpk/", 4) == 0) p = path - 1;
+  if (p) {
+    const char* rel = (p == path - 1) ? (path + 4) : (p + 5);
+    int n = snprintf(buffer, bufSize, "%s/cpk/%s", gDocsUTF8, rel);
+    if (n > 0 && (size_t)n < bufSize) return buffer;
+  }
+  if ((len >= 4 && strcmp(path + len - 4, "/cpk") == 0) || strcmp(path, "cpk") == 0) {
+    int n = snprintf(buffer, bufSize, "%s/cpk", gDocsUTF8);
+    if (n > 0 && (size_t)n < bufSize) return buffer;
+  }
+
+  // 3. Check for Download: /Download/ or /download/
+  p = strstr(path, "/Download/");
+  if (!p) p = strstr(path, "/download/");
+  if (!p && (strncmp(path, "Download/", 9) == 0 || strncmp(path, "download/", 9) == 0)) p = path - 1;
+  if (p) {
+    const char* rel = (p == path - 1) ? (path + 9) : (p + 10);
+    int n = snprintf(buffer, bufSize, "%s/Download/%s", gDocsUTF8, rel);
+    if (n > 0 && (size_t)n < bufSize) return buffer;
+  }
+  if ((len >= 9 && strcasecmp(path + len - 9, "/download") == 0) || strcasecmp(path, "download") == 0) {
+    int n = snprintf(buffer, bufSize, "%s/Download", gDocsUTF8);
+    if (n > 0 && (size_t)n < bufSize) return buffer;
+  }
+
+  return path;
+}
+
+static int hook_open(const char *path, int oflag, ...) {
+  if (!orig_open) orig_open = (int (*)(const char*, int, ...))dlsym(RTLD_DEFAULT, "open");
+  char buf[1024];
+  const char* actual = redirectPath(path, buf, sizeof(buf));
+  if (oflag & O_CREAT) {
+    va_list args;
+    va_start(args, oflag);
+    mode_t mode = (mode_t)va_arg(args, int);
+    va_end(args);
+    return orig_open ? orig_open(actual, oflag, mode) : -1;
+  }
+  return orig_open ? orig_open(actual, oflag) : -1;
+}
+
+static int hook_stat(const char *path, struct stat *buf) {
+  if (!orig_stat) orig_stat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "stat");
+  char rpath[1024];
+  const char* actual = redirectPath(path, rpath, sizeof(rpath));
+  return orig_stat ? orig_stat(actual, buf) : -1;
+}
+
+static int hook_access(const char *path, int amode) {
+  if (!orig_access) orig_access = (int (*)(const char*, int))dlsym(RTLD_DEFAULT, "access");
+  char rpath[1024];
+  const char* actual = redirectPath(path, rpath, sizeof(rpath));
+  return orig_access ? orig_access(actual, amode) : -1;
+}
+
+static FILE* hook_fopen(const char *filename, const char *mode) {
+  if (!orig_fopen) orig_fopen = (FILE* (*)(const char*, const char*))dlsym(RTLD_DEFAULT, "fopen");
+  char rpath[1024];
+  const char* actual = redirectPath(filename, rpath, sizeof(rpath));
+  return orig_fopen ? orig_fopen(actual, mode) : NULL;
+}
+
+static DIR* hook_opendir(const char *name) {
+  if (!orig_opendir) orig_opendir = (DIR* (*)(const char*))dlsym(RTLD_DEFAULT, "opendir");
+  char rpath[1024];
+  const char* actual = redirectPath(name, rpath, sizeof(rpath));
+  return orig_opendir ? orig_opendir(actual) : NULL;
 }
 
 // ---------------------------------------------------------------- NSFileManager swizzling
@@ -1376,12 +1478,22 @@ __attribute__((constructor)) static void ziruInit() {
     orig_unlink = (int (*)(const char*))dlsym(RTLD_DEFAULT, "unlink");
     orig_unlinkat = (int (*)(int, const char*, int))dlsym(RTLD_DEFAULT, "unlinkat");
     orig_remove = (int (*)(const char*))dlsym(RTLD_DEFAULT, "remove");
+    orig_open = (int (*)(const char*, int, ...))dlsym(RTLD_DEFAULT, "open");
+    orig_stat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "stat");
+    orig_access = (int (*)(const char*, int))dlsym(RTLD_DEFAULT, "access");
+    orig_fopen = (FILE* (*)(const char*, const char*))dlsym(RTLD_DEFAULT, "fopen");
+    orig_opendir = (DIR* (*)(const char*))dlsym(RTLD_DEFAULT, "opendir");
 
-    // Register ONLY commentary protection hooks via fishhook
+    // Register commentary protection & pak/cpk file redirection hooks via fishhook
     struct z_rebinding rebindings[] = {
       {"unlink", (void*)hook_unlink, (void**)&orig_unlink},
       {"unlinkat", (void*)hook_unlinkat, (void**)&orig_unlinkat},
       {"remove", (void*)hook_remove, (void**)&orig_remove},
+      {"open", (void*)hook_open, (void**)&orig_open},
+      {"stat", (void*)hook_stat, (void**)&orig_stat},
+      {"access", (void*)hook_access, (void**)&orig_access},
+      {"fopen", (void*)hook_fopen, (void**)&orig_fopen},
+      {"opendir", (void*)hook_opendir, (void**)&orig_opendir},
     };
     z_rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
 
