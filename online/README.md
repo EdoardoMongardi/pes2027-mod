@@ -14,7 +14,7 @@ Chỉ các lệnh online đi lên server này:
 - **gRPC:** tắt (`connect_grpc_task.disable = true` trong server env của Ziru). Phòng được cập nhật bằng cách hỏi định kỳ `CMD_GET_ROOM_INFO` mỗi 5 giây.
 
 ## Dựng trên AWS (khoảng 15 phút)
-1. Tạo EC2 Ubuntu 24.04, vùng **ap-southeast-1 (Singapore)**, loại t3.small, gắn Elastic IP.
+1. Ưu tiên tận dụng máy đang có, Ubuntu 24.04 hoặc Amazon Linux 2023, vùng **ap-southeast-1 (Singapore)** và IP tĩnh. IPA 1.1.1 hiện dùng Lightsail Tu Tiên `iosvn-game-1`; không cần tạo VM mới. Xem [bàn giao 1.1.1](../docs/1.1.1-gameplay.vi.md).
 2. Security group mở:
 
    | Giao thức | Cổng | Dùng cho |
@@ -25,6 +25,7 @@ Chỉ các lệnh online đi lên server này:
    | UDP | 49160-49259 | relay TURN |
 
 3. Chép thư mục `online/` lên máy, chạy: `sudo bash setup_ec2.sh <Elastic IP>`.
+   Với Lightsail, mở thêm cổng ở firewall của instance; nếu có firewalld trên máy cũng phải thêm đúng các cổng PES. Giữ nguyên quy tắc/dịch vụ hiện có. Script không mở firewall AWS tự động. Amazon Linux build coturn riêng trong `/opt/pes2027-coturn`, giữ nguyên các gói curl hiện có.
 4. Lấy `/etc/pes2027-online/client.json` về PC qua SSH, giữ ngoài Git. Build IPA với `--online-config PATH_TO_PRIVATE_CLIENT_JSON --skip-data` và `--extra-pak` như bản đang dùng. Token không được ghi vào build-report hoặc log console.
 5. Kiểm tra: mở `https://<IP>:8443/health` (trình duyệt cảnh báo chứng chỉ tự ký là bình thường).
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Isolated PES services on Ubuntu 24.04; does not reconfigure or restart GTA.
+# Isolated PES services on Ubuntu 24.04 / Amazon Linux 2023.
 set -euo pipefail
 HOST="${1:?usage: sudo bash setup_ec2.sh <public-ip-or-domain>}"
 [[ "$EUID" == 0 ]] || { echo 'Run with sudo.' >&2; exit 1; }
@@ -15,11 +15,30 @@ if systemctl is-active --quiet coturn; then
   exit 1
 fi
 export NEEDRESTART_MODE=l
-apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv coturn openssl
-# The new package may auto-start its default instance; PES uses its own unit/config.
-systemctl stop coturn
-systemctl disable coturn
+TURN_BIN=/usr/bin/turnserver
+if command -v apt-get >/dev/null; then
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv coturn openssl
+  # The new package may auto-start its default instance; PES uses its own unit/config.
+  systemctl stop coturn
+  systemctl disable coturn
+elif [[ -f /etc/amazon-linux-release ]]; then
+  # AL2023 has no coturn package. Build a pinned upstream release into a PES-only prefix.
+  dnf install -y gcc make libevent-devel openssl-devel sqlite-devel python3-pip tar gzip
+  command -v curl >/dev/null || dnf install -y curl-minimal
+  TURN_BIN=/opt/pes2027-coturn/bin/turnserver
+  if [[ ! -x "$TURN_BIN" ]]; then
+    BUILD="$(mktemp -d /tmp/pes2027-coturn.XXXXXX)"
+    curl --fail --location --retry 3 --output "$BUILD/source.tar.gz" \
+      https://codeload.github.com/coturn/coturn/tar.gz/refs/tags/4.18.0
+    echo "28d55294ac596fbd129b293a85e7bb1c5dc4bd15b7fb55c500f355149e5f4e28  $BUILD/source.tar.gz" | sha256sum -c -
+    tar -xzf "$BUILD/source.tar.gz" -C "$BUILD"
+    (cd "$BUILD/coturn-4.18.0" && ./configure --prefix=/opt/pes2027-coturn && make -j1 && make install)
+  fi
+else
+  echo 'Supported: Ubuntu 24.04 or Amazon Linux 2023.' >&2
+  exit 1
+fi
 id pes2027 >/dev/null 2>&1 || useradd --system --home-dir "$DIR" --shell /usr/sbin/nologin pes2027
 install -d -m 755 "$DIR"
 install -d -m 750 -o pes2027 -g pes2027 "$DIR/logs"
@@ -88,7 +107,7 @@ After=network-online.target
 User=pes2027
 Group=pes2027
 RuntimeDirectory=pes2027-turn
-ExecStart=/usr/bin/turnserver -c $CONF/turnserver.conf --pidfile=/run/pes2027-turn/turnserver.pid
+ExecStart=$TURN_BIN -c $CONF/turnserver.conf --pidfile=/run/pes2027-turn/turnserver.pid
 Restart=on-failure
 MemoryMax=160M
 TasksMax=64
