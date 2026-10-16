@@ -4,6 +4,8 @@ on:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   linux-tests:
     runs-on: ubuntu-24.04
@@ -59,10 +61,16 @@ jobs:
             build/ZiruOffline.dylib
             build/ZiruOffline.dylib.sha256
             tools/build_ipa.py
-      - name: release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: release
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('build-{0}', github.run_number) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('Build {0} ({1})', github.run_number, github.sha) }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          body: |
+            ZiruOffline.dylib (arm64, iOS 15+) cho eFootball iOS 11.1.1 (build 11.1.101) + tools/build_ipa.py.
+            Chưa thử trên thiết bị. Xem README để ghép IPA.
           files: |
             build/ZiruOffline.dylib
             build/ZiruOffline.dylib.sha256
