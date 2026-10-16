@@ -214,12 +214,14 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
                     zi.compress_type = zipfile.ZIP_DEFLATED
                     z.writestr(zi, a.read(e))
                     n += 1
-        font = make_ios_font_pak(apk, report)
-        if font:
-            zi = zipfile.ZipInfo(root + "ziru/ZiruFont_IOS_P.pak", time.localtime()[:6])
+        fonts = make_ios_fonts(apk, report)
+        if fonts:
+            ensure_dir(root + "ziru/fonts/")
+        for fname, fdata in sorted(fonts.items()):
+            zi = zipfile.ZipInfo(root + "ziru/fonts/" + fname, time.localtime()[:6])
             zi.external_attr = 0o100644 << 16
             zi.compress_type = zipfile.ZIP_DEFLATED
-            z.writestr(zi, font)
+            z.writestr(zi, fdata)
             n += 1
     os.replace(tmp, ipa)
     report["outputs"]["ipa"] = {"path": ipa, "size": os.path.getsize(ipa), "sha256": sha256_file(ipa), "files": n}
@@ -229,25 +231,24 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
 # ------------------------------------------------------------------ Vietnamese UI font (from Ziru's Android mod)
 ZIRU_OBB_IN_APK = "assets/pc0000_mobile_and.pak"            # a ZIP (Android "OBB" layout) despite the name
 ZIRU_FONT_PAK = "PesMobile/Content/Paks/ZFont_Orginal.pak"   # UE pak v3: eFootballSans-*/eFootballStencil .ufont
-IOS_FONT_MOUNT = "../../../PesMobile/Content/Platforms/_IOS/Assets/ui/Font/"
 
 
-def make_ios_font_pak(apk, report):
-    """Ziru's font pak with its mount point moved from Platforms/_Android to Platforms/_IOS.
-    File data and entries are reused as-is; only the index is rewritten (new mount point, size, SHA-1)."""
-    import io, struct
+def make_ios_fonts(apk, report):
+    """The four UI fonts (OpenType, full Vietnamese) from Ziru's ZFont_Orginal.pak, as {name: bytes}.
+    The dylib serves them in place of the iOS fonts; no pak is mounted on the device."""
+    import struct, zlib
     with zipfile.ZipFile(apk) as a:
         try:
             obb = a.open(ZIRU_OBB_IN_APK)
         except KeyError:
             log("font: Ziru OBB not in APK – Vietnamese font fix skipped")
-            return None
+            return {}
         with zipfile.ZipFile(obb) as o:
             try:
                 d = o.read(ZIRU_FONT_PAK)
             except KeyError:
                 log("font: ZFont_Orginal.pak not found – Vietnamese font fix skipped")
-                return None
+                return {}
     magic = d.rfind(struct.pack("<I", 0x5A6F12E1))
     ver, = struct.unpack_from("<I", d, magic + 4)
     ioff, isz = struct.unpack_from("<QQ", d, magic + 8)
@@ -255,18 +256,36 @@ def make_ios_font_pak(apk, report):
         raise SystemExit(f"font pak: unexpected version {ver} / encrypted index")
     idx = d[ioff:ioff + isz]
     n, = struct.unpack_from("<i", idx, 0)
-    old_mount = idx[4:4 + n].rstrip(b"\0").decode("latin1")
-    if "/Platforms/_Android/Assets/ui/Font/" not in old_mount:
-        raise SystemExit(f"font pak: unexpected mount point {old_mount}")
-    mp = IOS_FONT_MOUNT.encode("latin1") + b"\0"
-    new_idx = struct.pack("<i", len(mp)) + mp + idx[4 + n:]
-    footer = b"\0" + struct.pack("<IIQQ", 0x5A6F12E1, 3, ioff, len(new_idx)) + hashlib.sha1(new_idx).digest()
-    out = d[:ioff] + new_idx + footer
-    report["font_pak"] = {"source": ZIRU_FONT_PAK, "old_mount": old_mount, "new_mount": IOS_FONT_MOUNT,
-                          "size": len(out), "sha256": hashlib.sha256(out).hexdigest()}
-    log(f"font: ZiruFont_IOS_P.pak {len(out)} bytes (mount {IOS_FONT_MOUNT})")
-    return out
-
+    p = 4 + n
+    count, = struct.unpack_from("<i", idx, p); p += 4
+    fonts = {}
+    for _ in range(count):
+        ln, = struct.unpack_from("<i", idx, p); p += 4
+        name = idx[p:p + ln].rstrip(b"\0").decode("latin1"); p += ln
+        off, size, usize, comp = struct.unpack_from("<QQQI", idx, p); p += 28 + 20
+        blocks = []
+        if comp:
+            nb, = struct.unpack_from("<I", idx, p); p += 4
+            for _ in range(nb):
+                blocks.append(struct.unpack_from("<QQ", idx, p)); p += 16
+        encrypted = idx[p]; p += 1 + 4
+        if encrypted or comp not in (0, 1):
+            raise SystemExit(f"font pak: {name} uses unsupported compression/encryption")
+        if comp:
+            data = b"".join(zlib.decompress(d[s0:e0]) for s0, e0 in blocks)
+        else:
+            hdr = 8 + 8 + 8 + 4 + 20 + 1 + 4
+            data = d[off + hdr:off + hdr + size]
+        if len(data) != usize or data[:4] not in (b"OTTO", b"\0\1\0\0"):
+            raise SystemExit(f"font pak: {name} did not extract to a font file")
+        fonts[name] = data
+    want = {"eFootballSans-Bold.ufont", "eFootballSans-Light.ufont", "eFootballSans-Regular.ufont",
+            "eFootballStencil-Regular.ufont"}
+    if set(fonts) != want:
+        raise SystemExit(f"font pak: unexpected contents {sorted(fonts)}")
+    report["fonts"] = {k: {"size": len(v), "sha256": hashlib.sha256(v).hexdigest()} for k, v in sorted(fonts.items())}
+    log(f"font: {len(fonts)} Vietnamese UI fonts from {ZIRU_FONT_PAK}")
+    return fonts
 
 # ------------------------------------------------------------------ data pack
 def _dos_time(t=None):

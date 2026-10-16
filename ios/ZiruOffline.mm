@@ -1472,8 +1472,8 @@ __attribute__((constructor)) static void ziruInit() {
   @autoreleasepool {
     initPaths();
     initCrashHandler();
-    zfont::install([gBundleAssets stringByAppendingPathComponent:@"ZiruFont_IOS_P.pak"].fileSystemRepresentation,
-                   [](const char* line) { ZLog(@"%s", line); });
+    zfont::install([gBundleAssets stringByAppendingPathComponent:@"fonts"].fileSystemRepresentation,
+                   gDocs.fileSystemRepresentation, [](const char* line) { ZLog(@"%s", line); });
     checkDirectFolderData(nil); // Automatically link folders right at launch!
     ZLog(@"ZiruOffline %s loaded, bundle=%@", ZIRU_MOD_VERSION, NSBundle.mainBundle.bundlePath);
 
