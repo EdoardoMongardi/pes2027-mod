@@ -235,7 +235,13 @@ static void z_perform_rebinding_with_section(struct z_rebindings_entry *rebindin
   vm_address_t page_start = ((vm_address_t)indirect_symbol_bindings) & ~(psize - 1);
   vm_address_t page_end = (((vm_address_t)indirect_symbol_bindings) + sect->size + psize - 1) & ~(psize - 1);
   vm_size_t page_size = (vm_size_t)(page_end - page_start);
-  vm_protect(mach_task_self(), page_start, page_size, 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+  kern_return_t err = vm_protect(mach_task_self(), page_start, page_size, 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+  if (err != KERN_SUCCESS) {
+    err = vm_protect(mach_task_self(), page_start, page_size, 0, VM_PROT_READ | VM_PROT_WRITE);
+  }
+  if (err != KERN_SUCCESS) {
+    return; // Prevent SIGBUS (Bus error: 10) on iOS 16 JB/TrollStore when memory page is strictly protected
+  }
 
   for (uint32_t i = 0; i < sect->size / sizeof(void *); i++) {
     uint32_t symtab_index = indirect_symbol_indices[i];
@@ -409,6 +415,34 @@ static const char* redirectPath(const char* path, char* buffer, size_t bufSize) 
     if (n > 0 && (size_t)n < bufSize) return buffer;
   }
 
+  // 4. Check for livedata: /livedata/ or livedata/ or path ending with /livedata or path == "livedata"
+  p = strstr(path, "/livedata/");
+  if (!p && strncmp(path, "livedata/", 9) == 0) p = path - 1;
+  if (p) {
+    const char* rel = (p == path - 1) ? (path + 9) : (p + 10);
+    int n = snprintf(buffer, bufSize, "%s/livedata/%s", gDocsUTF8, rel);
+    if (n > 0 && (size_t)n < bufSize) {
+      if (access(buffer, F_OK) != 0) {
+        char alt[1024];
+        strncpy(alt, buffer, sizeof(alt) - 1);
+        alt[sizeof(alt) - 1] = '\0';
+        char* iosPtr = strstr(alt, "_mobile_ios");
+        if (iosPtr) {
+          memcpy(iosPtr, "_mobile_and", 11);
+          if (access(alt, F_OK) == 0) {
+            strncpy(buffer, alt, bufSize - 1);
+            buffer[bufSize - 1] = '\0';
+          }
+        }
+      }
+      return buffer;
+    }
+  }
+  if ((len >= 9 && strcmp(path + len - 9, "/livedata") == 0) || strcmp(path, "livedata") == 0) {
+    int n = snprintf(buffer, bufSize, "%s/livedata", gDocsUTF8);
+    if (n > 0 && (size_t)n < bufSize) return buffer;
+  }
+
   return path;
 }
 
@@ -481,7 +515,7 @@ static zsv::OfflineServer& server() {
   std::call_once(gServerOnce, [] {
     zsv::Config cfg;
     cfg.assetsDir = gBundleAssets.fileSystemRepresentation;
-    cfg.dropAndroidLivedata = true;   // Ziru's livedata are *_mobile_and.pak; the iOS client rejects them at login
+    cfg.dropAndroidLivedata = false;   // Retain 54 modded Epic/BigTime player paks; remapped to _mobile_ios
     // Vietnamese commentary is a paid add-on: offered only when dt510_eng_mobile_all.cpk is installed, and then with
     // its real size/SHA-256 so the client keeps it instead of deleting it as a mismatching download.
     cfg.iosCommentary = true;
@@ -643,6 +677,39 @@ static void hookSetRequest(id self, SEL _cmd, const char* url, const char* cooki
   gOrigSetReq[I](self, _cmd, url ? red.c_str() : url, cookie, isPost, data, size, gzip);
 }
 
+// ---------------------------------------------------------------- 120 FPS Unlock
+static IMP gOrigSetPreferredFramesPerSecond = nullptr;
+static void hookSetPreferredFramesPerSecond(CADisplayLink* self, SEL _cmd, NSInteger fps) {
+  if (gOrigSetPreferredFramesPerSecond) {
+    ((void(*)(id, SEL, NSInteger))gOrigSetPreferredFramesPerSecond)(self, _cmd, 120);
+  }
+  if (@available(iOS 15.0, *)) {
+    self.preferredFrameRateRange = CAFrameRateRangeMake(60.0f, 120.0f, 120.0f);
+  }
+}
+
+static IMP gOrigDisplayLinkWithTarget = nullptr;
+static CADisplayLink* hookDisplayLinkWithTarget(Class cls, SEL _cmd, id target, SEL sel) {
+  CADisplayLink* link = ((CADisplayLink* (*)(id, SEL, id, SEL))gOrigDisplayLinkWithTarget)(cls, _cmd, target, sel);
+  if (link) {
+    link.preferredFramesPerSecond = 120;
+    if (@available(iOS 15.0, *)) {
+      link.preferredFrameRateRange = CAFrameRateRangeMake(60.0f, 120.0f, 120.0f);
+    }
+  }
+  return link;
+}
+
+static IMP gOrigSetPreferredFrameRateRange = nullptr;
+static void hookSetPreferredFrameRateRange(CADisplayLink* self, SEL _cmd, CAFrameRateRange range) {
+  range.minimum = 60.0f;
+  range.maximum = 120.0f;
+  range.preferred = 120.0f;
+  if (gOrigSetPreferredFrameRateRange) {
+    ((void(*)(id, SEL, CAFrameRateRange))gOrigSetPreferredFrameRateRange)(self, _cmd, range);
+  }
+}
+
 // ---------------------------------------------------------------- launch gating
 static std::atomic<bool> gGameStarted{false};
 static IMP gOrigDidFinish, gOrigBecomeActive, gOrigResignActive, gOrigEnterBg, gOrigEnterFg;
@@ -751,6 +818,19 @@ static BOOL checkDirectFolderData(NSString** why) {
   }
   if (foundLivedata && ![foundLivedata isEqualToString:[gDocs stringByAppendingPathComponent:@"livedata"]]) {
     ensureSymlink([gDocs stringByAppendingPathComponent:@"livedata"], foundLivedata);
+  }
+
+  // Create _mobile_ios symlinks for livedata files named _mobile_and
+  NSString* liveDir = [gDocs stringByAppendingPathComponent:@"livedata"];
+  if ([fm fileExistsAtPath:liveDir]) {
+    for (NSString* f in [fm contentsOfDirectoryAtPath:liveDir error:nil]) {
+      if ([f containsString:@"_mobile_and"]) {
+        NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
+        NSString* target = [liveDir stringByAppendingPathComponent:f];
+        NSString* link = [liveDir stringByAppendingPathComponent:iosName];
+        ensureSymlink(link, target);
+      }
+    }
   }
 
   // Ensure Download folder exists
@@ -1547,6 +1627,17 @@ __attribute__((constructor)) static void ziruInit() {
     } else {
       ZLog(@"IOSAppDelegate not found — launch gating disabled");
       gGameStarted = true;
+    }
+
+    // 120 FPS Unlock via CADisplayLink
+    Class dlCls = CADisplayLink.class;
+    if (dlCls) {
+      gOrigDisplayLinkWithTarget = swizzleClassMethod(dlCls, @selector(displayLinkWithTarget:selector:), (IMP)hookDisplayLinkWithTarget);
+      gOrigSetPreferredFramesPerSecond = swizzleInstance(dlCls, @selector(setPreferredFramesPerSecond:), (IMP)hookSetPreferredFramesPerSecond);
+      if (@available(iOS 15.0, *)) {
+        gOrigSetPreferredFrameRateRange = swizzleInstance(dlCls, @selector(setPreferredFrameRateRange:), (IMP)hookSetPreferredFrameRateRange);
+      }
+      ZLog(@"[120FPS] CADisplayLink 120 FPS hooks installed");
     }
   }
 }

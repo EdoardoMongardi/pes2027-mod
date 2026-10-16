@@ -24,7 +24,7 @@ import argparse, hashlib, json, os, plistlib, shutil, struct, sys, time, zipfile
 EXPECTED_EXE_SHA256 = "0cf9bacd9a9f049587f78a5fb8646b4ed5b87abe40a761d1f8f6337cafa9a0de"
 EXPECTED_VERSION = ("11.1.1", "11.1.101")
 DYLIB_INSTALL_NAME = b"@executable_path/Frameworks/ZiruOffline.dylib"
-MOD_VERSION = "1.0.0"
+MOD_VERSION = "1.0.1"
 
 # basic::PathGet(PathType): types 6 (cpk) and 7 (pak) are built from GetAppBundlePath() (x20).
 # Switch them to GetDocumentsPath() (x21) so the game reads Documents/cpk and Documents/pak,
@@ -132,6 +132,8 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
 
     info["UIFileSharingEnabled"] = True
     info["LSSupportsOpeningDocumentsInPlace"] = True
+    info["CADisableMinimumFrameDurationOnPhone"] = True
+    info["CADisableMinimumFrameDuration"] = True
     if bundle_id:
         info["CFBundleIdentifier"] = bundle_id
     if display_name:
@@ -187,6 +189,8 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
                     z.writestr(zi, bytes(data))
                 elif arc == root + "Info.plist":
                     z.writestr(zi, plistlib.dumps(info, fmt=plistlib.FMT_XML))
+                elif fn in ("ue4commandline.txt", "uecommandline.txt"):
+                    z.writestr(zi, b"-t.MaxFPS=120 -FPS=120 -rhi.SyncInterval=0\n")
                 elif fn.endswith(".plist"):
                     try:
                         with open(p, "rb") as pf:
@@ -198,6 +202,14 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
                 else:
                     with open(p, "rb") as f:
                         z.writestr(zi, f.read())
+                n += 1
+        for cl_name in ("ue4commandline.txt", "uecommandline.txt"):
+            cl_arc = root + cl_name
+            if cl_arc not in z.namelist():
+                zi = zipfile.ZipInfo(cl_arc, time.localtime()[:6])
+                zi.external_attr = 0o100644 << 16
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                z.writestr(zi, b"-t.MaxFPS=120 -FPS=120 -rhi.SyncInterval=0\n")
                 n += 1
         zi = zipfile.ZipInfo(root + "Frameworks/ZiruOffline.dylib", time.localtime()[:6])
         zi.external_attr = 0o100755 << 16

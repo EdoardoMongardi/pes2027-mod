@@ -484,6 +484,34 @@ void patchLocalLivedataUrls(const ObjP& jo) {
       }
       zs::logi("OFFLINE_SERVER", "[IOS_LIVEDATA] dropped " + std::to_string(dropped) + " Android livedata entries, kept " +
                                      std::to_string(keep->length()));
+    } else {
+      std::string vf = li->optString("version_file", "");
+      if (!vf.empty()) {
+        try {
+          ObjP v = Object::parse(vf);
+          v->remove("targetAppVersion");
+          li->put("version_file", v->toString());
+        } catch (const std::exception& e) {
+          zs::loge("OFFLINE_SERVER", std::string("[IOS_LIVEDATA] version_file targetAppVersion strip failed ") + e.what());
+        }
+      }
+      for (int i = 0; i < list->length(); i++) {
+        ObjP o = list->optJSONObject(i);
+        if (!o) continue;
+        std::string name = o->optString("name", "");
+        if (name.empty()) continue;
+        size_t pos = name.find("_mobile_and");
+        if (pos != std::string::npos) {
+          name.replace(pos, 11, "_mobile_ios");
+          o->put("name", name);
+        }
+        std::string url = o->optString("url", "");
+        size_t upos = url.find("_mobile_and");
+        if (upos != std::string::npos) {
+          url.replace(upos, 11, "_mobile_ios");
+          o->put("url", url);
+        }
+      }
     }
     for (int i = 0; i < list->length(); i++) {
       ObjP o = list->optJSONObject(i);

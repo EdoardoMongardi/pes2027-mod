@@ -7,6 +7,8 @@
 
 #include "jvalue.hpp"
 
+#include <sys/stat.h>
+
 struct sqlite3;
 
 namespace zs {
@@ -19,7 +21,18 @@ struct Assets {
   bool read(const std::string& name, std::string& out) const;  // false = IOException
   std::vector<std::string> list(const std::string& dir) const;
   std::string path(const std::string& name) const {
-    if (!livedataRoot.empty() && name.rfind("livedata/", 0) == 0) return livedataRoot + "/" + name.substr(9);
+    if (!livedataRoot.empty() && name.rfind("livedata/", 0) == 0) {
+      std::string p = livedataRoot + "/" + name.substr(9);
+      struct stat st;
+      if (stat(p.c_str(), &st) == 0) return p;
+      size_t pos = p.find("_mobile_ios");
+      if (pos != std::string::npos) {
+        std::string fallback = p;
+        fallback.replace(pos, 11, "_mobile_and");
+        if (stat(fallback.c_str(), &st) == 0) return fallback;
+      }
+      return p;
+    }
     if (!livedataRoot.empty() && name == "livedata") return livedataRoot;
     return root + "/" + name;
   }
