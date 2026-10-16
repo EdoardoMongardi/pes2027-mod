@@ -267,9 +267,21 @@ Response serveInner(Request& r) {
       contains(uri, "CMD_GET_COMMUNITY_ROOM_LIST") || contains(uri, "CMD_GET_TURN_SERVER_LIST")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;
+    std::string msgid = req ? req->optString("msgid", "") : "";
+    if (msgid.empty()) {
+      std::string sub = uri.substr(uri.rfind('/') == std::string::npos ? 0 : uri.rfind('/') + 1);
+      if (startsWith(sub, "gate_")) sub = sub.substr(5);
+      if (endsWith(sub, ".php")) sub = sub.substr(0, sub.length() - 4);
+      msgid = sub;
+    }
     ObjP jo = newObj();
-    jo->put("result", "ERROR_MAINTENANCE");
+    if (contains(uri, "CMD_GET_ROOM_INFO")) {
+      jo->put("result", "ERR_NOT_IN_ROOM");
+    } else {
+      jo->put("result", "ERROR_MAINTENANCE");
+    }
     jo->put("rqid", rq);
+    jo->put("msgid", msgid);
     return serveObjectAsEncryptedMsgPack(jo);
   }
   if (contains(uri, "CMD_SET_USER_EULA_INFO") || contains(uri, "CmdSetUserEulaInfo")) return handleZiruStartupAck("CMD_SET_USER_EULA_INFO");
