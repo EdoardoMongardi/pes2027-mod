@@ -1,4 +1,4 @@
-struct AppearancePreset { uint8_t v[16]; };
+struct AppearancePreset { int32_t v[16]; };
 static const std::unordered_map<int32_t, AppearancePreset> kAppearancePresets = {
   {52, {{3, 0, 0, 4, 0, 0, 0, 6, 4, 5, 123, 0, 6, 0, 0, 0}}},
   {852, {{7, 1, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 35, 16, 0, 0}}},
