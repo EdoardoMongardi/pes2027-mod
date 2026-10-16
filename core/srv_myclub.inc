@@ -366,45 +366,27 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
       else pool = "44,45,47,48,49,50,51,52,53,54,67,68,69,70,71";
     }
     std::vector<std::string> sp_ = split(pool, ',');
-    std::string cursorKey = "ziru_skill_cursor_" + str(j) + "_" + str(ziruItemType ? *ziruItemType : std::string("null")) + "_" +
-                            (ziruSkillCategory ? *ziruSkillCategory : std::string("null"));
-    int i3 = prefs.getInt(cursorKey, 0);
-    int n = (int)sp_.size();
-    int i4 = 0;
-    while (true) {
-      if (i4 < n) {
-        int v = parseInt(sp_[(i3 + i4) % n]);
-        if (vcontains(al, v)) { i4++; continue; }
-        al.push_back(v);
-        prefs.edit().putInt(cursorKey, ((i3 + 1) + i4) % n).commit();
-        prefs.edit().putString(key, joinInts(al)).commit();
-        saveZiruSkillsToDb(j, al);
-        logRequest("ZIRU_SKILL_V22", "[ZIRU_SKILL_V22] resolved_category=" + resolveZiruSkillCategory() + " skill_id=" + str(v));
-        ObjP res = jo->optJSONObject("skill_training_result");
-        if (!res) { res = newObj(); jo->put("skill_training_result", res); }
-        res->put("additional_skill_id", v);
-        res->put("is_success", "YES");
-        break;
-      } else {
-        int i6 = 70;
-        if (vcontains(al, 70)) {
-          i6 = 69;
-          if (vcontains(al, 69)) {
-            i6 = 67;
-            if (vcontains(al, 67)) i6 = 64;
-          }
-        }
-        al.push_back(i6);
-        prefs.edit().putString(key, joinInts(al)).commit();
-        saveZiruSkillsToDb(j, al);
-        ObjP res = jo->optJSONObject("skill_training_result");
-        if (!res) { res = newObj(); jo->put("skill_training_result", res); }
-        res->put("additional_skill_id", i6);
-        res->put("is_success", "YES");
-        logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_V18_FALLBACK] safe replacement awarded");
-        break;
+    std::vector<int> candidates;
+    for (const auto& s_item : sp_) {
+      int val = parseInt(s_item);
+      if (!vcontains(al, val)) candidates.push_back(val);
+    }
+    int v = 70;
+    if (!candidates.empty()) {
+      v = candidates[rand() % candidates.size()];
+    } else {
+      for (int fallback_id : {70, 69, 67, 64}) {
+        if (!vcontains(al, fallback_id)) { v = fallback_id; break; }
       }
     }
+    al.push_back(v);
+    prefs.edit().putString(key, joinInts(al)).commit();
+    saveZiruSkillsToDb(j, al);
+    logRequest("ZIRU_SKILL_V22", "[ZIRU_SKILL_V22] random skill awarded: " + str(v));
+    ObjP res = jo->optJSONObject("skill_training_result");
+    if (!res) { res = newObj(); jo->put("skill_training_result", res); }
+    res->put("additional_skill_id", v);
+    res->put("is_success", "YES");
     ArrP items = jo->optJSONArray("item_list");
     if (items) {
       for (int i8 = 0; i8 < items->length(); i8++) {

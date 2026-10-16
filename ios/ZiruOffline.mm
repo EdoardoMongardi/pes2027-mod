@@ -584,8 +584,12 @@ static BOOL shouldHandleURL(NSURL* url) {
 // (404 -> packs show without pictures). Serve them from PESmobile.app/ziru/cdn/<path> or the on-device cache
 // Documents/PES2027-cache/cdn/<path>; otherwise fetch once from the CDN (when online) and keep a copy for offline use.
 static BOOL isCdnAssetURL(NSURL* url) {
-  return [url.host.lowercaseString isEqualToString:@"d1ln4m3c7n87ju.cloudfront.net"] && [url.path hasPrefix:@"/prd/"] &&
-         [url.path rangeOfString:@".."].location == NSNotFound;
+  if (![url.path hasPrefix:@"/prd/"]) return NO;
+  if ([url.path rangeOfString:@".."].location != NSNotFound) return NO;
+  NSString* h = url.host.lowercaseString;
+  return [h isEqualToString:@"d1ln4m3c7n87ju.cloudfront.net"] ||
+         [h isEqualToString:@"127.0.0.1"] ||
+         [h isEqualToString:@"localhost"];
 }
 static NSString* cdnCachePath(NSURL* url) {
   return [[gDocs stringByAppendingPathComponent:@"PES2027-cache/cdn"] stringByAppendingPathComponent:url.path];
@@ -783,7 +787,8 @@ static NSData* bodyOf(NSURLRequest* r) {
     }
   }
   CFRunLoopRef rl = CFRunLoopGetCurrent();
-  NSURLRequest* rq = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20];
+  NSURL* cdnRealUrl = [NSURL URLWithString:[@"https://d1ln4m3c7n87ju.cloudfront.net" stringByAppendingString:url.path]];
+  NSURLRequest* rq = [NSURLRequest requestWithURL:cdnRealUrl cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20];
   __weak ZiruURLProtocol* weakSelf = self;
   _cdnTask = [cdnSession() dataTaskWithRequest:rq completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
     NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse*)response).statusCode : 0;
@@ -941,7 +946,7 @@ template <int I>
 static void hookSetRequest(id self, SEL _cmd, const char* url, const char* cookie, long isPost, const void* data, long size, long gzip) {
   std::string orig = url ? url : "";
   std::string red = url ? zsv::OfflineServer::redirectUrl(orig) : orig;
-  if (orig.find("://d1ln4m3c7n87ju.cloudfront.net/prd/") != std::string::npos) red = orig;  // CDN images: see loadCdnAsset
+  if (orig.find("/prd/") != std::string::npos) red = orig;  // CDN images: see loadCdnAsset
   if (red != orig) {
     ZLog(@"[REDIRECT] %s -> %s", orig.c_str(), red.c_str());
   } else {

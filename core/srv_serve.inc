@@ -87,6 +87,17 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
   if (jo && name == "responses/CmdLogin.json") filterZiruSoldPlayersFromLogin(jo);
   if (jo && name == "responses/CmdLogin.json") applyZiruSquadStateToLogin(jo);
   if (jo && name == "responses/CmdLogin.json") normalizeZiruAllLoginPlayers(jo);
+  if (jo && (name == "responses/CmdLogin.json" || name == "responses/CmdGetMyclubEntryInfo.json" || name == "responses/CmdGetEntryInfo.json")) {
+    ObjP ei = jo->optJSONObject("entry_info");
+    if (ei) {
+      ei->put("current_gameplayer_warehouse_list_max", 900);
+      ei->put("warehouse_player_max", 900);
+      ei->put("current_gameplayer_list_max", 900);
+      ei->put("gameplayer_list_max", 900);
+      ei->put("unlock_gameplayer_frame", 900);
+      ei->put("unlock_gameplayer_warehouse_frame", 900);
+    }
+  }
   if (jo && (name == "responses/CmdGetMyclubAgentlist.json" || name == "responses/get_myclub_mainmenu_info.json")) applyZiruRemainingCounts(jo);
   if (jo && name == "responses/get_myclub_mainmenu_info.json") {
     jo->put("gp", 99999999999LL);
@@ -199,6 +210,64 @@ Response serveInner(Request& r) {
     return *x;
   }
   logRequest(uri, r.method);
+  if (contains(uri, "CMD_CHECK_STRING")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_CHECK_STRING");
+    jo->put("check_result", "OK");
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
+  if (contains(uri, "CMD_CREATE_MYCLUB_SQUAD")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    std::string name = req ? req->optString("squad_name", "TACTIC") : "TACTIC";
+    int32_t mainId = z27Main();
+    ObjP baseSquad = z27Squad(mainId);
+    int32_t nextId = 2;
+    for (int id = 1; id <= 20; id++) {
+      try {
+        z27Squad(id);
+      } catch (...) {
+        nextId = id;
+        break;
+      }
+    }
+    ObjP newSquad = z27Copy(baseSquad);
+    newSquad->put("squad_id", nextId);
+    newSquad->put("squad_name", name);
+    saveSquad(nextId, newSquad->toString());
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_CREATE_MYCLUB_SQUAD");
+    jo->put("squad_id", nextId);
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
+  if (contains(uri, "CMD_GET_EVENT_LIST_AND_LOG")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_GET_EVENT_LIST_AND_LOG");
+    jo->put("event_list", newArr());
+    jo->put("event_log_list", newArr());
+    jo->put("event_num", 0);
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
+  if (contains(uri, "CMD_CREATEJOIN_ROOM") || contains(uri, "CMD_JOIN_ROOM") ||
+      contains(uri, "CMD_GET_ROOM_LIST") || contains(uri, "CMD_GET_ROOM_INFO") ||
+      contains(uri, "CMD_GET_COMMUNITY_ROOM_LIST") || contains(uri, "CMD_GET_TURN_SERVER_LIST")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    ObjP jo = newObj();
+    jo->put("result", "ERROR_MAINTENANCE");
+    jo->put("rqid", rq);
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
   if (contains(uri, "CMD_SET_USER_EULA_INFO") || contains(uri, "CmdSetUserEulaInfo")) return handleZiruStartupAck("CMD_SET_USER_EULA_INFO");
   if (contains(uri, "CMD_USE_MYCLUB_CAREERPLAN")) return handleZiruCareerplan(r);
   logAlmanacAgentRequestBody(r);

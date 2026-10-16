@@ -696,7 +696,14 @@ std::optional<Response> z27Route(const std::string& uri) {
     return serveObjectAsEncryptedMsgPack(jo);
   }
   if (contains(up, "CMDGETMYCLUBENTRYINFO") || contains(up, "CMDGETENTRYINFO")) {
-    ObjP put = z27Ack("CMD_GET_MYCLUB_ENTRY_INFO", z27Request())->put("entry_info", z27Entry());
+    ObjP entry = z27Entry();
+    entry->put("current_gameplayer_warehouse_list_max", 900);
+    entry->put("warehouse_player_max", 900);
+    entry->put("current_gameplayer_list_max", 900);
+    entry->put("gameplayer_list_max", 900);
+    entry->put("unlock_gameplayer_frame", 900);
+    entry->put("unlock_gameplayer_warehouse_frame", 900);
+    ObjP put = z27Ack("CMD_GET_MYCLUB_ENTRY_INFO", z27Request())->put("entry_info", entry);
     z27Restore(put);
     return serveObjectAsEncryptedMsgPack(put);
   }
