@@ -44,7 +44,11 @@ jobs:
             -dynamiclib -install_name @executable_path/Frameworks/ZiruOffline.dylib \
             ios/ZiruOffline.mm core/jvalue.cpp core/codec.cpp core/store.cpp core/server.cpp core/zipread.cpp core/datapack.cpp \
             -framework Foundation -framework UIKit -framework UniformTypeIdentifiers -framework Security \
-            -lz -lsqlite3 -o build/ZiruOffline.dylib
+            -lz -lsqlite3 -o build/ZiruOffline.dylib 2> build/clang.log || {
+              grep -E "error:" build/clang.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+              grep -E "error:" -A3 build/clang.log | head -120 | while IFS= read -r l; do echo "::warning::$l"; done
+              exit 1; }
+          grep -E "warning:" build/clang.log | head -30 | while IFS= read -r l; do echo "::notice::$l"; done || true
           codesign -f -s - build/ZiruOffline.dylib
           otool -L build/ZiruOffline.dylib
           shasum -a 256 build/ZiruOffline.dylib | tee build/ZiruOffline.dylib.sha256
