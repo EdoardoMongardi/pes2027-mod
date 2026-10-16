@@ -14,11 +14,14 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <atomic>
+#include <mutex>
+#include <set>
 #include <string>
 
 namespace {
@@ -47,6 +50,10 @@ FileSizeFn gOrigFileSize;
 OpenAsyncReadFn gOrigOpenAsyncRead;
 
 std::u16string gFontPath[kNumFonts];   // bundle paths as TCHAR
+std::string gFontData[kNumFonts];      // font bytes, loaded at install time
+std::atomic<int> gFullReads[kNumFonts];
+std::mutex gSeenMu;
+std::set<std::string> gSeenFontPaths;
 std::atomic<int> gHits[kNumFonts];
 void (*gLog)(const char*) = nullptr;
 
@@ -86,6 +93,31 @@ int fontIndex(const char16_t* name) {
   return -1;
 }
 
+// IFileHandle as laid out in this engine (FIOSFileHandle vtable: D1, D0, Tell, Seek, SeekFromEnd, Read, Write, Flush,
+// Truncate, Size). Serves a font from memory so nothing depends on how the lower platform file resolves bundle paths.
+class ZMemFileHandle {
+ public:
+  ZMemFileHandle(const std::string* data, int idx) : data_(data), idx_(idx) {}
+  virtual ~ZMemFileHandle() {}
+  virtual int64_t Tell() { return pos_; }
+  virtual bool Seek(int64_t p) {
+    if (p < 0 || p > (int64_t)data_->size()) return false;
+    pos_ = p;
+    return true;
+  }
+  virtual bool SeekFromEnd(int64_t rel) { return Seek((int64_t)data_->size() + rel); }
+  virtual bool Read(uint8_t* dst, int64_t n);
+  virtual bool Write(const uint8_t*, int64_t) { return false; }
+  virtual bool Flush(bool) { return false; }
+  virtual bool Truncate(int64_t) { return false; }
+  virtual int64_t Size() { return (int64_t)data_->size(); }
+
+ private:
+  const std::string* data_;
+  int idx_;
+  int64_t pos_ = 0;
+};
+
 inline void* lowerOf(void* self) { return *(void**)((char*)self + kLowerLevelOffset); }
 template <typename F>
 inline F vfn(void* obj, size_t off) {
@@ -96,24 +128,51 @@ void noteHit(int i, const char* op, bool ok) {
   if (gHits[i].fetch_add(1) < 3) logf("[FONT] %s %s.ufont -> Ziru font from bundle: %s", op, kFonts[i], ok ? "ok" : "FAILED (using original)");
 }
 
+bool ZMemFileHandle::Read(uint8_t* dst, int64_t n) {
+  if (n < 0 || pos_ + n > (int64_t)data_->size()) return false;
+  memcpy(dst, data_->data() + pos_, (size_t)n);
+  pos_ += n;
+  if (pos_ == (int64_t)data_->size() && gFullReads[idx_].fetch_add(1) < 2)
+    logf("[FONT] %s.ufont read to the end by the engine (%zu bytes, Ziru font)", kFonts[idx_], data_->size());
+  return true;
+}
+
+std::string narrow(const char16_t* s) {
+  std::string r;
+  if (s)
+    for (; *s && r.size() < 600; s++) r += (*s < 128) ? (char)*s : '?';
+  return r;
+}
+
+// Log (once per path) every font-like file the engine opens through the pak layer, ours or not.
+void noteFontPath(const char* op, const char16_t* name, const char* how) {
+  std::string n = narrow(name), l = n;
+  for (auto& c : l) c = (char)tolower((unsigned char)c);
+  if (l.find("/font") == std::string::npos && l.find(".ufont") == std::string::npos && l.find(".ttf") == std::string::npos &&
+      l.find(".otf") == std::string::npos)
+    return;
+  {
+    std::lock_guard<std::mutex> g(gSeenMu);
+    if (gSeenFontPaths.size() > 200 || !gSeenFontPaths.insert(std::string(op) + n).second) return;
+  }
+  logf("[FONT] %s %s -> %s", op, n.c_str(), how);
+}
+
 void* hookOpenRead(void* self, const char16_t* name, bool allowWrite) {
   int i = fontIndex(name);
-  if (i >= 0 && !allowWrite) {
-    void* lower = lowerOf(self);
-    void* h = lower ? vfn<OpenReadFn>(lower, kVtOpenRead)(lower, gFontPath[i].c_str(), false) : nullptr;
-    noteHit(i, "OpenRead", h != nullptr);
-    if (h) return h;
+  if (i >= 0 && !allowWrite && !gFontData[i].empty()) {
+    noteFontPath("OpenRead", name, "Ziru font (memory)");
+    noteHit(i, "OpenRead", true);
+    return new ZMemFileHandle(&gFontData[i], i);
   }
-  return gOrigOpenRead(self, name, allowWrite);
+  void* h = gOrigOpenRead(self, name, allowWrite);
+  noteFontPath("OpenRead", name, h ? "original" : "not found");
+  return h;
 }
 
 int64_t hookFileSize(void* self, const char16_t* name) {
   int i = fontIndex(name);
-  if (i >= 0) {
-    void* lower = lowerOf(self);
-    int64_t s = lower ? vfn<FileSizeFn>(lower, kVtFileSize)(lower, gFontPath[i].c_str()) : -1;
-    if (s > 0) return s;
-  }
+  if (i >= 0 && !gFontData[i].empty()) return (int64_t)gFontData[i].size();
   return gOrigFileSize(self, name);
 }
 
@@ -125,7 +184,9 @@ void* hookOpenAsyncRead(void* self, const char16_t* name) {
     noteHit(i, "OpenAsyncRead", h != nullptr);
     if (h) return h;
   }
-  return gOrigOpenAsyncRead(self, name);
+  void* h = gOrigOpenAsyncRead(self, name);
+  noteFontPath("OpenAsyncRead", name, h ? "original" : "not found");
+  return h;
 }
 
 void patchSlot(intptr_t slide, uint64_t slotVA, void* repl, void** orig) {
@@ -156,6 +217,17 @@ void install(const char* fontDir, const char* documentsDir, void (*log)(const ch
       return;
     }
     gFontPath[i] = widen(p);
+    FILE* f = fopen(p.c_str(), "rb");
+    if (f) {
+      gFontData[i].resize((size_t)st.st_size);
+      size_t got = fread(&gFontData[i][0], 1, gFontData[i].size(), f);
+      fclose(f);
+      if (got != gFontData[i].size()) gFontData[i].clear();
+    }
+    if (gFontData[i].size() < 4 || (memcmp(gFontData[i].data(), "OTTO", 4) != 0 && memcmp(gFontData[i].data(), "\0\1\0\0", 4) != 0)) {
+      logf("[FONT] %s unreadable – Vietnamese font fix disabled", p.c_str());
+      return;
+    }
   }
   intptr_t slide = 0;
   bool found = false;
@@ -194,7 +266,7 @@ void install(const char* fontDir, const char* documentsDir, void (*log)(const ch
   patchSlot(slide, kSlotFileSize, (void*)hookFileSize, (void**)&gOrigFileSize);
   patchSlot(slide, kSlotOpenAsyncRead, (void*)hookOpenAsyncRead, (void**)&gOrigOpenAsyncRead);
   vm_protect(mach_task_self(), lo, len, false, VM_PROT_READ);
-  logf("[FONT] installed: FPakPlatformFile OpenRead/FileSize/OpenAsyncRead serve %d UI fonts from %s", kNumFonts, fontDir);
+  logf("[FONT] installed: FPakPlatformFile OpenRead/FileSize/OpenAsyncRead serve %d UI fonts from memory (%s)", kNumFonts, fontDir);
 }
 
 }  // namespace zfont

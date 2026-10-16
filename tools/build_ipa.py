@@ -203,10 +203,18 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
         zi.external_attr = 0o100755 << 16
         zi.compress_type = zipfile.ZIP_DEFLATED
         z.writestr(zi, open(dylib, "rb").read())
+        extra_names = set()
+        for extra_dir in (os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ziru-extra", "responses"),
+                          os.path.join(os.path.dirname(os.path.abspath(__file__)), "ziru-extra", "responses")):
+            if os.path.isdir(extra_dir):
+                extra_names = set(os.listdir(extra_dir))
+                break
         # Ziru responses (JSON templates) from the APK
         with zipfile.ZipFile(apk) as a:
             for e in a.infolist():
                 if e.filename.startswith("assets/responses/") and not e.is_dir():
+                    if os.path.basename(e.filename) in extra_names:
+                        continue   # overridden by ziru-extra/responses
                     arc = root + "ziru/responses/" + e.filename[len("assets/responses/"):]
                     ensure_dir(os.path.dirname(arc))
                     zi = zipfile.ZipInfo(arc, time.localtime()[:6])
@@ -214,6 +222,33 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
                     zi.compress_type = zipfile.ZIP_DEFLATED
                     z.writestr(zi, a.read(e))
                     n += 1
+        # Responses written for this port (e.g. commands new in 11.1.1); added after Ziru's, so they win
+        for extra_dir in (os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ziru-extra", "responses"),
+                          os.path.join(os.path.dirname(os.path.abspath(__file__)), "ziru-extra", "responses")):
+            if not os.path.isdir(extra_dir):
+                continue
+            for fn in sorted(os.listdir(extra_dir)):
+                src = os.path.join(extra_dir, fn)
+                if not os.path.isfile(src):
+                    continue
+                arc = root + "ziru/responses/" + fn
+                zi = zipfile.ZipInfo(arc, time.localtime()[:6])
+                zi.external_attr = 0o100644 << 16
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                z.writestr(zi, open(src, "rb").read())
+                report.setdefault("extra_responses", []).append(fn)
+                n += 1
+            break
+        # Built-in fallbacks for commands Ziru's server (client 11.0.1) never answered; ziru-extra/ overrides them
+        for fn, body in BUILTIN_RESPONSES.items():
+            if fn in extra_names:
+                continue
+            zi = zipfile.ZipInfo(root + "ziru/responses/" + fn, time.localtime()[:6])
+            zi.external_attr = 0o100644 << 16
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(zi, body.encode())
+            report.setdefault("builtin_responses", []).append(fn)
+            n += 1
         fonts = make_ios_fonts(apk, report)
         if fonts:
             ensure_dir(root + "ziru/fonts/")
@@ -229,6 +264,11 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
 
 
 # ------------------------------------------------------------------ Vietnamese UI font (from Ziru's Android mod)
+# Responses for commands new in client 11.1.1 (see ziru-extra/README.md). Not taken from Ziru's APK.
+BUILTIN_RESPONSES = {
+    "CMD_GET_AGE_GATE_REQUIREMENTS.json":
+        '{"msgid":"CMD_GET_AGE_GATE_REQUIREMENTS","result":"NOERR","is_eula_country":"YES","country_age_kind":"BIRTH_YEAR_MONTH"}',
+}
 ZIRU_OBB_IN_APK = "assets/pc0000_mobile_and.pak"            # a ZIP (Android "OBB" layout) despite the name
 ZIRU_FONT_PAK = "PesMobile/Content/Paks/ZFont_Orginal.pak"   # UE pak v3: eFootballSans-*/eFootballStencil .ufont
 

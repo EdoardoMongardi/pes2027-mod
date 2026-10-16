@@ -44,8 +44,8 @@ jobs:
           xcrun --sdk iphoneos clang++ -arch arm64 -isysroot "$SDK" -miphoneos-version-min=15.0 \
             -std=c++17 -O2 -fobjc-arc -fvisibility=hidden -Wall -Wno-unused \
             -dynamiclib -install_name @executable_path/Frameworks/ZiruOffline.dylib \
-            ios/ZiruOffline.mm ios/ZiruFontPak.mm core/jvalue.cpp core/codec.cpp core/store.cpp core/server.cpp core/zipread.cpp core/datapack.cpp \
-            -framework Foundation -framework UIKit -framework UniformTypeIdentifiers -framework Security -framework QuartzCore -framework CoreGraphics \
+            ios/ZiruOffline.mm ios/ZiruFontPak.mm ios/ZiruWebView.mm core/jvalue.cpp core/codec.cpp core/store.cpp core/server.cpp core/zipread.cpp core/datapack.cpp \
+            -framework Foundation -framework UIKit -framework UniformTypeIdentifiers -framework Security -framework QuartzCore -framework CoreGraphics -framework WebKit \
             -lz -lsqlite3 -o build/ZiruOffline.dylib 2> build/clang.log || {
               cat build/clang.log
               exit 1; }

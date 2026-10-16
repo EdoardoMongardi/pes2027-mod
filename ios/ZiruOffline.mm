@@ -41,6 +41,7 @@ static DIR* (*orig_opendir)(const char *name);
 #include "../core/datapack.hpp"
 #include "../core/server.hpp"
 #include "ZiruFontPak.h"
+#include "ZiruWebView.h"
 
 #define ZIRU_MOD_VERSION "1.0.1"
 
@@ -1474,6 +1475,7 @@ __attribute__((constructor)) static void ziruInit() {
     initCrashHandler();
     zfont::install([gBundleAssets stringByAppendingPathComponent:@"fonts"].fileSystemRepresentation,
                    gDocs.fileSystemRepresentation, [](const char* line) { ZLog(@"%s", line); });
+    zweb::install([](const char* line) { ZLog(@"%s", line); });
     checkDirectFolderData(nil); // Automatically link folders right at launch!
     ZLog(@"ZiruOffline %s loaded, bundle=%@", ZIRU_MOD_VERSION, NSBundle.mainBundle.bundlePath);
 
