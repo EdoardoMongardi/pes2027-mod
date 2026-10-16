@@ -443,8 +443,19 @@ static zsv::OfflineServer& server() {
   std::call_once(gServerOnce, [] {
     zsv::Config cfg;
     cfg.assetsDir = gBundleAssets.fileSystemRepresentation;
-    std::string id = zd::activeId(layout());
-    if (!id.empty()) cfg.livedataDir = zd::dataDir(layout(), id) + "/livedata";
+    std::string livedataDir;
+    NSString* directLivedata = [gDocs stringByAppendingPathComponent:@"livedata"];
+    NSString* subLivedata = [gDocs stringByAppendingPathComponent:@"PES2027-data/livedata"];
+    NSFileManager* fm = NSFileManager.defaultManager;
+    if ([fm fileExistsAtPath:directLivedata]) {
+      livedataDir = directLivedata.fileSystemRepresentation;
+    } else if ([fm fileExistsAtPath:subLivedata]) {
+      livedataDir = subLivedata.fileSystemRepresentation;
+    } else {
+      std::string id = zd::activeId(layout());
+      if (!id.empty()) livedataDir = zd::dataDir(layout(), id) + "/livedata";
+    }
+    cfg.livedataDir = livedataDir;
     cfg.dataDir = std::string(gSupport.fileSystemRepresentation) + "/Save";
     cfg.logFile = std::string([gDocs stringByAppendingPathComponent:@"PES2027-logs/offline_server.log"].fileSystemRepresentation);
     gServer.reset(new zsv::OfflineServer(cfg));
@@ -587,7 +598,80 @@ static __strong id gDelegate;
 static __strong UIWindow* gImportWindow;
 static void startGame();
 
+static BOOL checkDirectFolderData(NSString** why) {
+  NSFileManager* fm = NSFileManager.defaultManager;
+
+  // Case 2: User copied a single folder like "PES2027-data" into Documents
+  NSString* subfolder = nil;
+  for (NSString* item in [fm contentsOfDirectoryAtPath:gDocs error:nil]) {
+    NSString* full = [gDocs stringByAppendingPathComponent:item];
+    BOOL isDir = NO;
+    if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+      if ([item.lowercaseString containsString:@"pes2027-data"] || [item.lowercaseString isEqualToString:@"data"]) {
+        NSString* subPak = [full stringByAppendingPathComponent:@"pak"];
+        NSString* subCpk = [full stringByAppendingPathComponent:@"cpk"];
+        if ([fm fileExistsAtPath:subPak] && [fm fileExistsAtPath:subCpk]) {
+          subfolder = full;
+          break;
+        }
+      }
+    }
+  }
+
+  if (subfolder) {
+    ZLog(@"Found data subfolder: %@", subfolder);
+    for (NSString* name in @[@"pak", @"cpk"]) {
+      NSString* link = [gDocs stringByAppendingPathComponent:name];
+      NSString* target = [subfolder stringByAppendingPathComponent:name];
+      NSDictionary* attr = [fm attributesOfItemAtPath:link error:nil];
+      if (attr) {
+        if ([attr[NSFileType] isEqualToString:NSFileTypeSymbolicLink]) {
+          [fm removeItemAtPath:link error:nil];
+          [fm createSymbolicLinkAtPath:link withDestinationPath:target error:nil];
+        }
+      } else {
+        [fm createSymbolicLinkAtPath:link withDestinationPath:target error:nil];
+      }
+    }
+    NSString* subDl = [subfolder stringByAppendingPathComponent:@"download"];
+    if (![fm fileExistsAtPath:subDl]) subDl = [subfolder stringByAppendingPathComponent:@"Download"];
+    if ([fm fileExistsAtPath:subDl]) {
+      NSString* dlDir = [gDocs stringByAppendingPathComponent:@"Download"];
+      [fm createDirectoryAtPath:dlDir withIntermediateDirectories:YES attributes:nil error:nil];
+      for (NSString* f in [fm contentsOfDirectoryAtPath:subDl error:nil]) {
+        NSString* src = [subDl stringByAppendingPathComponent:f];
+        NSString* dst = [dlDir stringByAppendingPathComponent:f];
+        if (![fm fileExistsAtPath:dst]) {
+          [fm createSymbolicLinkAtPath:dst withDestinationPath:src error:nil];
+        }
+      }
+    }
+  }
+
+  // Case 1: Direct folders pak and cpk in Documents
+  NSString* pakDir = [gDocs stringByAppendingPathComponent:@"pak"];
+  NSString* cpkDir = [gDocs stringByAppendingPathComponent:@"cpk"];
+  BOOL isDir = NO;
+  if (![fm fileExistsAtPath:pakDir isDirectory:&isDir]) return NO;
+  if (![fm fileExistsAtPath:cpkDir isDirectory:&isDir]) return NO;
+
+  NSArray* pakItems = [fm contentsOfDirectoryAtPath:pakDir error:nil];
+  NSArray* cpkItems = [fm contentsOfDirectoryAtPath:cpkDir error:nil];
+  if (pakItems.count < 3 || cpkItems.count < 3) {
+    if (why) *why = @"Thư mục pak hoặc cpk trong Documents thiếu file dữ liệu";
+    return NO;
+  }
+
+  // Ensure Download folder exists
+  NSString* dlDir = [gDocs stringByAppendingPathComponent:@"Download"];
+  [fm createDirectoryAtPath:dlDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+  ZLog(@"Direct folder data ready: pak=%lu files, cpk=%lu files", (unsigned long)pakItems.count, (unsigned long)cpkItems.count);
+  return YES;
+}
+
 static BOOL dataReady(NSString** why) {
+  if (checkDirectFolderData(why)) return YES;
   std::string err;
   zd::Layout L = layout();
   std::string id = zd::activeId(L);
@@ -803,6 +887,7 @@ static BOOL dataReady(NSString** why) {
 @property(nonatomic, strong) UIProgressView* bar;
 @property(nonatomic, strong) PESPressButton* pick;
 @property(nonatomic, strong) PESPressButton* local;
+@property(nonatomic, strong) PESPressButton* rescan;
 @property(nonatomic, strong) PESPressButton* logs;
 @property(nonatomic, strong) UILabel* watermarkLabel;
 @property(nonatomic, copy) NSString* localZip;
@@ -913,11 +998,16 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
   self.bar.clipsToBounds = YES;
   self.bar.hidden = YES;
 
-  self.pick = makeButton(@"Chọn gói data (.zip) từ Tệp", YES);
+  self.pick = makeButton(@"Chọn file (.zip) từ Tệp", YES);
   [self.pick addTarget:self action:@selector(onPick) forControlEvents:UIControlEventTouchUpInside];
 
-  self.local = makeButton(@"Nhập gói trong thư mục ứng dụng", NO);
+  self.local = makeButton(@"Nhập file .zip trong Documents", NO);
   [self.local addTarget:self action:@selector(onLocal) forControlEvents:UIControlEventTouchUpInside];
+
+  self.rescan = makeButton(@"Quét thư mục data (3uTools)", NO);
+  [self.rescan setTitleColor:PESLime() forState:UIControlStateNormal];
+  self.rescan.layer.borderColor = [PESLime() colorWithAlphaComponent:0.6].CGColor;
+  [self.rescan addTarget:self action:@selector(onRescan) forControlEvents:UIControlEventTouchUpInside];
 
   self.logs = makeButton(@"Xem nhật ký (Logs)", NO);
   self.logs.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
@@ -949,10 +1039,10 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
     [self.watermarkLabel.trailingAnchor constraintEqualToAnchor:wmContainer.trailingAnchor constant:-14],
   ]];
 
-  UIStackView* btnStack = [[UIStackView alloc] initWithArrangedSubviews:@[self.pick, self.local]];
+  UIStackView* btnStack = [[UIStackView alloc] initWithArrangedSubviews:@[self.rescan, self.pick, self.local]];
   btnStack.axis = UILayoutConstraintAxisHorizontal;
   btnStack.alignment = UIStackViewAlignmentCenter;
-  btnStack.spacing = 14;
+  btnStack.spacing = 10;
 
   UIStackView* cardStack = [[UIStackView alloc] initWithArrangedSubviews:@[
     title, pill, self.status, self.bar, btnStack, self.detail, self.logs, wmContainer
@@ -967,11 +1057,11 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
   [NSLayoutConstraint activateConstraints:@[
     [card.centerXAnchor constraintEqualToAnchor:g.centerXAnchor],
     [card.centerYAnchor constraintEqualToAnchor:g.centerYAnchor],
-    [card.widthAnchor constraintLessThanOrEqualToAnchor:g.widthAnchor multiplier:0.88],
+    [card.widthAnchor constraintLessThanOrEqualToAnchor:g.widthAnchor multiplier:0.92],
     [cardStack.topAnchor constraintEqualToAnchor:card.topAnchor constant:22],
     [cardStack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-18],
-    [cardStack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:28],
-    [cardStack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-28],
+    [cardStack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:24],
+    [cardStack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-24],
     [self.bar.widthAnchor constraintEqualToConstant:420],
   ]];
 
@@ -1000,13 +1090,38 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
 
 - (void)refresh {
   NSString* why = nil;
-  dataReady(&why);
+  if (dataReady(&why)) {
+    self.status.text = @"Đã phát hiện dữ liệu game! Đang vào game…";
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      startGame();
+    });
+    return;
+  }
   self.localZip = [self findLocalZip];
   self.local.hidden = self.localZip == nil;
   if (self.localZip) [self.local setTitle:[NSString stringWithFormat:@"Nhập %@", self.localZip.lastPathComponent] forState:UIControlStateNormal];
-  self.status.text = @"Chưa có dữ liệu game. Hãy chọn file PES2027-data-….zip (khoảng 4.7 GB).\n"
-                     @"Có thể chép file vào thư mục \"Trên iPhone › PES 2027\" bằng app Tệp hoặc Finder/3uTools.";
+  self.status.text = @"Chưa có dữ liệu game. Bạn có thể:\n"
+                     @"1. Dùng 3uTools chép thẳng thư mục data (pak, cpk, Download, livedata) vào app.\n"
+                     @"2. Hoặc chọn file .zip từ app Tệp để giải nén.";
   self.detail.text = [NSString stringWithFormat:@"Bản mod %s • %@", ZIRU_MOD_VERSION, why ?: @""];
+}
+
+- (void)onRescan {
+  [self checkTamper];
+  NSString* why = nil;
+  if (dataReady(&why)) {
+    self.status.text = @"Đã phát hiện dữ liệu game! Đang khởi động…";
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      startGame();
+    });
+  } else {
+    [self refresh];
+    UIAlertController* a = [UIAlertController alertControllerWithTitle:@"Chưa thấy đủ thư mục dữ liệu"
+                                                               message:why ?: @"Hãy đảm bảo đã chép các thư mục pak, cpk, Download, livedata vào Documents."
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:a animated:YES completion:nil];
+  }
 }
 
 - (void)onPick {
