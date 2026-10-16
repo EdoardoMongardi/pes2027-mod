@@ -108,6 +108,12 @@ int main() {
       auto p3 = call(s, "CMD_USE_MYCLUB_CAREERPLAN", newObj()->put("gameplayer_use_list", newArr()->put(reset)))
           ->getJSONArray("careerplan_result_list")->getJSONObject(0)->getJSONObject("gameplayer");
       check(p3->getJSONObject("level_info")->getInt("customize_point") == 68 && p3->getJSONArray("parameters")->getInt(14) == 70, "reset refunds correct budget");
+      auto useReal = newObj()->put("gameplayer_id", p->getJSONObject("gameplayer_id"))
+          ->put("use_list", newArr()->put(newObj()->put("parameter_type", "STRENGTH")->put("point", 12)));
+      auto p4 = call(s, "CMD_USE_MYCLUB_CAREERPLAN", newObj()->put("gameplayer_use_list", newArr()->put(useReal)))
+          ->getJSONArray("careerplan_result_list")->getJSONObject(0)->getJSONObject("gameplayer");
+      check(p4->getJSONObject("level_info")->getInt("customize_point") == 56, "12 points spent");
+      check(p4->getJSONArray("parameters")->getInt(26) == 8, "kicking power auto calculated from progression points");
     }
     std::filesystem::remove_all(root);
     std::cout << "PASS: coach/snapshot/MyLeague, progression spend/reset/restart, AI promotion/idempotency/restart/give-up\n";

@@ -492,6 +492,19 @@ ObjP z27Player(const ObjP& gid) {
       i++;
     }
   }
+  z27ApplyAppearanceAndClub(p);
+  if (serial > 0) {
+    JStr pr = loadProgression(serial);
+    if (pr && !pr->empty()) {
+      ObjP prog = Object::parse(*pr);
+      ObjP w = getZiruPlayerWrapper(Value((long long)gid->getLong("id")), false);
+      ArrP bp = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
+      ArrP params = p->optJSONArray("parameters");
+      if (params && bp) {
+        z27ApplyProgressionPoints(params, prog, bp);
+      }
+    }
+  }
   return ziruSyncActiveBooster(p);
 }
 

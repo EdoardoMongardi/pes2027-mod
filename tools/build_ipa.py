@@ -281,15 +281,19 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=N
         for extra_dir in (os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ziru-extra", "responses"),
                           os.path.join(os.path.dirname(os.path.abspath(__file__)), "ziru-extra", "responses")):
             if os.path.isdir(extra_dir):
-                extra_names = set(os.listdir(extra_dir))
+                for root_dir, dirs, files in os.walk(extra_dir):
+                    for fn in files:
+                        rel = os.path.relpath(os.path.join(root_dir, fn), extra_dir).replace("\\", "/")
+                        extra_names.add(rel)
                 break
         # Ziru responses (JSON templates) from the APK
         with zipfile.ZipFile(apk) as a:
             for e in a.infolist():
                 if e.filename.startswith("assets/responses/") and not e.is_dir():
-                    if os.path.basename(e.filename) in extra_names:
+                    rel_apk = e.filename[len("assets/responses/"):]
+                    if rel_apk in extra_names or os.path.basename(e.filename) in extra_names:
                         continue   # overridden by ziru-extra/responses
-                    arc = root + "ziru/responses/" + e.filename[len("assets/responses/"):]
+                    arc = root + "ziru/responses/" + rel_apk
                     ensure_dir(os.path.dirname(arc))
                     zi = zipfile.ZipInfo(arc, time.localtime()[:6])
                     zi.external_attr = 0o100644 << 16
@@ -301,17 +305,18 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=N
                           os.path.join(os.path.dirname(os.path.abspath(__file__)), "ziru-extra", "responses")):
             if not os.path.isdir(extra_dir):
                 continue
-            for fn in sorted(os.listdir(extra_dir)):
-                src = os.path.join(extra_dir, fn)
-                if not os.path.isfile(src):
-                    continue
-                arc = root + "ziru/responses/" + fn
-                zi = zipfile.ZipInfo(arc, time.localtime()[:6])
-                zi.external_attr = 0o100644 << 16
-                zi.compress_type = zipfile.ZIP_DEFLATED
-                z.writestr(zi, open(src, "rb").read())
-                report.setdefault("extra_responses", []).append(fn)
-                n += 1
+            for root_dir, dirs, files in os.walk(extra_dir):
+                for fn in sorted(files):
+                    src = os.path.join(root_dir, fn)
+                    rel = os.path.relpath(src, extra_dir).replace("\\", "/")
+                    arc = root + "ziru/responses/" + rel
+                    ensure_dir(os.path.dirname(arc))
+                    zi = zipfile.ZipInfo(arc, time.localtime()[:6])
+                    zi.external_attr = 0o100644 << 16
+                    zi.compress_type = zipfile.ZIP_DEFLATED
+                    z.writestr(zi, open(src, "rb").read())
+                    report.setdefault("extra_responses", []).append(rel)
+                    n += 1
             break
         # Built-in fallbacks for commands Ziru's server (client 11.0.1) never answered; ziru-extra/ overrides them
         for fn, body in BUILTIN_RESPONSES.items():

@@ -77,6 +77,7 @@ void applyZiruDynamicRecruit(const ObjP& jo) {
       }
       j2++;
       w->getJSONObject("gameplayer")->getJSONObject("gameplayer_id")->put("serial", (long long)j2);
+      refreshZiruGameplayerFromCanonical(w->getJSONObject("gameplayer"));
       saveZiruPlayerToDb(w->getJSONObject("gameplayer"));
       out->put(w);
     }

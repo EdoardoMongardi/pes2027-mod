@@ -10,6 +10,7 @@
 #include <functional>
 #include <cstdint>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -80,6 +81,9 @@ struct Config {
   std::string downloadDir;   // where the game keeps downloaded files (commentary); "" = dataDir + "/Download"
   bool iosCommentary = false;  // commentary list from the installed file: real size/SHA-256, or empty when absent  // iOS: Ziru's livedata are Android paks (*_mobile_and.pak) the iOS client cannot apply
 };
+
+#include "appearance_presets_gen.inc"
+#include "known_teams_gen.inc"
 
 class OfflineServer {
  public:

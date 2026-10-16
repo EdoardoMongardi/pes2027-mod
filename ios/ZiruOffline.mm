@@ -584,7 +584,7 @@ static BOOL shouldHandleURL(NSURL* url) {
 // (404 -> packs show without pictures). Serve them from PESmobile.app/ziru/cdn/<path> or the on-device cache
 // Documents/PES2027-cache/cdn/<path>; otherwise fetch once from the CDN (when online) and keep a copy for offline use.
 static BOOL isCdnAssetURL(NSURL* url) {
-  if (![url.path hasPrefix:@"/prd/"]) return NO;
+  if (![url.path hasPrefix:@"/prd/"] && ![url.path hasPrefix:@"/banner/"]) return NO;
   if ([url.path rangeOfString:@".."].location != NSNotFound) return NO;
   NSString* h = url.host.lowercaseString;
   return [h isEqualToString:@"d1ln4m3c7n87ju.cloudfront.net"] ||
@@ -632,36 +632,18 @@ static uint32_t gOnlineUid;
 static std::atomic<bool> gOnlineInRoom{false};
 
 static void loadOnlineConfig() {
-  NSMutableDictionary* cfg = [NSMutableDictionary dictionary];
-  for (NSString* f in @[ [gBundleAssets stringByAppendingPathComponent:@"online.json"],
-                          [gDocs stringByAppendingPathComponent:@"PES2027-online.json"] ]) {
-    NSData* d = [NSData dataWithContentsOfFile:f];
-    id j = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
-    if ([j isKindOfClass:NSDictionary.class]) [cfg addEntriesFromDictionary:j];
-  }
-  NSString* server = [cfg[@"server"] isKindOfClass:NSString.class] ? cfg[@"server"] : nil;
-  BOOL enabled = cfg[@"enabled"] ? [cfg[@"enabled"] boolValue] : YES;
-  while ([server hasSuffix:@"/"]) server = [server substringToIndex:server.length - 1];
-  gOnlineServer = (enabled && server.length) ? server : nil;
-  NSURL* onlineURL = gOnlineServer ? [NSURL URLWithString:gOnlineServer] : nil;
-  if (gOnlineServer && (![onlineURL.scheme.lowercaseString isEqualToString:@"https"] || !onlineURL.host.length ||
-                       onlineURL.user.length || onlineURL.password.length || onlineURL.query.length ||
-                       onlineURL.fragment.length || onlineURL.path.length)) {
-    ZLog(@"[ONLINE] invalid server origin; HTTPS host and optional port required");
-    gOnlineServer = nil;
-  }
-  gOnlineToken = [cfg[@"token"] isKindOfClass:NSString.class] ? cfg[@"token"] : nil;
-  gOnlineCertSha256 = [cfg[@"cert_sha256"] isKindOfClass:NSString.class] ? [cfg[@"cert_sha256"] lowercaseString] : nil;
+  // Keep AWS online servers disabled per user request ("gỡ toàn bộ online qua sever aws đi", "chỉ giữ đá qua LAN thôi")
+  gOnlineServer = nil;
+  gOnlineToken = nil;
+  gOnlineCertSha256 = nil;
   NSUserDefaults* ud = NSUserDefaults.standardUserDefaults;
   gOnlineUid = (uint32_t)[ud integerForKey:@"ZiruOnlineUid"];
   if (!gOnlineUid) {
     gOnlineUid = 1000000000u + arc4random_uniform(1000000000u);
     [ud setInteger:gOnlineUid forKey:@"ZiruOnlineUid"];
   }
-  NSString* name = [cfg[@"name"] isKindOfClass:NSString.class] ? cfg[@"name"] : nil;
-  gOnlineName = name.length ? name : [NSString stringWithFormat:@"Player%04u", gOnlineUid % 10000];
-  if (gOnlineServer) ZLog(@"[ONLINE] server %@ uid %u name %@", gOnlineServer, gOnlineUid, gOnlineName);
-  else ZLog(@"[ONLINE] disabled (no server in ziru/online.json or Documents/PES2027-online.json)");
+  gOnlineName = [NSString stringWithFormat:@"Player%04u", gOnlineUid % 10000];
+  ZLog(@"[ONLINE] disabled (AWS servers decommissioned; local LAN/Bluetooth match only)");
 }
 
 static NSString* gateCommand(NSURL* url) {
@@ -777,11 +759,12 @@ static NSData* bodyOf(NSURLRequest* r) {
 - (void)loadCdnAsset {
   NSURL* url = self.request.URL;
   NSString* bundled = [[gBundleAssets stringByAppendingPathComponent:@"cdn"] stringByAppendingPathComponent:url.path];
+  NSString* bundledResp = [[gBundleAssets stringByAppendingPathComponent:@"responses"] stringByAppendingPathComponent:url.path];
   NSString* cached = cdnCachePath(url);
-  for (NSString* f in @[ bundled, cached ]) {
+  for (NSString* f in @[ bundled, bundledResp, cached ]) {
     NSData* d = [NSData dataWithContentsOfFile:f];
     if (d.length) {
-      ZLog(@"[CDN] %@ -> %@ (%lu bytes)", url.path, f == bundled ? @"bundle" : @"cache", (unsigned long)d.length);
+      ZLog(@"[CDN] %@ -> %@ (%lu bytes)", url.path, f == bundled ? @"bundle/cdn" : (f == bundledResp ? @"bundle/responses" : @"cache"), (unsigned long)d.length);
       [self finishWithStatus:200 headers:@{@"Content-Type" : cdnMime(d), @"Content-Length" : [NSString stringWithFormat:@"%lu", (unsigned long)d.length]} data:d];
       return;
     }
@@ -946,7 +929,7 @@ template <int I>
 static void hookSetRequest(id self, SEL _cmd, const char* url, const char* cookie, long isPost, const void* data, long size, long gzip) {
   std::string orig = url ? url : "";
   std::string red = url ? zsv::OfflineServer::redirectUrl(orig) : orig;
-  if (orig.find("/prd/") != std::string::npos) red = orig;  // CDN images: see loadCdnAsset
+  if (orig.find("/prd/") != std::string::npos || orig.find("/banner/") != std::string::npos) red = orig;  // CDN images: see loadCdnAsset
   if (red != orig) {
     ZLog(@"[REDIRECT] %s -> %s", orig.c_str(), red.c_str());
   } else {

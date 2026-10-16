@@ -348,12 +348,34 @@ Response serveInner(Request& r) {
     }
     zs::logw("OFFLINE_SERVER", " [SERVER_NOT_FOUND] No match for: " + uri);
     logRequest(uri, "GENERIC_NO_RESPONSE");
-    if (uri.find("/prd/banner/") != std::string::npos || uri.find(".png") != std::string::npos || uri.find(".jpg") != std::string::npos || uri.find(".webp") != std::string::npos) {
+    size_t bpos = uri.find("/banner/");
+    if (bpos == std::string::npos) bpos = uri.find("/prd/banner/");
+    if (bpos != std::string::npos || uri.find(".png") != std::string::npos || uri.find(".jpg") != std::string::npos || uri.find(".webp") != std::string::npos) {
+      std::string assetPath;
+      if (bpos != std::string::npos) {
+        std::string sub = uri.substr(bpos + 1);
+        if (sub.rfind("prd/banner/", 0) == 0) sub = sub.substr(4);
+        assetPath = "responses/" + sub;
+      } else {
+        assetPath = (uri.front() == '/') ? uri.substr(1) : uri;
+      }
       try {
-        std::string png = readAsset("responses/ziru_blank.png");
-        return newFixed(200, "image/png", {png.begin(), png.end()});
-      } catch (...) {
-        return newFixed(404, "text/plain", {});
+        std::string imgData = readAsset(assetPath);
+        std::string mime = "image/png";
+        if (imgData.size() >= 3 && (uint8_t)imgData[0] == 0xFF && (uint8_t)imgData[1] == 0xD8 && (uint8_t)imgData[2] == 0xFF) {
+          mime = "image/jpeg";
+        } else if (imgData.size() >= 12 && imgData.compare(0, 4, "RIFF") == 0 && imgData.compare(8, 4, "WEBP") == 0) {
+          mime = "image/webp";
+        }
+        logRequest("IOS_BANNER", "[IOS_BANNER_SERVED] " + assetPath + " (" + std::to_string(imgData.size()) + " B)");
+        return newFixed(200, mime, {imgData.begin(), imgData.end()});
+      } catch (const IOEx&) {
+        try {
+          std::string png = readAsset("responses/ziru_blank.png");
+          return newFixed(200, "image/png", {png.begin(), png.end()});
+        } catch (...) {
+          return newFixed(404, "text/plain", {});
+        }
       }
     }
     return handleZiruProtocolAckV81(std::nullopt);

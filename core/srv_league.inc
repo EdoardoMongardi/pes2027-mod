@@ -402,6 +402,7 @@ ObjP getZiruPlayerWrapper(const Value& obj, bool warehouse) {
       li->put("exp_to_next_level", 0);
       li->put("customize_point", ziruProgressionBudget(lim));
     }
+    z27ApplyAppearanceAndClub(jo->optJSONObject("gameplayer"));
     return jo;
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V12_RECORD_ERR] failed ") + e.what());
@@ -479,7 +480,18 @@ Response handleZiruCareerplan(Request& r) {
                 else {
                   ArrP params = ziruCareerParameters;
                   res = jo;
-                  if (params && params->length() > 0) {
+                  if (!params || params->length() < 145) {
+                    ObjP baseWrapper = getZiruPlayerWrapper(Value((long long)ziruCareerPlayerId), false);
+                    ArrP bp = (baseWrapper && baseWrapper->optJSONObject("gameplayer")) ?
+                              baseWrapper->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
+                    if (!bp) bp = jo->optJSONArray("parameters");
+                    if (bp) {
+                      ArrP np = Array::parse(bp->toString());
+                      z27ApplyProgressionPoints(np, ziruCareerProgression, bp);
+                      z28PreserveCareerTraining(jo, np);
+                      jo->put("parameters", np);
+                    }
+                  } else {
                     z28PreserveCareerTraining(jo, params);
                     jo->put("parameters", params);
                   }
@@ -487,6 +499,7 @@ Response handleZiruCareerplan(Request& r) {
               }
             }
             if (!fail) {
+              z27ApplyAppearanceAndClub(res);
               ObjP li = res->optJSONObject("level_info");
               if (li) {
                 int cp = ziruProgressionBudget(li->optInt("level_limit", 1)) - ziruCareerSpent;
