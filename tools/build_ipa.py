@@ -50,6 +50,17 @@ def sha256_file(path, chunk=1 << 20):
     return h.hexdigest()
 
 
+class Partial(Exception):
+    pass
+
+
+DEADLINE = [None]
+
+
+def over_budget():
+    return DEADLINE[0] is not None and time.time() > DEADLINE[0]
+
+
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
@@ -168,6 +179,105 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
 
 
 # ------------------------------------------------------------------ data pack
+def _dos_time(t=None):
+    lt = time.localtime(t)
+    return ((lt.tm_hour << 11) | (lt.tm_min << 5) | (lt.tm_sec // 2),
+            ((max(lt.tm_year, 1980) - 1980) << 9) | (lt.tm_mon << 5) | lt.tm_mday)
+
+
+def write_pack_resumable(tmp, final, manifest, files, recs, apk):
+    """STORED ZIP64 writer whose progress survives being killed: state is saved after every
+    chunk, and a restart truncates the file to the last saved position and continues."""
+    import struct
+    import zlib
+    state_path = tmp + ".state.json"
+    mbytes = json.dumps(manifest, indent=1).encode()
+    jobs = [("data-manifest.json", ("bytes", None), len(mbytes))]
+    sizes = {r["path"]: r["size"] for r in recs}
+    jobs += [(arc, spec, sizes[arc]) for arc, spec in files]
+    st = None
+    if os.path.exists(state_path) and os.path.exists(tmp):
+        st = json.load(open(state_path))
+        if st.get("data_id") != manifest["data_id"]:
+            st = None
+    if st is None:
+        st = {"data_id": manifest["data_id"], "entries": [], "cur": None, "pos": 0}
+    tm, dt = _dos_time()
+
+    def save():
+        with open(state_path + ".new", "w") as f:
+            json.dump(st, f)
+        os.replace(state_path + ".new", state_path)
+
+    f = open(tmp, "r+b" if os.path.exists(tmp) else "w+b")
+    f.truncate(st["pos"])
+    f.seek(st["pos"])
+    done_names = {e["name"] for e in st["entries"]}
+    apkz = None
+    for name, (kind, src), size in jobs:
+        if name in done_names:
+            continue
+        cur = st["cur"]
+        if cur is None or cur["name"] != name:
+            if over_budget():
+                f.close(); save(); raise Partial("writing")
+            nb = name.encode()
+            hdr = struct.pack("<IHHHHHIIIHH", 0x04034b50, 45, 0x0800, 0, tm, dt, 0, 0xFFFFFFFF, 0xFFFFFFFF,
+                              len(nb), 20) + nb + struct.pack("<HHQQ", 1, 16, size, size)
+            cur = {"name": name, "offset": f.tell(), "hdr": len(hdr), "done": 0, "crc": 0}
+            f.write(hdr)
+            st["cur"] = cur; st["pos"] = f.tell(); f.flush(); save()
+            log("  +", name, f"({size / 1048576:.1f} MB)")
+        if kind == "bytes":
+            data_iter = iter([mbytes])
+        elif kind == "apk":
+            # small entries: restart from the beginning of the entry if interrupted
+            if cur["done"]:
+                f.truncate(cur["offset"] + cur["hdr"]); f.seek(cur["offset"] + cur["hdr"])
+                cur["done"] = 0; cur["crc"] = 0
+            apkz = apkz or zipfile.ZipFile(apk)
+            fi = apkz.open(src)
+            data_iter = iter(lambda: fi.read(1 << 20), b"")
+        else:
+            fi = open(src, "rb")
+            fi.seek(cur["done"])
+            data_iter = iter(lambda: fi.read(8 << 20), b"")
+        last_save = time.time()
+        for chunk in data_iter:
+            f.write(chunk)
+            cur["crc"] = zlib.crc32(chunk, cur["crc"])
+            cur["done"] += len(chunk)
+            if time.time() - last_save > 5 or over_budget():
+                f.flush(); st["pos"] = f.tell(); save(); last_save = time.time()
+                if over_budget() and kind == "fs" and cur["done"] < size:
+                    f.close(); raise Partial("writing " + name)
+        if cur["done"] != size:
+            raise SystemExit(f"size changed while packing: {name}")
+        end = f.tell()
+        f.seek(cur["offset"] + 14)
+        f.write(struct.pack("<I", cur["crc"]))
+        f.seek(end)
+        st["entries"].append({"name": name, "offset": cur["offset"], "size": size, "crc": cur["crc"]})
+        st["cur"] = None; st["pos"] = end; f.flush(); save()
+    # central directory + ZIP64 end records
+    cd_off = f.tell()
+    for e in st["entries"]:
+        nb = e["name"].encode()
+        f.write(struct.pack("<IHHHHHHIIIHHHHHII", 0x02014b50, 45, 45, 0x0800, 0, tm, dt, e["crc"],
+                            0xFFFFFFFF, 0xFFFFFFFF, len(nb), 28, 0, 0, 0, 0, 0xFFFFFFFF) + nb +
+                struct.pack("<HHQQQ", 1, 24, e["size"], e["size"], e["offset"]))
+    cd_end = f.tell()
+    n = len(st["entries"])
+    f.write(struct.pack("<IQHHIIQQQQ", 0x06064b50, 44, 45, 45, 0, 0, n, n, cd_end - cd_off, cd_off))
+    f.write(struct.pack("<IIQI", 0x07064b50, 0, cd_end, 1))
+    f.write(struct.pack("<IHHHHIIH", 0x06054b50, 0, 0, min(n, 0xFFFF), min(n, 0xFFFF), 0xFFFFFFFF, 0xFFFFFFFF, 0))
+    f.close()
+    os.replace(tmp, final)
+    with open(state_path, "w") as sf:   # deletion may be blocked; leave a tiny marker instead
+        sf.write("{}")
+    log("data pack written:", final)
+
+
 def build_data(app, apk, out, report, include_livedata=True, ziru_cpk=("dt500",), commentary=None):
     files = []  # (arcname, source spec)
     apk_names = set(zipfile.ZipFile(apk).namelist())
@@ -189,36 +299,43 @@ def build_data(app, apk, out, report, include_livedata=True, ziru_cpk=("dt500",)
             for e in a.infolist():
                 if e.filename.startswith("assets/livedata/") and not e.is_dir():
                     files.append(("livedata/" + e.filename[len("assets/livedata/"):], ("apk", e.filename)))
+    # ---- hashing (cached, resumable) ----
+    cache_path = os.path.join(out, ".hash-cache.json")
+    cache = json.load(open(cache_path)) if os.path.exists(cache_path) else {}
     log(f"hashing {len(files)} data files…")
     recs = []
     apkz = zipfile.ZipFile(apk)
     for arc, (kind, src) in files:
-        if kind == "fs":
-            size, sha = os.path.getsize(src), sha256_file(src)
+        key = f"{kind}:{src}"
+        st = os.stat(src if kind == "fs" else apk)
+        stamp = [st.st_size, int(st.st_mtime)]
+        c = cache.get(key)
+        if c and c["stamp"] == stamp:
+            size, sha = c["size"], c["sha256"]
         else:
+            if over_budget():
+                json.dump(cache, open(cache_path, "w"))
+                raise Partial("hashing")
             h = hashlib.sha256(); size = 0
-            with apkz.open(src) as fi:
+            fi = open(src, "rb") if kind == "fs" else apkz.open(src)
+            with fi:
                 for b in iter(lambda: fi.read(1 << 20), b""):
                     h.update(b); size += len(b)
             sha = h.hexdigest()
+            cache[key] = {"stamp": stamp, "size": size, "sha256": sha}
+            json.dump(cache, open(cache_path, "w"))
         recs.append({"path": arc, "size": size, "sha256": sha})
     digest = hashlib.sha256(json.dumps(recs, sort_keys=True).encode()).hexdigest()[:12]
     data_id = f"pes2027-{EXPECTED_VERSION[1]}-{digest}"
     manifest = {"format": 1, "data_id": data_id, "client_version": EXPECTED_VERSION[0], "client_build": EXPECTED_VERSION[1],
-                "mod_version": MOD_VERSION, "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "files": recs}
+                "mod_version": MOD_VERSION, "files": recs}
     path = os.path.join(out, f"PES2027-data-{data_id}.zip")
     tmp = path + ".tmp"
-    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
-        z.writestr("data-manifest.json", json.dumps(manifest, indent=1))
-        for arc, (kind, src) in files:
-            log("  +", arc)
-            if kind == "fs":
-                z.write(src, arc)
-            else:
-                zi = zipfile.ZipInfo(arc, time.localtime()[:6])
-                with apkz.open(src) as fi, z.open(zi, "w", force_zip64=True) as fo:
-                    shutil.copyfileobj(fi, fo, 1 << 20)
-    os.replace(tmp, path)
+    # ---- writing (custom ZIP64 STORED writer, resumable at chunk level) ----
+    if os.path.exists(path):
+        log("data pack already complete:", path)
+    else:
+        write_pack_resumable(tmp, path, manifest, files, recs, apk)
     with open(os.path.join(out, "data-manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)
     total = sum(r["size"] for r in recs)
@@ -235,20 +352,48 @@ def main():
     ap.add_argument("--bundle-id", default="", help="optional new CFBundleIdentifier (keep empty to let your signer decide)")
     ap.add_argument("--display-name", default="PES 2027")
     ap.add_argument("--skip-data", action="store_true", help="only build the IPA")
+    ap.add_argument("--skip-ipa", action="store_true", help="only build/continue the data pack")
+    ap.add_argument("--time-budget", type=float, default=0, help="seconds; stop cleanly and exit 3 when exceeded (run again to continue)")
     ap.add_argument("--no-livedata", action="store_true", help="do not ship Ziru's Android livedata in the data pack")
     ap.add_argument("--ziru-cpk", default="dt500", help="comma list of CPK stems taken from the Ziru APK instead of the IPA (default dt500; '' = none)")
     ap.add_argument("--commentary", default="", help="commentary CPK to install into the game's Download folder, e.g. D:\\Telegram\\dt510_eng_mobile_all.cpk (Vietnamese)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
+    if a.time_budget:
+        DEADLINE[0] = time.time() + a.time_budget
     report = {"tool": "build_ipa.py", "mod_version": MOD_VERSION, "time": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
               "inputs": {"app": os.path.abspath(a.app), "dylib": os.path.abspath(a.dylib), "dylib_sha256": sha256_file(a.dylib),
                          "apk": os.path.abspath(a.apk)},
               "patches": [], "outputs": {}}
-    build_ipa(a.app, a.dylib, a.apk, a.out, report, a.bundle_id, a.display_name)
+    report_path = os.path.join(a.out, "build-report.json")
+    if not a.skip_ipa:
+        build_ipa(a.app, a.dylib, a.apk, a.out, report, a.bundle_id, a.display_name)
+        with open(report_path, "w") as f:
+            json.dump(report, f, indent=1)
+    else:
+        # keep the IPA part of an earlier report; otherwise describe the existing IPA
+        prev = json.load(open(report_path)) if os.path.exists(report_path) else {}
+        if prev.get("outputs", {}).get("ipa"):
+            report["patches"] = prev.get("patches", [])
+            report["outputs"]["ipa"] = prev["outputs"]["ipa"]
+            report["inputs"]["PESmobile_sha256"] = prev.get("inputs", {}).get("PESmobile_sha256")
+        elif os.path.exists(os.path.join(a.out, "PES2027.ipa")):
+            exe = os.path.join(a.app, "PESmobile")
+            report["inputs"]["PESmobile_sha256"] = sha256_file(exe)
+            patch_executable(bytearray(open(exe, "rb").read()), report)
+            ipa = os.path.join(a.out, "PES2027.ipa")
+            with zipfile.ZipFile(ipa) as zi:
+                nfiles = len(zi.namelist())
+            report["outputs"]["ipa"] = {"path": ipa, "size": os.path.getsize(ipa), "sha256": sha256_file(ipa), "files": nfiles,
+                                        "note": "described afterwards (built by an earlier run)"}
     if not a.skip_data:
-        build_data(a.app, a.apk, a.out, report, include_livedata=not a.no_livedata,
-                   ziru_cpk=tuple(x for x in a.ziru_cpk.split(",") if x), commentary=a.commentary or None)
-    with open(os.path.join(a.out, "build-report.json"), "w") as f:
+        try:
+            build_data(a.app, a.apk, a.out, report, include_livedata=not a.no_livedata,
+                       ziru_cpk=tuple(x for x in a.ziru_cpk.split(",") if x), commentary=a.commentary or None)
+        except Partial as e:
+            log(f"PARTIAL ({e}) – time budget reached, run the same command again to continue")
+            sys.exit(3)
+    with open(report_path, "w") as f:
         json.dump(report, f, indent=1)
     log("done. Sign PES2027.ipa with your usual tool (Sideloadly/ESign/…), install, then import the data zip in the app.")
 
