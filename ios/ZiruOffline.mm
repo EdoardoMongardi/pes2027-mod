@@ -16,13 +16,8 @@
 #import <mach-o/loader.h>
 #import <mach-o/nlist.h>
 #import <dlfcn.h>
-#import <execinfo.h>
-#ifndef _XOPEN_SOURCE
-#define _XOPEN_SOURCE 700
-#endif
 #import <signal.h>
 #import <sys/stat.h>
-#import <sys/ucontext.h>
 #import <fcntl.h>
 #import <unistd.h>
 #include <atomic>
@@ -145,14 +140,11 @@ static void crashHandler(int sig, siginfo_t* info, void* ucontext) {
   fprintf(f, "ASLR Slide: 0x%lx\n", (unsigned long)mainSlide);
   fprintf(f, "\n--- Backtrace ---\n");
 
-  void* callstack[64];
-  int frames = backtrace(callstack, 64);
-  char** strs = backtrace_symbols(callstack, frames);
-  if (strs) {
-    for (int i = 0; i < frames; ++i) {
-      fprintf(f, "#%02d %s\n", i, strs[i]);
+  NSArray<NSString*>* syms = [NSThread callStackSymbols];
+  if (syms) {
+    for (NSUInteger i = 0; i < syms.count; ++i) {
+      fprintf(f, "#%02lu %s\n", (unsigned long)i, syms[i].UTF8String);
     }
-    free(strs);
   }
   fprintf(f, "==============================================================\n\n");
   if (f != stderr) fclose(f);
