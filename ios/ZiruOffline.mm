@@ -362,7 +362,7 @@ static uint64_t freeBytes() {
     NSString* build = NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"];
     bool ok = zd::inspectPack(zip, m, err) && zd::checkCompatible(m, ver.UTF8String ?: "", build.UTF8String ?: "", ZIRU_MOD_VERSION, err);
     if (ok) {
-      __block CFAbsoluteTime last = 0;
+      CFAbsoluteTime last = 0;
       ok = zd::installPack(zip, layout(), freeBytes(), [&](const zd::Progress& p) {
         CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
         if (now - last < 0.2 && p.phase == "extract") return true;
