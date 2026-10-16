@@ -577,10 +577,48 @@ static BOOL shouldHandleURL(NSURL* url) {
   return NO;
 }
 
+// Konami CDN images (pack/agent banners: /prd/banner/agent/<id>/<sha256>, campaign art ...). Ziru's responses point at
+// d1ln4m3c7n87ju.cloudfront.net/prd/...; the Android build fetches them from the real CDN, the local server has none
+// (404 -> packs show without pictures). Serve them from PESmobile.app/ziru/cdn/<path> or the on-device cache
+// Documents/PES2027-cache/cdn/<path>; otherwise fetch once from the CDN (when online) and keep a copy for offline use.
+static BOOL isCdnAssetURL(NSURL* url) {
+  return [url.host.lowercaseString isEqualToString:@"d1ln4m3c7n87ju.cloudfront.net"] && [url.path hasPrefix:@"/prd/"] &&
+         [url.path rangeOfString:@".."].location == NSNotFound;
+}
+static NSString* cdnCachePath(NSURL* url) {
+  return [[gDocs stringByAppendingPathComponent:@"PES2027-cache/cdn"] stringByAppendingPathComponent:url.path];
+}
+static NSString* cdnMime(NSData* d) {
+  const uint8_t* b = (const uint8_t*)d.bytes;
+  if (d.length >= 8 && b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G') return @"image/png";
+  if (d.length >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return @"image/jpeg";
+  if (d.length >= 12 && memcmp(b, "RIFF", 4) == 0 && memcmp(b + 8, "WEBP", 4) == 0) return @"image/webp";
+  return @"application/octet-stream";
+}
+static IMP gOrigEphemeralCfg;  // defined with the configuration hooks below
+static NSURLSession* cdnSession() {
+  static NSURLSession* s;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    // the unhooked ephemeral configuration: no ZiruURLProtocol, so the request really goes to the CDN
+    NSURLSessionConfiguration* c = gOrigEphemeralCfg
+        ? ((NSURLSessionConfiguration * (*)(id, SEL)) gOrigEphemeralCfg)(NSURLSessionConfiguration.class, @selector(ephemeralSessionConfiguration))
+        : NSURLSessionConfiguration.ephemeralSessionConfiguration;
+    NSMutableArray* p = [NSMutableArray arrayWithArray:c.protocolClasses ?: @[]];
+    [p removeObject:NSClassFromString(@"ZiruURLProtocol")];
+    c.protocolClasses = p;
+    c.timeoutIntervalForRequest = 20;
+    s = [NSURLSession sessionWithConfiguration:c];
+  });
+  return s;
+}
+
 @interface ZiruURLProtocol : NSURLProtocol
 @end
 
-@implementation ZiruURLProtocol
+@implementation ZiruURLProtocol {
+  NSURLSessionDataTask* _cdnTask;
+}
 + (BOOL)canInitWithRequest:(NSURLRequest*)request {
   if (shouldHandleURL(request.URL)) return YES;
   if (request.URL) {
@@ -610,9 +648,57 @@ static NSData* bodyOf(NSURLRequest* r) {
   return d;
 }
 
+- (void)finishWithStatus:(NSInteger)status headers:(NSDictionary*)headers data:(NSData*)data {
+  NSHTTPURLResponse* hr = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL statusCode:status HTTPVersion:@"HTTP/1.1" headerFields:headers];
+  [self.client URLProtocol:self didReceiveResponse:hr cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+  if (data.length) [self.client URLProtocol:self didLoadData:data];
+  [self.client URLProtocolDidFinishLoading:self];
+}
+
+- (void)loadCdnAsset {
+  NSURL* url = self.request.URL;
+  NSString* bundled = [[gBundleAssets stringByAppendingPathComponent:@"cdn"] stringByAppendingPathComponent:url.path];
+  NSString* cached = cdnCachePath(url);
+  for (NSString* f in @[ bundled, cached ]) {
+    NSData* d = [NSData dataWithContentsOfFile:f];
+    if (d.length) {
+      ZLog(@"[CDN] %@ -> %@ (%lu bytes)", url.path, f == bundled ? @"bundle" : @"cache", (unsigned long)d.length);
+      [self finishWithStatus:200 headers:@{@"Content-Type" : cdnMime(d), @"Content-Length" : [NSString stringWithFormat:@"%lu", (unsigned long)d.length]} data:d];
+      return;
+    }
+  }
+  CFRunLoopRef rl = CFRunLoopGetCurrent();
+  NSURLRequest* rq = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20];
+  __weak ZiruURLProtocol* weakSelf = self;
+  _cdnTask = [cdnSession() dataTaskWithRequest:rq completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
+    NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse*)response).statusCode : 0;
+    if (!error && status == 200 && data.length) {
+      [NSFileManager.defaultManager createDirectoryAtPath:cached.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+      [data writeToFile:cached atomically:YES];
+    }
+    ZLog(@"[CDN] %@ -> network %ld, %lu bytes%@", url.path, (long)status, (unsigned long)data.length,
+         error ? [@" error: " stringByAppendingString:error.localizedDescription] : @"");
+    CFRunLoopPerformBlock(rl, kCFRunLoopCommonModes, ^{
+      ZiruURLProtocol* me = weakSelf;
+      if (!me) return;
+      if (error || !status) {
+        [me.client URLProtocol:me didFailWithError:error ?: [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorBadServerResponse userInfo:nil]];
+        return;
+      }
+      [me finishWithStatus:status headers:@{@"Content-Type" : cdnMime(data ?: [NSData data]), @"Content-Length" : [NSString stringWithFormat:@"%lu", (unsigned long)data.length]} data:data];
+    });
+    CFRunLoopWakeUp(rl);
+  }];
+  [_cdnTask resume];
+}
+
 - (void)startLoading {
   NSURLRequest* rq = self.request;
   NSURL* url = rq.URL;
+  if (isCdnAssetURL(url)) {
+    [self loadCdnAsset];
+    return;
+  }
   zsv::Request r;
   r.method = rq.HTTPMethod ? rq.HTTPMethod.uppercaseString.UTF8String : "GET";
   NSString* path = url.path.length ? url.path : @"/";                // decoded, no query (NanoHTTPD getUri)
@@ -643,7 +729,10 @@ static NSData* bodyOf(NSURLRequest* r) {
   if (!resp.body.empty()) [self.client URLProtocol:self didLoadData:[NSData dataWithBytes:resp.body.data() length:resp.body.size()]];
   [self.client URLProtocolDidFinishLoading:self];
 }
-- (void)stopLoading {}
+- (void)stopLoading {
+  [_cdnTask cancel];
+  _cdnTask = nil;
+}
 @end
 
 // ---------------------------------------------------------------- swizzling helpers
@@ -660,7 +749,7 @@ static IMP swizzleInstance(Class c, SEL s, IMP repl) {
 }
 
 // NSURLSessionConfiguration: put our protocol first in every default/ephemeral configuration
-static IMP gOrigDefaultCfg, gOrigEphemeralCfg;
+static IMP gOrigDefaultCfg;  // gOrigEphemeralCfg is declared with the CDN helpers above
 static NSURLSessionConfiguration* withProtocol(NSURLSessionConfiguration* c) {
   NSMutableArray* p = [NSMutableArray arrayWithArray:c.protocolClasses ?: @[]];
   if (![p containsObject:ZiruURLProtocol.class]) [p insertObject:ZiruURLProtocol.class atIndex:0];
@@ -691,12 +780,58 @@ template <int I>
 static void hookSetRequest(id self, SEL _cmd, const char* url, const char* cookie, long isPost, const void* data, long size, long gzip) {
   std::string orig = url ? url : "";
   std::string red = url ? zsv::OfflineServer::redirectUrl(orig) : orig;
+  if (orig.find("://d1ln4m3c7n87ju.cloudfront.net/prd/") != std::string::npos) red = orig;  // CDN images: see loadCdnAsset
   if (red != orig) {
     ZLog(@"[REDIRECT] %s -> %s", orig.c_str(), red.c_str());
   } else {
     ZLog(@"[HTTP_DIRECT] %s", orig.c_str());
   }
   gOrigSetReq[I](self, _cmd, url ? red.c_str() : url, cookie, isPost, data, size, gzip);
+}
+
+// ---------------------------------------------------------------- real frame-rate cap (FramePace)
+// FMetalViewport::Present presents with afterMinimumDuration = 1 / FIOSPlatformRHIFramePacer::GetFramePace().
+// GetFramePace (0x101aee720) returns maximumFramesPerSecond / rhi.SyncInterval only when
+// [/Script/IOSRuntimeSettings.IOSRuntimeSettings] bEnableDynamicMaxFPS is true; eFootball's DefaultEngine.ini does
+// not set it, so it returns 60 / SyncInterval and every frame is held for >= 16.7 ms: the game can never exceed
+// 60 fps, whatever t.MaxFPS or CADisplayLink say. GetFramePace caches that ini value in two bytes of __DATA
+// (0x10716a062 = value, 0x10716a063 = "already read"); set both so the cap follows the screen (120 on ProMotion).
+static void enableDynamicMaxFps() {
+  intptr_t slide = _dyld_get_image_vmaddr_slide(0);
+  const uint32_t* code = (const uint32_t*)(0x101aee764 + slide);
+  if (code[0] != 0x39418d08 || ((const uint32_t*)(0x101aee7ac + slide))[0] != 0x39418908) {
+    ZLog(@"[FPS] GetFramePace does not match this binary - dynamic max FPS not enabled");
+    return;
+  }
+  volatile uint8_t* cached = (volatile uint8_t*)(0x10716a062 + slide);
+  cached[0] = 1;  // bEnableDynamicMaxFPS = true
+  cached[1] = 1;  // value already loaded from the ini
+  ZLog(@"[FPS] bEnableDynamicMaxFPS forced on: present pacing follows UIScreen.maximumFramesPerSecond");
+}
+
+// Measured frame rate: the renderer takes one drawable per presented frame.
+static std::atomic<uint32_t> gDrawables{0};
+static IMP gOrigNextDrawable;
+static id hookNextDrawable(id self, SEL _cmd) {
+  gDrawables.fetch_add(1, std::memory_order_relaxed);
+  return ((id(*)(id, SEL))gOrigNextDrawable)(self, _cmd);
+}
+static void startFpsMeter() {
+  Class c = NSClassFromString(@"CAMetalLayer");
+  if (!c) return;
+  gOrigNextDrawable = swizzleInstance(c, @selector(nextDrawable), (IMP)hookNextDrawable);
+  dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+  static dispatch_source_t keep;
+  keep = t;
+  dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), 10 * NSEC_PER_SEC, NSEC_PER_SEC);
+  dispatch_source_set_event_handler(t, ^{
+    uint32_t n = gDrawables.exchange(0);
+    if (!n) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      ZLog(@"[FPS] measured %.1f fps (screen max %ld Hz)", n / 10.0, (long)UIScreen.mainScreen.maximumFramesPerSecond);
+    });
+  });
+  dispatch_resume(t);
 }
 
 // ---------------------------------------------------------------- 120 FPS Unlock
@@ -1693,5 +1828,7 @@ __attribute__((constructor)) static void ziruInit() {
       }
       ZLog(@"[120FPS] CADisplayLink 120 FPS hooks installed");
     }
+    enableDynamicMaxFps();
+    startFpsMeter();
   }
 }

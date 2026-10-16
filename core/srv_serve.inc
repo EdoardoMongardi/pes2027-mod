@@ -22,14 +22,10 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     if (eula) {
       eula->put("eula_privacy_action", "NONE");
       eula->put("eula_country_age_kind", "NONE");
-      eula->put("eula_ip_country_a3", "VNM");
-      eula->put("eula_select_country_a3", "VNM");
+      // Keep Ziru's own country (TUR). Forcing VNM here (e1d55ad) is when the Ziru packs disappeared.
     }
     jo->put("select_country_privacy_action", "NONE");
     jo->put("country_status", "NO_CHANGE");
-  }
-  if (jo && (name == "responses/CmdGetServerEnv.json" || name == "responses/GateInfo.json")) {
-    jo->put("ip_country_code", "VNM");
   }
   if (jo && (name == "responses/get_myclub_commentary_info.json" || name == "responses/ZIRU_GET_COMMENTARY_DATA.json"))
     patchIosCommentaryData(jo);
@@ -82,11 +78,25 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     jo->put("gp", 99999999999LL);
     ObjP ci = jo->optJSONObject("coin_info");
     if (ci) ci->put("coin", 9999999LL);
+    // Main-menu banners of type AGENT are the entry points to Ziru's packs (EPIC 1368, BIG TIME 1348, SHOW TIME 1374).
+    // ab162b9 turned every one into NONE, which removed the packs from the menu. Only neutralize a banner whose agent
+    // is not in the agent list (a dangling entity is what can crash the menu).
     ArrP bl = jo->optJSONArray("banner_list");
     if (bl) {
+      std::set<long long> agents;
+      try {
+        ObjP al = loadZiruJsonAssetObject("responses/get_myclub_agentlist.json");
+        ArrP l = al ? al->optJSONArray("agent_list") : nullptr;
+        for (int i = 0; l && i < l->length(); i++) {
+          ObjP a = l->optJSONObject(i);
+          if (a) agents.insert(a->optLong("agent_id", 0));
+        }
+      } catch (const std::exception&) {
+      }
       for (int i = 0; i < bl->length(); i++) {
         ObjP b = bl->optJSONObject(i);
-        if (b && b->optString("announcement_type", "") == "AGENT") {
+        if (b && b->optString("announcement_type", "") == "AGENT" && !agents.count(b->optLong("entity_id", 0))) {
+          logRequest("IOS_BANNER", "[IOS_BANNER] AGENT banner without agent " + str(b->optLong("entity_id", 0)) + " -> NONE");
           b->put("announcement_type", "NONE");
           b->put("entity_id", 0);
         }
