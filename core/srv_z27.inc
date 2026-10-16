@@ -306,7 +306,7 @@ void z27Restore(const ObjP& jo) {
 ObjP z27State() {
   ObjP m = z27Meta("z27_division_state");
   if (m) {
-    if (!z27Meta("z27_div1_set")) {
+    if (!loadMeta("z27_div1_set")) {
       m->put("division", 1);
       m->put("best", 1);
       m->put("point", 0);
