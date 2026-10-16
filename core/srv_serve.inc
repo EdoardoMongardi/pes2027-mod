@@ -370,6 +370,18 @@ Response serveInner(Request& r) {
         logRequest("IOS_BANNER", "[IOS_BANNER_SERVED] " + assetPath + " (" + std::to_string(imgData.size()) + " B)");
         return newFixed(200, mime, {imgData.begin(), imgData.end()});
       } catch (const IOEx&) {
+        size_t slash = assetPath.rfind('/');
+        if (slash != std::string::npos) {
+          std::string dir = assetPath.substr(0, slash + 1);
+          for (const char* fbName : {"offline_pack_banner.png", "offline_pack_banner.jpg"}) {
+            try {
+              std::string imgData = readAsset(dir + fbName);
+              std::string mime = (std::string(fbName).find(".jpg") != std::string::npos) ? "image/jpeg" : "image/png";
+              logRequest("IOS_BANNER", "[IOS_BANNER_FALLBACK] " + dir + fbName + " (" + std::to_string(imgData.size()) + " B)");
+              return newFixed(200, mime, {imgData.begin(), imgData.end()});
+            } catch (...) {}
+          }
+        }
         try {
           std::string png = readAsset("responses/ziru_blank.png");
           return newFixed(200, "image/png", {png.begin(), png.end()});

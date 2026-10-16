@@ -114,6 +114,8 @@ int main() {
           ->getJSONArray("careerplan_result_list")->getJSONObject(0)->getJSONObject("gameplayer");
       check(p4->getJSONObject("level_info")->getInt("customize_point") == 56, "12 points spent");
       check(p4->getJSONArray("parameters")->getInt(26) == 8, "kicking power auto calculated from progression points");
+      auto entryTest = call(s, "CMD_SET_MYCLUB_ENTRY_INFO", newObj()->put("base_team_id", 262143)->put("team_name", "Entry Team"));
+      check(entryTest->getJSONArray("base_team")->getJSONObject(0)->getString("base_team_license") == "LICENSED", "entry info sets licensed base team");
     }
     std::filesystem::remove_all(root);
     std::cout << "PASS: coach/snapshot/MyLeague, progression spend/reset/restart, AI promotion/idempotency/restart/give-up\n";

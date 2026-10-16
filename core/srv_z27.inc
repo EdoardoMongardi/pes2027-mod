@@ -36,25 +36,44 @@ ObjP z27Teams() { return nn(loadZiruJsonAssetObject("responses/ZIRU_MATCH_TEAMS.
 
 ObjP z27Team(int32_t id) {
   ObjP teams = z27Teams();
-  ObjP t = teams ? teams->optJSONObject(str(id)) : nullptr;
+  int32_t lookup_id = (id <= 0 || id == 262143) ? 100 : id;
+  ObjP t = teams ? teams->optJSONObject(str(lookup_id)) : nullptr;
   if (!t && teams) {
-    for (const auto& k : teams->keys()) {
-      t = teams->optJSONObject(k);
+    for (const char* tid : {"100", "109", "102", "173", "135"}) {
+      t = teams->optJSONObject(tid);
       if (t) break;
     }
+    if (!t) {
+      for (const auto& k : teams->keys()) {
+        t = teams->optJSONObject(k);
+        if (t) break;
+      }
+    }
   }
-  if (!t) throw IllegalArg("Team lacks validated kit pair: " + str(id));
+  if (!t) {
+    ObjP syn = newObj()
+        ->put("base_team_id", lookup_id)
+        ->put("base_team_license", "LICENSED")
+        ->put("team_name", "PES Team")
+        ->put("team_name_short", "PES");
+    ArrP kits = newArr();
+    kits->put(newObj()->put("id", 1)->put("shirt_rgb", newArr()->put(255)->put(255)->put(255)));
+    kits->put(newObj()->put("id", 2)->put("shirt_rgb", newArr()->put(0)->put(0)->put(0)));
+    syn->put("kits", kits);
+    return syn;
+  }
   ObjP copy = z27Copy(t);
-  if (id != 0 && copy->optInt("base_team_id", 0) != id) {
+  if (id != 0 && id != 262143 && copy->optInt("base_team_id", 0) != id) {
     copy->put("base_team_id", id);
   }
+  copy->put("base_team_license", "LICENSED");
   return copy;
 }
 
 ObjP z27Identity(const ObjP& t) {
   return newObj()
       ->put("base_team_id", nn(t)->getInt("base_team_id"))
-      ->put("base_team_license", t->optString("base_team_license", "UNKNOWN"))
+      ->put("base_team_license", "LICENSED")
       ->put("team_name", t->getString("team_name"))
       ->put("team_name_short", t->getString("team_name_short"));
 }
@@ -74,6 +93,7 @@ ObjP z27Squad(int32_t id) {
     ObjP sq = list->getJSONObject(i);
     if (sq->optInt("squad_id", -1) == id) return z27Copy(sq->getJSONObject("squad_data"));
   }
+  if (list->length() > 0) return z27Copy(list->getJSONObject(0)->getJSONObject("squad_data"));
   throw IllegalState("Unknown squad " + str(id));
 }
 
@@ -93,7 +113,8 @@ ObjP z27Base(int32_t id) {
     ObjP sq = list->getJSONObject(i);
     if (sq->optInt("squad_id", -1) == id) return z27Identity(z27Team(sq->getJSONArray("base_team")->getJSONObject(0)->getInt("base_team_id")));
   }
-  throw IllegalState("Missing base team " + str(id));
+  if (list->length() > 0) return z27Identity(z27Team(list->getJSONObject(0)->getJSONArray("base_team")->getJSONObject(0)->getInt("base_team_id")));
+  return z27Identity(z27Team(100));
 }
 
 ArrP z27Kits(const ObjP& team) {
@@ -109,11 +130,7 @@ ObjP z27Uniform(const ObjP& base, const ArrP& sel) {
   if (sel) {
     out = newArr();
     for (int i = 0; i < sel->length(); i++) {
-      int k = sel->getInt(i);
-      bool ok = false;
-      for (int j = 0; j < kits->length(); j++) if (k == kits->getInt(j)) ok = true;
-      if (!ok) throw IllegalArg("Kit does not belong to selected team");
-      out->put(k);
+      out->put(sel->getInt(i));
     }
     for (int j = 0; j < kits->length(); j++) {
       bool have = false;
@@ -161,10 +178,19 @@ Response z27TeamChange(const std::string& cmd) {
       ObjP fb = z27FindBase(req);
       if (!fb && cmd == "CMD_SET_MYCLUB_ENTRY_INFO") {
         fb = z27Copy(req);
-        fb->put("base_team_id", z27Base(sq)->getInt("base_team_id"));
+        int defTid = 100;
+        try { defTid = z27Base(sq)->getInt("base_team_id"); } catch (...) {}
+        fb->put("base_team_id", defTid);
       }
-      if (!fb) throw IllegalArg("Missing base_team_id");
-      ObjP ident = z27Identity(z27Team(fb->getInt("base_team_id")));
+      if (!fb) {
+        fb = newObj()->put("base_team_id", 100);
+      }
+      int tid = fb->getInt("base_team_id");
+      if (tid == 262143 || tid <= 0) {
+        tid = 100;
+        fb->put("base_team_id", tid);
+      }
+      ObjP ident = z27Identity(z27Team(tid));
       if (cmd == "CMD_SET_MYCLUB_ENTRY_INFO") {
         if (fb->has("team_name")) ident->put("team_name", fb->getString("team_name"));
         if (fb->has("team_name_short")) ident->put("team_name_short", fb->getString("team_name_short"));

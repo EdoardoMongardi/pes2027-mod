@@ -25,19 +25,18 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
         break;
       }
     }
-    if (allZero) {
+    if (allZero || (params->optInt(49, 0) == 6 && params->optInt(50, 0) == 1 && params->optInt(51, 0) == 1)) {
       auto it = kAppearancePresets.find(base_id);
       if (it != kAppearancePresets.end()) {
         for (int i = 0; i < 16; i++) {
           params->put(49 + i, (int)it->second.v[i]);
         }
       } else {
-        // Natural default skin tone and appearance so player is never chalk white
-        params->put(49, 6);
-        params->put(50, 1);
-        params->put(51, 1);
-        params->put(52, 1);
-        params->put(53, 4);
+        // Natural default skin tone and appearance so player is never chalk white or pitch black
+        static const int32_t kDefAppearance[16] = {7, 1, 1, 1, 4, 0, 4, 18, 4, 8, 142, 0, 14, 0, 1, 1};
+        for (int i = 0; i < 16; i++) {
+          params->put(49 + i, kDefAppearance[i]);
+        }
       }
     }
   }
