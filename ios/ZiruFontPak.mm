@@ -49,11 +49,16 @@ OpenReadFn gOrigOpenRead;
 FileSizeFn gOrigFileSize;
 OpenAsyncReadFn gOrigOpenAsyncRead;
 
-std::u16string gFontPath[kNumFonts];   // bundle paths as TCHAR
-std::string gFontData[kNumFonts];      // font bytes, loaded at install time
+// Non-trivial state lives on the heap: zfont::install runs from ZiruOffline.mm's constructor, which dyld calls before
+// this file's static initializers, so a global std::string here would be re-initialized (emptied) after install.
+struct FontState {
+  std::u16string path[kNumFonts];   // bundle paths as TCHAR
+  std::string data[kNumFonts];      // font bytes, loaded at install time
+  std::set<std::string> seen;       // font paths already logged
+};
+FontState* gS = nullptr;
 std::atomic<int> gFullReads[kNumFonts];
 std::mutex gSeenMu;
-std::set<std::string> gSeenFontPaths;
 std::atomic<int> gHits[kNumFonts];
 void (*gLog)(const char*) = nullptr;
 
@@ -153,17 +158,17 @@ void noteFontPath(const char* op, const char16_t* name, const char* how) {
     return;
   {
     std::lock_guard<std::mutex> g(gSeenMu);
-    if (gSeenFontPaths.size() > 200 || !gSeenFontPaths.insert(std::string(op) + n).second) return;
+    if (gS->seen.size() > 200 || !gS->seen.insert(std::string(op) + n).second) return;
   }
   logf("[FONT] %s %s -> %s", op, n.c_str(), how);
 }
 
 void* hookOpenRead(void* self, const char16_t* name, bool allowWrite) {
   int i = fontIndex(name);
-  if (i >= 0 && !allowWrite && !gFontData[i].empty()) {
+  if (i >= 0 && !allowWrite && !gS->data[i].empty()) {
     noteFontPath("OpenRead", name, "Ziru font (memory)");
     noteHit(i, "OpenRead", true);
-    return new ZMemFileHandle(&gFontData[i], i);
+    return new ZMemFileHandle(&gS->data[i], i);
   }
   void* h = gOrigOpenRead(self, name, allowWrite);
   noteFontPath("OpenRead", name, h ? "original" : "not found");
@@ -172,7 +177,7 @@ void* hookOpenRead(void* self, const char16_t* name, bool allowWrite) {
 
 int64_t hookFileSize(void* self, const char16_t* name) {
   int i = fontIndex(name);
-  if (i >= 0 && !gFontData[i].empty()) return (int64_t)gFontData[i].size();
+  if (i >= 0 && !gS->data[i].empty()) return (int64_t)gS->data[i].size();
   return gOrigFileSize(self, name);
 }
 
@@ -180,7 +185,7 @@ void* hookOpenAsyncRead(void* self, const char16_t* name) {
   int i = fontIndex(name);
   if (i >= 0) {
     void* lower = lowerOf(self);
-    void* h = lower ? vfn<OpenAsyncReadFn>(lower, kVtOpenAsyncRead)(lower, gFontPath[i].c_str()) : nullptr;
+    void* h = lower ? vfn<OpenAsyncReadFn>(lower, kVtOpenAsyncRead)(lower, gS->path[i].c_str()) : nullptr;
     noteHit(i, "OpenAsyncRead", h != nullptr);
     if (h) return h;
   }
@@ -209,6 +214,7 @@ void install(const char* fontDir, const char* documentsDir, void (*log)(const ch
     unlink(guard.c_str());
   }
   if (!fontDir) return;
+  gS = new FontState();
   for (int i = 0; i < kNumFonts; i++) {
     std::string p = std::string(fontDir) + "/" + kFonts[i] + ".ufont";
     struct stat st;
@@ -216,15 +222,15 @@ void install(const char* fontDir, const char* documentsDir, void (*log)(const ch
       logf("[FONT] %s missing in the app bundle – Vietnamese font fix disabled", p.c_str());
       return;
     }
-    gFontPath[i] = widen(p);
+    gS->path[i] = widen(p);
     FILE* f = fopen(p.c_str(), "rb");
     if (f) {
-      gFontData[i].resize((size_t)st.st_size);
-      size_t got = fread(&gFontData[i][0], 1, gFontData[i].size(), f);
+      gS->data[i].resize((size_t)st.st_size);
+      size_t got = fread(&gS->data[i][0], 1, gS->data[i].size(), f);
       fclose(f);
-      if (got != gFontData[i].size()) gFontData[i].clear();
+      if (got != gS->data[i].size()) gS->data[i].clear();
     }
-    if (gFontData[i].size() < 4 || (memcmp(gFontData[i].data(), "OTTO", 4) != 0 && memcmp(gFontData[i].data(), "\0\1\0\0", 4) != 0)) {
+    if (gS->data[i].size() < 4 || (memcmp(gS->data[i].data(), "OTTO", 4) != 0 && memcmp(gS->data[i].data(), "\0\1\0\0", 4) != 0)) {
       logf("[FONT] %s unreadable – Vietnamese font fix disabled", p.c_str());
       return;
     }

@@ -16,7 +16,13 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     std::string msgid = req->optString("msgid", "");
     if (!msgid.empty()) jo->put("msgid", msgid);
   }
-  if (jo && name == "responses/CmdLogin.json") patchLocalLivedataUrls(jo);
+  if (jo && name == "responses/CmdLogin.json") {
+    patchLocalLivedataUrls(jo);
+    ObjP eula = jo->optJSONObject("user_eula_info");
+    if (eula) eula->put("eula_privacy_action", "NONE");
+  }
+  if (jo && (name == "responses/get_myclub_commentary_info.json" || name == "responses/ZIRU_GET_COMMENTARY_DATA.json"))
+    patchIosCommentaryData(jo);
   if (jo) {
     if (name == "responses/CmdGetMyclubProcurableGameplayerlist.json") applyZiruProcurableList(jo);
     if (name == "responses/CmdGetMyclubAgentBoxInfo.json") ziruPatchAgentBoxInfo(jo);
@@ -128,6 +134,7 @@ Response serveInner(Request& r) {
     return *x;
   }
   logRequest(uri, r.method);
+  if (contains(uri, "CMD_SET_USER_EULA_INFO") || contains(uri, "CmdSetUserEulaInfo")) return handleZiruStartupAck("CMD_SET_USER_EULA_INFO");
   if (contains(uri, "CMD_USE_MYCLUB_CAREERPLAN")) return handleZiruCareerplan(r);
   logAlmanacAgentRequestBody(r);
   traceZiruUserCompeV87(uri);

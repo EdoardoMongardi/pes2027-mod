@@ -1,6 +1,8 @@
 // C++ port of com.offline.server.OfflineServer (Ziru eFootball offline server, classes5.dex).
 // Method names follow the original bytecode so behaviour can be diffed against the JVM oracle.
 #pragma once
+#include <fstream>
+#include "zipread.hpp"
 #include <sys/stat.h>
 
 #include <algorithm>
@@ -74,6 +76,9 @@ struct Config {
   std::string livedataBaseUrl = "https://127.0.0.1:8085/livedata/";
   std::string dataDir;      // ziru_save.db, prefs, Download/
   std::string logFile;      // offline_server.log ("" = disabled)
+  bool dropAndroidLivedata = false;
+  std::string downloadDir;   // where the game keeps downloaded files (commentary); "" = dataDir + "/Download"
+  bool iosCommentary = false;  // commentary list from the installed file: real size/SHA-256, or empty when absent  // iOS: Ziru's livedata are Android paks (*_mobile_and.pak) the iOS client cannot apply
 };
 
 class OfflineServer {

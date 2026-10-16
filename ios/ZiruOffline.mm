@@ -481,6 +481,11 @@ static zsv::OfflineServer& server() {
   std::call_once(gServerOnce, [] {
     zsv::Config cfg;
     cfg.assetsDir = gBundleAssets.fileSystemRepresentation;
+    cfg.dropAndroidLivedata = true;   // Ziru's livedata are *_mobile_and.pak; the iOS client rejects them at login
+    // Vietnamese commentary is a paid add-on: offered only when dt510_eng_mobile_all.cpk is installed, and then with
+    // its real size/SHA-256 so the client keeps it instead of deleting it as a mismatching download.
+    cfg.iosCommentary = true;
+    cfg.downloadDir = std::string([gDocs stringByAppendingPathComponent:@"Download"].fileSystemRepresentation);
     std::string livedataDir;
     NSString* directLivedata = [gDocs stringByAppendingPathComponent:@"livedata"];
     NSString* subLivedata = [gDocs stringByAppendingPathComponent:@"PES2027-data/livedata"];
@@ -497,6 +502,7 @@ static zsv::OfflineServer& server() {
     cfg.dataDir = std::string(gSupport.fileSystemRepresentation) + "/Save";
     cfg.logFile = std::string([gDocs stringByAppendingPathComponent:@"PES2027-logs/offline_server.log"].fileSystemRepresentation);
     gServer.reset(new zsv::OfflineServer(cfg));
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ gServer->prewarmIosCommentary(); });
     gServer->startupAudit();
     ZLog(@"server ready assets=%s livedata=%s", cfg.assetsDir.c_str(), cfg.livedataDir.c_str());
   });
@@ -604,6 +610,16 @@ static NSURLSessionConfiguration* withProtocol(NSURLSessionConfiguration* c) {
   if (![p containsObject:ZiruURLProtocol.class]) [p insertObject:ZiruURLProtocol.class atIndex:0];
   c.protocolClasses = p;
   return c;
+}
+// Live Update (livedata) is downloaded with UE4 BackgroundHttp, i.e. a background NSURLSession. NSURLProtocol is never
+// consulted for background sessions (the transfer runs in nsurlsessiond), so those downloads went to the real
+// 127.0.0.1:8085 where nothing listens -> "Không thể áp dụng Dữ liệu Live Update". Give such callers an ordinary
+// session configuration that carries ZiruURLProtocol instead; the delegate callbacks are the same.
+static IMP gOrigBackgroundCfg;
+static NSURLSessionConfiguration* hookDefaultCfg(id self, SEL _cmd);
+static NSURLSessionConfiguration* hookBackgroundCfg(id self, SEL _cmd, NSString* identifier) {
+  ZLog(@"[NET] background session '%@' -> in-app session with ZiruURLProtocol", identifier);
+  return hookDefaultCfg(self, @selector(defaultSessionConfiguration));
 }
 static NSURLSessionConfiguration* hookDefaultCfg(id self, SEL _cmd) {
   return withProtocol(((NSURLSessionConfiguration * (*)(id, SEL)) gOrigDefaultCfg)(self, _cmd));
@@ -1511,6 +1527,7 @@ __attribute__((constructor)) static void ziruInit() {
     [NSURLProtocol registerClass:ZiruURLProtocol.class];
     Class cfg = NSURLSessionConfiguration.class;
     gOrigDefaultCfg = swizzleClassMethod(cfg, @selector(defaultSessionConfiguration), (IMP)hookDefaultCfg);
+    gOrigBackgroundCfg = swizzleClassMethod(cfg, @selector(backgroundSessionConfigurationWithIdentifier:), (IMP)hookBackgroundCfg);
     gOrigEphemeralCfg = swizzleClassMethod(cfg, @selector(ephemeralSessionConfiguration), (IMP)hookEphemeralCfg);
     SEL sr = NSSelectorFromString(@"setRequest:cookie:isPost:sendData:sendDataSize:useGzip:");
     const char* names[3] = {"HttpImplAsyncRequest", "HttpImplRequest", "HttpImpl2Request"};

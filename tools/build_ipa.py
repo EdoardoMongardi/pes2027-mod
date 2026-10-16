@@ -267,7 +267,7 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name):
 # Responses for commands new in client 11.1.1 (see ziru-extra/README.md). Not taken from Ziru's APK.
 BUILTIN_RESPONSES = {
     "CMD_GET_AGE_GATE_REQUIREMENTS.json":
-        '{"msgid":"CMD_GET_AGE_GATE_REQUIREMENTS","result":"NOERR","is_eula_country":"YES","country_age_kind":"BIRTH_YEAR_MONTH"}',
+        '{"msgid":"CMD_GET_AGE_GATE_REQUIREMENTS","result":"NOERR","is_eula_country":"YES","country_age_kind":"NONE"}',
 }
 ZIRU_OBB_IN_APK = "assets/pc0000_mobile_and.pak"            # a ZIP (Android "OBB" layout) despite the name
 ZIRU_FONT_PAK = "PesMobile/Content/Paks/ZFont_Orginal.pak"   # UE pak v3: eFootballSans-*/eFootballStencil .ufont

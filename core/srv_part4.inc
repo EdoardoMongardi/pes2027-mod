@@ -262,7 +262,7 @@ Response handleZiruStartupAck(const std::string& msg) {
     ObjP jo = newObj();
     if (msg == "CMD_GET_AGE_GATE_REQUIREMENTS") {
       jo->put("is_eula_country", "YES");
-      jo->put("country_age_kind", "BIRTH_YEAR_MONTH");
+      jo->put("country_age_kind", "NONE");
     }
     jo->put("result", "NOERR");
     jo->put("rqid", (long long)rq);
@@ -295,7 +295,7 @@ void hydrateZiruMyLeagueCoachV73(const ObjP& jo) {
 }
 
 bool isZiruLocalCommentaryInstalled() {
-  std::string dir = cfg.dataDir + "/Download";
+  std::string dir = cfg.downloadDir.empty() ? cfg.dataDir + "/Download" : cfg.downloadDir;
   mkdir(dir.c_str(), 0755);
   struct stat st;
   std::string f = dir + "/dt510_eng_mobile_all.cpk";
@@ -305,6 +305,59 @@ bool isZiruLocalCommentaryInstalled() {
   }
   logRequest("ZIRU_COMMENTARY_V59", "[ZIRU_V59_COMMENTARY_FOUND] size=" + str((int64_t)st.st_size));
   return true;
+}
+
+// SHA-256 of a commentary file, cached by size+mtime (hashing 1.2 GB takes a few seconds on a phone).
+std::string commentaryHash(const std::string& path, const struct stat& st) {
+  std::string cache = cfg.dataDir + "/commentary_hash_" + path.substr(path.rfind('/') + 1) + ".txt";
+  std::string key = std::to_string((long long)st.st_size) + " " + std::to_string((long long)st.st_mtime);
+  std::ifstream in(cache);
+  std::string k1, k2, h;
+  if (in >> k1 >> k2 >> h && k1 + " " + k2 == key && h.size() == 64) return h;
+  std::string hex;
+  if (!zz::sha256File(path, hex)) return "";
+  std::string tmp = cache + ".tmp" + std::to_string((long long)(uintptr_t)&hex);  // per-call name: prewarm thread vs request
+  { std::ofstream(tmp) << key << " " << hex << "\n"; }
+  std::rename(tmp.c_str(), cache.c_str());
+  zs::logi("OFFLINE_SERVER", "[IOS_COMMENTARY] hashed " + path + " -> " + hex);
+  return hex;
+}
+
+// iOS: the commentary list describes the file that is really installed. Ziru sends the metadata of Konami's English
+// file (825 MB, its hash); with the 1.26 GB Vietnamese file the client sees a mismatch and deletes/redownloads it.
+// When the file is absent (commentary is an optional add-on) the entry is dropped so nothing is downloaded.
+void patchIosCommentaryData(const ObjP& jo) {
+  if (!cfg.iosCommentary || !jo) return;
+  ArrP list = jo->optJSONArray("data_list");
+  if (!list) return;
+  std::string dir = cfg.downloadDir.empty() ? cfg.dataDir + "/Download" : cfg.downloadDir;
+  ArrP keep = newArr();
+  for (int i = 0; i < list->length(); i++) {
+    ObjP o = list->optJSONObject(i);
+    std::string name = o ? o->optString("name", "") : "";
+    if (name.empty() || name.find('/') != std::string::npos) continue;
+    std::string path = dir + "/" + name;
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+      logRequest("IOS_COMMENTARY", "[IOS_COMMENTARY] " + name + " not installed - not offered for download");
+      continue;
+    }
+    std::string hash = commentaryHash(path, st);
+    o->put("size", (long long)st.st_size);
+    if (!hash.empty()) o->put("hash", hash);
+    logRequest("IOS_COMMENTARY", "[IOS_COMMENTARY] " + name + " size=" + std::to_string((long long)st.st_size) + " sha256=" + hash);
+    keep->put(o);
+  }
+  jo->put("data_list", keep);
+}
+
+// Hashing the 1.26 GB commentary takes a few seconds on the device; do it off the request path at startup so
+// CMD_GET_COMMENTARY_DATA answers from the cache. Safe to call from another thread (reads cfg, writes the cache file).
+void prewarmIosCommentary() {
+  if (!cfg.iosCommentary) return;
+  std::string path = (cfg.downloadDir.empty() ? cfg.dataDir + "/Download" : cfg.downloadDir) + "/dt510_eng_mobile_all.cpk";
+  struct stat st;
+  if (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) commentaryHash(path, st);
 }
 
 bool isZiruPlayerSold(int64_t s) {
@@ -377,6 +430,61 @@ void patchLocalLivedataUrls(const ObjP& jo) {
     ObjP li = jo->optJSONObject("livedata_info");
     ArrP list;
     if (!li || !(list = li->optJSONArray("livedata_list"))) return;
+    if (cfg.dropAndroidLivedata) {
+      // The iOS client fails the whole login ("Không thể áp dụng Dữ liệu Live Update") on Android livedata paks.
+      ArrP keep = std::make_shared<Array>();
+      int dropped = 0;
+      for (int i = 0; i < list->length(); i++) {
+        ObjP o = list->optJSONObject(i);
+        std::string name = o ? o->optString("name", "") : "";
+        std::string url = o ? o->optString("url", "") : "";
+        if (name.find("_mobile_and") != std::string::npos || url.find("_mobile_and") != std::string::npos) {
+          dropped++;
+          continue;
+        }
+        keep->put(list->opt(i));
+      }
+      li->put("livedata_list", keep);
+      list = keep;
+      // The version file names every livedata item (dt870 cpk, dt880 paks) the client must hold; without their
+      // downloads it reports "Không thể áp dụng Dữ liệu Live Update". Keep only items that are still listed.
+      std::string vf = li->optString("version_file", "");
+      if (!vf.empty()) {
+        try {
+          ObjP v = Object::parse(vf);
+          bool haveDt870 = false;
+          for (int i = 0; i < keep->length(); i++) {
+            ObjP o = keep->optJSONObject(i);
+            if (o && o->optString("name", "").rfind("dt870", 0) == 0) haveDt870 = true;
+          }
+          if (!haveDt870) {
+            v->remove("dt870Hash");
+            v->remove("dt870FileSize");
+          }
+          ArrP items = v->optJSONArray("dt880"), kept = std::make_shared<Array>();
+          for (int i = 0; items && i < items->length(); i++) {
+            ObjP it = items->optJSONObject(i);
+            std::string n = it ? it->optString("name", "") : "";
+            bool listed = false;
+            for (int k = 0; k < keep->length() && !n.empty(); k++) {
+              ObjP o = keep->optJSONObject(k);
+              if (o && o->optString("name", "").rfind(n + "_", 0) == 0) listed = true;
+            }
+            if (listed) kept->put(items->opt(i));
+          }
+          v->put("dt880", kept);
+          // LiveDataVersionLoader::IsPassAppVer: a non-empty targetAppVersion must match the app's major.minor
+          // (Ziru's "6.0.0" is the Android build; iOS 11.1.1 is a newer series), otherwise ChoiceLastestVer pushes
+          // an error code and the client reports "Không thể áp dụng Dữ liệu Live Update". Empty means pass.
+          v->remove("targetAppVersion");
+          li->put("version_file", v->toString());
+        } catch (const std::exception& e) {
+          zs::loge("OFFLINE_SERVER", std::string("[IOS_LIVEDATA] version_file rewrite failed ") + e.what());
+        }
+      }
+      zs::logi("OFFLINE_SERVER", "[IOS_LIVEDATA] dropped " + std::to_string(dropped) + " Android livedata entries, kept " +
+                                     std::to_string(keep->length()));
+    }
     for (int i = 0; i < list->length(); i++) {
       ObjP o = list->optJSONObject(i);
       if (!o) continue;
