@@ -69,7 +69,24 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
       if (s.empty()) out = gl->toString();
       else {
         ArrP acc = Array::parse(s);
-        for (int i = 0; i < gl->length(); i++) { ObjP o = gl->optJSONObject(i); if (o) acc->put(o); }
+        std::set<int64_t> haveAcc;
+        for (int i = 0; i < acc->length(); i++) {
+          ObjP o = acc->optJSONObject(i);
+          ObjP gp = o ? o->optJSONObject("gameplayer") : nullptr;
+          if (!gp) gp = o;
+          if (gp && gp->optJSONObject("gameplayer_id"))
+            haveAcc.insert(gp->getJSONObject("gameplayer_id")->optLong("serial", 0));
+        }
+        for (int i = 0; i < gl->length(); i++) {
+          ObjP o = gl->optJSONObject(i);
+          ObjP gp = o ? o->optJSONObject("gameplayer") : nullptr;
+          if (!gp) gp = o;
+          int64_t srl = (gp && gp->optJSONObject("gameplayer_id")) ? gp->getJSONObject("gameplayer_id")->optLong("serial", 0) : 0;
+          if (o && srl > 0 && !haveAcc.count(srl)) {
+            acc->put(o);
+            haveAcc.insert(srl);
+          }
+        }
         out = acc->toString();
       }
       prefs.edit().putString("recruited_players", out).commit();
@@ -80,12 +97,37 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
       ObjP ei = jo->optJSONObject("entry_info");
       ArrP l2;
       if (ei && (l2 = ei->optJSONArray("gameplayer_list"))) {
+        std::set<int64_t> have;
+        for (int i = 0; i < l2->length(); i++) {
+          ObjP p = l2->optJSONObject(i);
+          if (p && p->optJSONObject("gameplayer_id"))
+            have.insert(p->getJSONObject("gameplayer_id")->optLong("serial", 0));
+        }
         for (int i = 0; i < acc->length(); i++) {
           ObjP o = acc->optJSONObject(i);
           ObjP gp;
-          if (o && (gp = o->optJSONObject("gameplayer"))) l2->put(gp);
+          if (o && (gp = o->optJSONObject("gameplayer"))) {
+            int64_t s = gp->optJSONObject("gameplayer_id") ? gp->getJSONObject("gameplayer_id")->optLong("serial", 0) : 0;
+            if (s > 0 && !have.count(s) && !isZiruPlayerSold(s)) {
+              l2->put(gp);
+              have.insert(s);
+            }
+          }
         }
       }
+    }
+  }
+  if (jo && name == "responses/get_stadium_data.json" && cfg.iosPlayerLayout) {
+    ArrP list = jo->optJSONArray("data_list");
+    if (list) {
+      ArrP keep = std::make_shared<Array>();
+      for (int i = 0; i < list->length(); i++) {
+        ObjP o = list->optJSONObject(i);
+        std::string n = o ? o->optString("name", "") : "";
+        if (n.find("_mobile_and") != std::string::npos) continue;
+        keep->put(list->opt(i));
+      }
+      jo->put("data_list", keep);
     }
   }
   if (jo && name == "responses/CMD_USE_MYCLUB_ITEM.json") {

@@ -1160,11 +1160,28 @@ static BOOL checkDirectFolderData(NSString** why) {
   // Create _mobile_ios symlinks for livedata files, and mount all epic paks/ucas/utoc into pak/ and cpk into cpk/
   // CRITICAL: Also link into Documents/Download/ because onlinemode::UtilityLiveData::GetLiveDataSaveDirPath()
   // returns Documents/Download/ where LiveDataVersionLoader, LiveDataHashChecker, and LiveDataBinder look for dt870 and pc9242..pc9259!
+  // Remove any stale Android stadium symlinks in pakDir and dlDir that cause Unreal Engine black screen
+  NSArray* stalePaks = @[@"pc3002_mobile_ios.pak", @"pc3002_mobile_ios.ucas", @"pc3002_mobile_ios.utoc",
+                         @"pc3012_mobile_ios.pak", @"pc3012_mobile_ios.ucas", @"pc3012_mobile_ios.utoc",
+                         @"pc3002_mobile_and.pak", @"pc3002_mobile_and.ucas", @"pc3002_mobile_and.utoc",
+                         @"pc3012_mobile_and.pak", @"pc3012_mobile_and.ucas", @"pc3012_mobile_and.utoc"];
+  for (NSString* stale in stalePaks) {
+    NSString* sp = [pakDir stringByAppendingPathComponent:stale];
+    if ([fm fileExistsAtPath:sp]) [fm removeItemAtPath:sp error:nil];
+    NSString* sdp = [dlDir stringByAppendingPathComponent:stale];
+    if ([fm fileExistsAtPath:sdp]) [fm removeItemAtPath:sdp error:nil];
+  }
+
   NSString* liveDir = [gDocs stringByAppendingPathComponent:@"livedata"];
   if ([fm fileExistsAtPath:liveDir]) {
     for (NSString* f in [fm contentsOfDirectoryAtPath:liveDir error:nil]) {
       NSString* target = [liveDir stringByAppendingPathComponent:f];
       NSString* ext = f.pathExtension.lowercaseString;
+      // Android stadium paks cannot render with Metal shaders on iOS; mounting them causes black screen / freeze
+      if ([f containsString:@"pc3002"] || [f containsString:@"pc3012"] || [f isEqualToString:@"version_stadium.bin"]) {
+        ZLog(@"[SKIP_AND_STADIUM] Skipping Android stadium pak %@ on iOS to prevent black screen", f);
+        continue;
+      }
       if ([f containsString:@"_mobile_and"]) {
         NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
         NSString* link = [liveDir stringByAppendingPathComponent:iosName];
@@ -1924,7 +1941,7 @@ __attribute__((constructor)) static void ziruInit() {
                    gDocs.fileSystemRepresentation, [](const char* line) { ZLog(@"%s", line); });
     zweb::install([](const char* line) { ZLog(@"%s", line); });
     loadOnlineConfig();
-    checkDirectFolderData(nil); // Automatically link folders right at launch!
+    // checkDirectFolderData is called safely from dataReady() inside hookDidFinish to avoid dyld constructor crashes.
     ZLog(@"ZiruOffline %s loaded, bundle=%@", ZIRU_MOD_VERSION, NSBundle.mainBundle.bundlePath);
 
     // Initialize original function pointers via dlsym
