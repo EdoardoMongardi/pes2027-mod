@@ -106,11 +106,14 @@ Response handleZiruMyLeagueEnterV71() {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     if (req) {
       int team = req->optInt("select_team_id", 0);
+      if (team <= 0) team = req->optInt("team_id", 0);
       int compe = req->optInt("select_compe_unit_id", 0);
+      if (compe <= 0) compe = req->optInt("league_compe_unit_id", 0);
       if (team > 0) {
         if (compe <= 0) compe = ziruMyLeagueInferCompetitionV80(team);
+        if (compe <= 0) compe = 113;
         ziruLeagueSaveInt("ziru_myleague_team_id", team);
-        if (compe > 0) ziruLeagueSaveInt("ziru_myleague_compe_unit_id", compe);
+        ziruLeagueSaveInt("ziru_myleague_compe_unit_id", compe);
         ziruLeagueSaveInt("ziru_myleague_initialized", 1);
         ziruLeagueSaveInt("ziru_myleague_fixture", 1);
         ziruLeagueSaveInt("ziru_myleague_table_points", 0);
@@ -251,13 +254,20 @@ Response handleZiruMyLeagueMainmenuCreativeV78() {
     if (req) nn(jo)->put("rqid", (long long)req->optLong("rqid", 1));
     int init = ziruLeagueLoadInt("ziru_myleague_initialized", 0);
     int team = ziruLeagueLoadInt("ziru_myleague_team_id", 0);
-    int compe = ziruLeagueLoadInt("ziru_myleague_compe_unit_id", 113);
-    if (init <= 0) {
-      if (team == 100 && compe == 113) return serveObjectAsEncryptedMsgPack(jo);
-      ziruLeagueSaveInt("ziru_myleague_initialized", 1);
+    if (team <= 0) {
+      try { team = z27Base(z27Main())->getInt("base_team_id"); } catch (...) {}
+      if (team <= 0) team = 100;
+      ziruLeagueSaveInt("ziru_myleague_team_id", team);
     }
-    ObjP root;
-    if (team > 0 && (root = nn(jo)->optJSONObject("season_root_info"))) {
+    int compe = ziruLeagueLoadInt("ziru_myleague_compe_unit_id", 0);
+    if (compe <= 0) {
+      compe = ziruMyLeagueInferCompetitionV80(team);
+      if (compe <= 0) compe = 113;
+      ziruLeagueSaveInt("ziru_myleague_compe_unit_id", compe);
+    }
+    if (init <= 0) ziruLeagueSaveInt("ziru_myleague_initialized", 1);
+    ObjP root = nn(jo)->optJSONObject("season_root_info");
+    if (root) {
       root->put("team_id", team);
       root->put("league_compe_unit_id", compe);
       ArrP teams = ziruMyLeagueCompetitionTeamsV80(compe);

@@ -196,6 +196,18 @@ Response z27TeamChange(const std::string& cmd) {
       z27PutMeta("z27_base_" + str(sq), ident->toString());
       z27PutMeta("z27_kits_" + str(sq), z27Kits(z27Team(ident->getInt("base_team_id")))->toString());
     }
+    if (cmd == "CMD_SET_MYCLUB_ENTRY_INFO") {
+      ObjP ei = z27Entry();
+      ObjP curBase = z27Base(sq);
+      ei->put("team_name", curBase->getString("team_name"));
+      ei->put("team_name_short", curBase->getString("team_name_short"));
+      ei->put("base_team_id", curBase->getInt("base_team_id"));
+      ei->put("base_team_license", curBase->optString("base_team_license", "LICENSED"));
+      ObjP ack = z27Ack(cmd, req);
+      ack->put("entry_info", ei);
+      logRequest("ZIRU_TEAM_COMMIT", "squad=" + str(sq) + " base=" + str(curBase->getInt("base_team_id")));
+      return serveObjectAsEncryptedMsgPack(ack);
+    }
     ObjP ack = z27Ack(cmd, req);
     ack->put("base_team", newArr()->put(z27Base(sq)));
     ack->put("entry_info", z27Entry());
@@ -547,7 +559,30 @@ ObjP z27Player(const ObjP& gid) {
       }
     }
   }
-  return ziruSyncActiveBooster(p);
+  p = ziruSyncActiveBooster(p);
+  ArrP addSkills = p->optJSONArray("additional_skill_id");
+  if (!addSkills && serial > 0) {
+    std::string s = sp("almanac_state").getString("ziru_skills_" + str(serial), "");
+    if (!s.empty()) {
+      addSkills = newArr();
+      for (auto& part : split(s, ',')) {
+        try { addSkills->put(parseInt(part)); } catch (...) {}
+      }
+      p->put("additional_skill_id", addSkills);
+    }
+  }
+  if (addSkills) {
+    ArrP params = p->optJSONArray("parameters");
+    if (params && params->length() >= 142) {
+      for (int i = 0; i < addSkills->length(); i++) {
+        int skId = addSkills->optInt(i, -1);
+        if (isZiruSkillId(skId)) {
+          params->put(kZiruSkillParameters[skId], 1);
+        }
+      }
+    }
+  }
+  return p;
 }
 
 ObjP z27Home(const ObjP& active) {
@@ -557,7 +592,16 @@ ObjP z27Home(const ObjP& active) {
   ArrP out = newArr();
   for (int i = 0; i < pl->length(); i++) {
     ObjP gid = pl->getJSONObject(i)->getJSONObject("gameplayer_id");
-    out->put(newObj()->put("gameplayer_id", z27Copy(gid))->put("parameters", Array::parse(z27Player(gid)->getJSONArray("parameters")->toString()))->put("averaged_overall", 0));
+    ObjP p = z27Player(gid);
+    ObjP pObj = newObj()->put("gameplayer_id", z27Copy(gid))
+                       ->put("parameters", Array::parse(p->getJSONArray("parameters")->toString()))
+                       ->put("averaged_overall", 0);
+    ArrP ib = p->optJSONArray("initial_booster_id_list");
+    if (ib) pObj->put("initial_booster_id_list", Array::parse(ib->toString()));
+    ArrP sk = p->optJSONArray("additional_skill_id");
+    if (sk) pObj->put("additional_skill_id", Array::parse(sk->toString()));
+    if (p->has("play_style")) pObj->put("play_style", p->get("play_style"));
+    out->put(pObj);
   }
   home->put("player_list", out)->put("squad_gameplan", z27Copy(sq->getJSONObject("squad_gameplan")))->put("team_id", active->getJSONObject("home")->getInt("base_team_id"));
   ArrP co = sq->optJSONArray("coach");

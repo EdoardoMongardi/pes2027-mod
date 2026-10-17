@@ -973,11 +973,13 @@ static IMP gOrigSetPreferredFramesPerSecond = nullptr;
 static void hookSetPreferredFramesPerSecond(CADisplayLink* self, SEL _cmd, NSInteger fps) {
   NSInteger maxFps = (NSInteger)UIScreen.mainScreen.maximumFramesPerSecond;
   if (maxFps < 60) maxFps = 60;
+  NSInteger targetFps = (fps <= 60 && fps > 0) ? 60 : maxFps;
   if (gOrigSetPreferredFramesPerSecond) {
-    ((void(*)(id, SEL, NSInteger))gOrigSetPreferredFramesPerSecond)(self, _cmd, maxFps);
+    ((void(*)(id, SEL, NSInteger))gOrigSetPreferredFramesPerSecond)(self, _cmd, targetFps);
   }
   if (@available(iOS 15.0, *)) {
-    self.preferredFrameRateRange = CAFrameRateRangeMake(60.0f, (float)maxFps, (float)maxFps);
+    float f = (float)targetFps;
+    self.preferredFrameRateRange = CAFrameRateRangeMake((targetFps <= 60) ? 60.0f : 60.0f, f, f);
   }
 }
 
@@ -999,9 +1001,15 @@ static IMP gOrigSetPreferredFrameRateRange = nullptr;
 static void hookSetPreferredFrameRateRange(CADisplayLink* self, SEL _cmd, CAFrameRateRange range) {
   float maxFps = (float)UIScreen.mainScreen.maximumFramesPerSecond;
   if (maxFps < 60.0f) maxFps = 60.0f;
-  range.minimum = 60.0f;
-  range.maximum = maxFps;
-  range.preferred = maxFps;
+  if (range.preferred <= 60.0f && range.preferred > 0.0f) {
+    range.minimum = 60.0f;
+    range.maximum = 60.0f;
+    range.preferred = 60.0f;
+  } else {
+    range.minimum = 60.0f;
+    range.maximum = maxFps;
+    range.preferred = maxFps;
+  }
   if (gOrigSetPreferredFrameRateRange) {
     ((void(*)(id, SEL, CAFrameRateRange))gOrigSetPreferredFrameRateRange)(self, _cmd, range);
   }

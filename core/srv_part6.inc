@@ -331,7 +331,13 @@ ObjP ziruSyncActiveBooster(const ObjP& jo) {
           if (cur && (v = cur->optInt(i3)) > 0 && v != (bv = ib->optInt(i3)) && ((pv = params->optInt(i3 + 142)) == bv || pv <= 0)) params->put(i3 + 142, v);
           if (params->optInt(i3 + 142) <= 0 && ib->optInt(i3) > 0) params->put(i3 + 142, ib->optInt(i3));
         }
-        jo->put("initial_booster_id_list", Array::parse(ib->toString()));
+        if (!cur) {
+          jo->put("initial_booster_id_list", Array::parse(ib->toString()));
+        } else {
+          for (int i3 = 0; i3 < 3; i3++) {
+            if (cur->optInt(i3) <= 0 && ib->optInt(i3) > 0) cur->put(i3, ib->optInt(i3));
+          }
+        }
       }
     }
   } catch (const std::exception& e) {

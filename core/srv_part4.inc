@@ -131,8 +131,9 @@ Response handleZiruMyLeagueScheduleV74() {
 Response handleZiruMyLeagueSpecialSquadV71() {
   try {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
-    ObjP sq;
-    if (req && (sq = req->optJSONObject("special_squad_data"))) {
+    ObjP sq = req ? req->optJSONObject("special_squad_data") : nullptr;
+    if (!sq && req) sq = req->optJSONObject("special_dream_squad_data");
+    if (sq) {
       hydrateZiruMyLeagueCoachV73(sq);
       sq->put("initial_settings", "YES");
       ziruDb->saveMeta("ziru_myleague_special_squad", sq->toString());
@@ -170,10 +171,31 @@ Response handleZiruMyLeagueStartGameV71() {
       ObjP sq = Object::parse(*m);
       hydrateZiruMyLeagueCoachV73(sq);
       ObjP sd = sq->optJSONObject("squad_data");
+      if (!sd) sd = sq;
       ObjP home;
       if (sd && (home = nn(jo)->optJSONObject("squad_data_home"))) {
         ArrP pl = sd->optJSONArray("player_list");
-        if (pl) home->put("player_list", pl);
+        if (pl) {
+          ArrP out = newArr();
+          for (int i = 0; i < pl->length(); i++) {
+            ObjP item = pl->getJSONObject(i);
+            ObjP gid = item->optJSONObject("gameplayer_id");
+            if (gid) {
+              ObjP p = z27Player(gid);
+              ObjP pObj = newObj()->put("gameplayer_id", z27Copy(gid))
+                                 ->put("parameters", Array::parse(p->getJSONArray("parameters")->toString()))
+                                 ->put("averaged_overall", 0);
+              if (item->has("uniform_number")) pObj->put("uniform_number", item->getInt("uniform_number"));
+              ArrP ib = p->optJSONArray("initial_booster_id_list");
+              if (ib) pObj->put("initial_booster_id_list", Array::parse(ib->toString()));
+              ArrP sk = p->optJSONArray("additional_skill_id");
+              if (sk) pObj->put("additional_skill_id", Array::parse(sk->toString()));
+              if (p->has("play_style")) pObj->put("play_style", p->get("play_style"));
+              out->put(pObj);
+            }
+          }
+          if (out->length() > 0) home->put("player_list", out);
+        }
         ArrP co = sd->optJSONArray("coach");
         ObjP c0;
         if (co && (c0 = co->optJSONObject(0))) home->put("coach", c0);
@@ -577,13 +599,19 @@ void patchZiruMyLeagueCommonState(const ObjP& jo) {
     }
     int f = ziruLeagueLoadInt("ziru_myleague_fixture", 1);
     if (jo->has("fixture")) jo->put("fixture", f);
+    ObjP base = z27Base(z27Main());
+    ArrP bt = newArr()->put(base);
     JStr m = loadMeta("ziru_myleague_special_squad");
     if (!m) {
       ObjP sd = jo->optJSONObject("special_dream_squad_data");
       if (sd) {
         sd->put("rental_team_id", team);
+        sd->put("base_team", bt);
         ObjP data = sd->optJSONObject("squad_data");
-        if (data) data->put("coach", Array::parse(z27Squad(z27Main())->getJSONArray("coach")->toString()));
+        if (data) {
+          data->put("base_team", bt);
+          data->put("coach", Array::parse(z27Squad(z27Main())->getJSONArray("coach")->toString()));
+        }
         hydrateZiruMyLeagueCoachV73(sd);
       }
       return;
@@ -591,6 +619,9 @@ void patchZiruMyLeagueCommonState(const ObjP& jo) {
     if (jo->has("special_dream_squad_data")) {
       ObjP s = Object::parse(*m);
       s->put("initial_settings", "YES");
+      s->put("base_team", bt);
+      ObjP data = s->optJSONObject("squad_data");
+      if (data) data->put("base_team", bt);
       jo->put("special_dream_squad_data", s);
     }
   } catch (const std::exception& e) {

@@ -99,17 +99,17 @@ void z27ApplyProgressionPoints(const ArrP& params, const ObjP& prog, const ArrP&
   deltas[25] += defCount;
   deltas[26] += defCount;
 
-  // GK1 -> GK Awareness (15), Jump (38)
-  deltas[15] += gk1Count;
+  // GK1 -> GK Awareness (29), Jump (38)
+  deltas[29] += gk1Count;
   deltas[38] += gk1Count;
 
-  // GK2 -> GK Clearing (24), GK Reach (39)
-  deltas[24] += gk2Count;
+  // GK2 -> GK Clearing (31), GK Reach (39)
+  deltas[31] += gk2Count;
   deltas[39] += gk2Count;
 
-  // GK3 -> GK Catching (25), GK Reflexes (26)
-  deltas[25] += gk3Count;
-  deltas[26] += gk3Count;
+  // GK3 -> GK Catching (30), GK Reflexes (32)
+  deltas[30] += gk3Count;
+  deltas[32] += gk3Count;
 
   for (int idx = 14; idx <= 40; idx++) {
     int baseVal = src->optInt(idx, 0);
@@ -140,6 +140,8 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
         if (w && (base = w->optJSONObject("gameplayer"))) {
           ArrP ib;
           if (!cur->optJSONArray("initial_booster_id_list") && (ib = base->optJSONArray("initial_booster_id_list"))) cur->put("initial_booster_id_list", ib);
+          auto ps = base->get("play_style");
+          if (ps) cur->put("play_style", ps);
           ObjP bl = base->optJSONObject("level_info");
           int lim = bl ? bl->optInt("level_limit", 1) : 1;
           if (lim == 1 && (((int32_t)id) & 16777215) == 134665) {

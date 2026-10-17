@@ -28,6 +28,10 @@ void applyZiruBoosterTrainingResponse(const ObjP& r13) {
     r8 = ziruSyncActiveBooster(r8);
     ArrP r9 = nn(r8)->optJSONArray("parameters");
     if (r9 && r9->length() >= 145) r9->put(142 + r3, r2);
+    ArrP ib = r8->optJSONArray("initial_booster_id_list");
+    if (!ib) { ib = newArr()->put(0)->put(0)->put(0); r8->put("initial_booster_id_list", ib); }
+    while (ib->length() < 3) ib->put(0);
+    ib->put(r3, r2);
     saveZiruPlayerToDb(r8);
     ObjP res = r13->optJSONObject("ability_training_result");
     if (!res) { res = newObj(); r13->put("ability_training_result", res); }
@@ -478,6 +482,11 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     al.push_back(v);
     prefs.edit().putString(key, joinInts(al)).commit();
     saveZiruSkillsToDb(j, al);
+    ArrP params = owned ? owned->optJSONArray("parameters") : nullptr;
+    if (params && params->length() >= 142 && isZiruSkillId(v)) {
+      params->put(kZiruSkillParameters[v], 1);
+      saveZiruPlayerToDb(owned);
+    }
     logRequest("ZIRU_SKILL_V22", "[ZIRU_SKILL_V22] random skill awarded: " + str(v));
     ObjP res = jo->optJSONObject("skill_training_result");
     if (!res) { res = newObj(); jo->put("skill_training_result", res); }
