@@ -10,6 +10,14 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
   else root = Value(Object::parse(text));
 
   ObjP jo = root.t == Value::OBJ ? root.o : nullptr;
+  if (jo && name == "responses/CmdCreateUser.json") {
+    // A missing client AUTH_USERID must not create a new offline roster. Resume
+    // the same save, including recruits, even when iOS repeats CREATE_USER.
+    ObjP login = loadZiruJsonAssetObject("responses/CmdLogin.json");
+    if (login) for (const auto& key : login->keys()) {
+      if (!jo->has(key)) jo->put(key, login->get(key));
+    }
+  }
   ObjP req;
   if (jo && ziruLastRequestBody && (req = decodeZiruRequestJson(ziruLastRequestBody))) {
     jo->put("rqid", (long long)req->optLong("rqid", 0));
@@ -153,7 +161,7 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     z27Restore(jo);
     z27RepairLoginRoster(jo);
   }
-  Response r = newFixed(200, "application/x-msgpack", zc::encodeResponse(root));
+  Response r = newFixed(200, "application/x-msgpack", encodeClientResponse(root));
   r.headers["Connection"] = "close";
   return r;
 }

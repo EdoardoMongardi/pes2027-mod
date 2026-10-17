@@ -21,7 +21,8 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
         if (j2 > 0 && (lp = loadPlayer(j2)) && !lp->empty() && (saved = Object::parse(*lp)->optJSONArray("parameters"))) {
           int l1 = params->length(), l2 = saved->length();
           if (l1 >= 7 && l2 >= 7) {
-            int a = l1 - 7, c = l2 - 7;
+            int a = 142, c = 142;
+            if (l1 < 145 || l2 < 145) throw IllegalState("Incomplete player booster parameters");
             for (int k = 0; k < 3; k++) params->put(a + k, saved->optInt(c + k));
           }
         }

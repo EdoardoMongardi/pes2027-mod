@@ -36,6 +36,7 @@ void applyZiruBoosterTrainingResponse(const ObjP& r13) {
     logRequest("ZIRU_BOOSTER_V23", "[ZIRU_BOOSTER_V23] type=" + r0 + " serial=" + str(r4) + " slot=" + str(r3) + " ability_id=" + str(r2));
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_BOOSTER_V23_ERR] ") + e.what());
+    throw;
   }
 }
 
@@ -88,6 +89,7 @@ void applyZiruDynamicRecruit(const ObjP& jo) {
     logRequest("ZIRU_V10_DRAW", msg);
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V10_DRAW_ERR] dynamic recruit failed ") + e.what());
+    throw;
   }
 }
 

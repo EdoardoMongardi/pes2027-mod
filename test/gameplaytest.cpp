@@ -4,6 +4,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <unistd.h>
+#include <sqlite3.h>
+#include <sys/wait.h>
 using namespace zsv;
 static void check(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
 static void asset(const std::string& root, const char* name, const ObjP& obj) {
@@ -50,6 +52,7 @@ int main() {
         ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squad)
         ->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))));
     asset(root, "CmdLogin.json", newObj()->put("entry_info", entry));
+    asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline","auth_code":"local","session_id":"create"})"));
     asset(root, "ZIRU_PLAYER_RECORDS.json", newObj()->put("1", newObj()->put("gameplayer", p)));
     asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
     asset(root, "ZIRU_MATCH_PROFILES.json", obj(R"({"profiles":[{"profile_id":1,"player_ids":[1],"coordinates":[],"team_style":0,"base_team_id":108}]})"));
@@ -117,10 +120,75 @@ int main() {
       check(p4->getJSONArray("parameters")->getInt(34) == 8, "speed auto calculated from progression points");
       check(p4->getJSONArray("parameters")->getInt(40) == 8, "stamina auto calculated from progression points");
       auto entryTest = call(s, "CMD_SET_MYCLUB_ENTRY_INFO", newObj()->put("base_team_id", 262143)->put("team_name", "Entry Team"));
-      check(entryTest->getJSONArray("base_team")->getJSONObject(0)->getString("base_team_license") == "LICENSED", "entry info sets licensed base team");
+      check(entryTest->getJSONArray("base_team")->getJSONObject(0)->getString("base_team_license") == "UNKNOWN", "entry info preserves unknown license instead of fabricating licensed assets");
+    }
+    // iOS wire layout, resume through CREATE_USER, and stale difficulty migration.
+    cfg.iosPlayerLayout = true;
+    {
+      OfflineServer s(cfg);
+      auto saved = Object::parse(*s.loadPlayer(101));
+      saved->put("initial_booster_id_list", newArr()->put(12)->put(0)->put(0));
+      auto par = saved->getJSONArray("parameters"); par->put(142, 12)->put(143, 77)->put(144, 0);
+      s.ziruDb->savePlayer(101, 1, saved->toString());
+      auto extra = Object::parse(saved->toString());
+      extra->getJSONObject("gameplayer_id")->put("serial", 202);
+      s.ziruDb->savePlayer(202, 1, extra->toString());
+      auto wire = call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list")->getJSONObject(0)->getJSONArray("parameters");
+      check(wire->length() == 147 && wire->getInt(142) == 0 && wire->getInt(143) == 0 && wire->getInt(144) == 12 && wire->getInt(145) == 77, "iOS booster slots are 144..146, not skill bits 142/143");
+      check(Object::parse(*s.loadPlayer(101))->getJSONArray("parameters")->length() == 145, "wire translation must not mutate saved layout");
+      auto use = newObj()->put("gameplayer_id", p->getJSONObject("gameplayer_id"))->put("parameters", wire)
+          ->put("use_list", newArr()->put(newObj()->put("parameter_type", "STRENGTH")->put("point", 12)));
+      auto trained = call(s, "CMD_USE_MYCLUB_CAREERPLAN", newObj()->put("gameplayer_use_list", newArr()->put(use)))
+          ->getJSONArray("careerplan_result_list")->getJSONObject(0)->getJSONObject("gameplayer")->getJSONArray("parameters");
+      check(trained->length() == 147 && trained->getInt(144) == 12 && trained->getInt(145) == 77, "iOS request roundtrip preserves trained boosters");
+      auto base = Object::parse(p->toString());
+      auto original = base->getJSONArray("parameters");
+      while (original->length() < 149) original->put(0);
+      base->put("initial_booster_id_list", newArr()->put(12)->put(0)->put(0));
+      asset(root, "ZIRU_PLAYER_RECORDS.json", newObj()->put("1", newObj()->put("gameplayer", base)));
+      s.ziruPlayerRecordsCache.reset();
+      auto pd = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", p->getJSONObject("gameplayer_id")))->getJSONArray("original_parameters");
+      check(pd->length() == 147 && pd->getInt(144) == 12 && pd->getInt(145) == 77, "149-element canonical records preserve owned booster slots");
+      s.ziruDb->saveMeta("z27_division_state", R"({"division":10,"best":10,"point":0,"matches":0,"win":0,"draw":0,"lose":0,"sequence":0,"completed":{}})");
+      s.ziruDb->saveMeta("z27_div1_set", "");
+      auto active = s.z27Meta("z27_active_match");
+      active->put("division", 10)->put("cpu_level", "EASY");
+      s.ziruDb->saveMeta("z27_active_match", active->toString());
+      check(sqlite3_exec(s.ziruDb->db, "DELETE FROM meta WHERE k='z27_div1_set'", nullptr, nullptr, nullptr) == SQLITE_OK, "prepare legacy save");
+      check(s.z27State()->getInt("division") == 1, "legacy rank migrates to D1");
+      auto selected = call(s, "CMD_GET_VSCOM_OPPONENT");
+      check(selected->getString("cpu_level") == "LEGEND" && s.z27Active()->getInt("division") == 1, "cached EASY opponent migrates with D1");
+      sqlite3_exec(s.ziruDb->db, "PRAGMA query_only=ON", nullptr, nullptr, nullptr);
+      bool failed = false;
+      try { s.ziruDb->saveMeta("must_not_succeed", "1"); } catch (const std::exception&) { failed = true; }
+      check(failed, "write failure must not be acknowledged as saved");
+      sqlite3_exec(s.ziruDb->db, "PRAGMA query_only=OFF", nullptr, nullptr, nullptr);
+    }
+    {
+      OfflineServer s(cfg);
+      auto resumed = call(s, "CMD_CREATE_USER")->getJSONObject("entry_info");
+      check(resumed->getJSONArray("gameplayer_list")->length() == 2, "CREATE_USER resumes recruits after process restart");
+      check(resumed->getJSONArray("squad_list")->length() > 0, "CREATE_USER resumes saved squads");
+    }
+    std::filesystem::create_directories(root + "/kill-save");
+    pid_t child = fork();
+    check(child >= 0, "spawn abrupt-exit save test");
+    if (child == 0) {
+      zs::ZiruDb db(root + "/kill-save/save.db");
+      db.saveMeta("progress", "retained");
+      zs::Prefs prefs(root + "/kill-save/prefs.json");
+      prefs.edit().putString("recruited_players", "[1,2]").commit();
+      _exit(0); // no C++ destructors, matching process termination after saving
+    }
+    int status = 0;
+    check(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0, "abrupt-exit child saved");
+    {
+      zs::ZiruDb db(root + "/kill-save/save.db"); std::string progress;
+      zs::Prefs prefs(root + "/kill-save/prefs.json");
+      check(db.loadMeta("progress", progress) && progress == "retained" && prefs.getString("recruited_players", "") == "[1,2]", "DB and recruits survive exit without destructors");
     }
     std::filesystem::remove_all(root);
-    std::cout << "PASS: coach/snapshot/MyLeague, progression spend/reset/restart, AI promotion/idempotency/restart/give-up\n";
+    std::cout << "PASS: gameplay, iOS booster layout/roundtrip, CREATE_USER resume, D1 stale CPU migration, failed writes and abrupt-exit persistence\n";
     return 0;
   } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << "\n"; return 1; }
 }

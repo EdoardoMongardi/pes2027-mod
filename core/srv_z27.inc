@@ -63,17 +63,15 @@ ObjP z27Team(int32_t id) {
     return syn;
   }
   ObjP copy = z27Copy(t);
-  if (id != 0 && id != 262143 && copy->optInt("base_team_id", 0) != id) {
-    copy->put("base_team_id", id);
-  }
-  copy->put("base_team_license", "LICENSED");
+  // Keep the ID/license of the actual supported team. Relabelling a fallback
+  // team, or forcing LICENSED, selects kit/emblem assets that may not exist.
   return copy;
 }
 
 ObjP z27Identity(const ObjP& t) {
   return newObj()
       ->put("base_team_id", nn(t)->getInt("base_team_id"))
-      ->put("base_team_license", "LICENSED")
+      ->put("base_team_license", t->optString("base_team_license", "UNKNOWN"))
       ->put("team_name", t->getString("team_name"))
       ->put("team_name_short", t->getString("team_name_short"));
 }
@@ -340,6 +338,12 @@ ObjP z27State() {
       m->put("win", 0);
       m->put("draw", 0);
       m->put("lose", 0);
+      // A pre-migration EASY opponent must not survive the move to D1.
+      ObjP active = z27Meta("z27_active_match");
+      if (active) {
+        active->put("division", 1)->put("cpu_level", z27Difficulty(1));
+        z27PutMeta("z27_active_match", active->toString());
+      }
       z27PutMeta("z27_division_state", m->toString());
       z27PutMeta("z27_div1_set", "1");
     }
@@ -403,6 +407,7 @@ void z27InfoState(ObjP jo, const ObjP& st) {
 ObjP z27Active() {
   ObjP m = z27Meta("z27_active_match");
   if (!m) throw IllegalState("No selected opponent; request GET_VSCOM_OPPONENT first");
+  m->put("cpu_level", z27Difficulty(m->getInt("division")));
   return m;
 }
 
@@ -463,6 +468,10 @@ Response z27SelectOpponent() {
     ObjP req = z27Request();
     ObjP st = z27State();
     ObjP m = z27Meta("z27_active_match");
+    if (m) {
+      m->put("cpu_level", z27Difficulty(m->getInt("division")));
+      z27PutMeta("z27_active_match", m->toString());
+    }
     if (!m || st->getJSONObject("completed")->has(str(m->getLong("game_id")))) {
       ArrP profs = nn(loadZiruJsonAssetObject("responses/ZIRU_MATCH_PROFILES.json"))->getJSONArray("profiles");
       ObjP prof = profs->getJSONObject(st->getInt("sequence") % profs->length());
@@ -481,7 +490,7 @@ Response z27SelectOpponent() {
     }
     ObjP opp = z27Opponent(m);
     opp->put("rqid", (long long)req->optLong("rqid", 1));
-    logRequest("ZIRU_MATCH_SELECTED", "game=" + str(m->getLong("game_id")));
+    logRequest("ZIRU_MATCH_SELECTED", "game=" + str(m->getLong("game_id")) + " division=" + str(m->getInt("division")) + " cpu=" + m->getString("cpu_level"));
     return serveObjectAsEncryptedMsgPack(opp);
   } catch (const std::exception& e) {
     return z27Error("CMD_GET_VSCOM_OPPONENT", e);
@@ -618,7 +627,7 @@ Response z27Start() {
     ObjP ci = out->optJSONObject("commentary_info");
     if (ci) ci->put("pre_division", act->getInt("division"));
     logRequest("ZIRU_MATCH_START", "game=" + str(gid) + " squad=" + str(mainId) + " coach=" +
-        home->getJSONObject("coach")->getJSONObject("coach_id")->toString() + " reused=" + str(reuse));
+        home->getJSONObject("coach")->getJSONObject("coach_id")->toString() + " reused=" + str(reuse) + " division=" + str(act->getInt("division")) + " cpu=" + act->getString("cpu_level"));
     return serveObjectAsEncryptedMsgPack(out);
   } catch (const std::exception& e) {
     return z27Error("CMD_START_GAME", e);

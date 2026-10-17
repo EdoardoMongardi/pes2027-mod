@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <sqlite3.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -86,17 +87,26 @@ bool Prefs::Editor::commit() {
     else p->data->put(c.first, c.second);
   }
   std::string tmp = p->file + ".tmp";
-  {
-    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-    if (!out) return false;
-    out << p->data->toString();
-  }
-  return std::rename(tmp.c_str(), p->file.c_str()) == 0;
+  std::string bytes = p->data->toString();
+  FILE* out = fopen(tmp.c_str(), "wb");
+  if (!out) throw std::runtime_error("Cannot open preferences: " + p->file);
+  bool ok = fwrite(bytes.data(), 1, bytes.size(), out) == bytes.size();
+  if (fflush(out) != 0 || fsync(fileno(out)) != 0) ok = false;
+  if (fclose(out) != 0) ok = false;
+  if (!ok || std::rename(tmp.c_str(), p->file.c_str()) != 0)
+    throw std::runtime_error("Cannot persist preferences: " + p->file);
+  return true;
 }
 
 // ---------------- sqlite ----------------
 ZiruDb::ZiruDb(const std::string& path) {
-  if (sqlite3_open(path.c_str(), &db) != SQLITE_OK) { loge("ZIRU_DB", std::string("open failed: ") + sqlite3_errmsg(db)); return; }
+  if (sqlite3_open(path.c_str(), &db) != SQLITE_OK) {
+    std::string error = sqlite3_errmsg(db);
+    sqlite3_close(db); db = nullptr;
+    throw std::runtime_error("Cannot open save DB: " + error);
+  }
+  sqlite3_busy_timeout(db, 5000);
+  exec("PRAGMA synchronous=FULL");
   std::string ver;
   int cur = 0;
   if (queryOne("PRAGMA user_version", {}, ver)) cur = atoi(ver.c_str());
@@ -122,8 +132,10 @@ ZiruDb::~ZiruDb() { if (db) sqlite3_close(db); }
 void ZiruDb::exec(const std::string& sql) {
   char* err = nullptr;
   if (sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &err) != SQLITE_OK) {
-    loge("ZIRU_DB", std::string("exec failed: ") + (err ? err : "?"));
+    std::string message = std::string("exec failed: ") + (err ? err : "?");
+    loge("ZIRU_DB", message);
     sqlite3_free(err);
+    throw std::runtime_error(message);
   }
 }
 bool ZiruDb::queryOne(const std::string& sql, const std::vector<std::string>& args, std::string& out) {
@@ -148,11 +160,13 @@ static void bindAll(sqlite3_stmt* st, const std::vector<zj::Value>& a) {
 }
 static bool run(sqlite3* db, const std::string& sql, const std::vector<zj::Value>& a) {
   sqlite3_stmt* st = nullptr;
-  if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) { loge("ZIRU_DB", sqlite3_errmsg(db)); return false; }
+  if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    throw std::runtime_error(std::string("Save prepare failed: ") + sqlite3_errmsg(db));
+  }
   bindAll(st, a);
   int r = sqlite3_step(st);
   sqlite3_finalize(st);
-  if (r != SQLITE_DONE) { loge("ZIRU_DB", sqlite3_errmsg(db)); return false; }
+  if (r != SQLITE_DONE) throw std::runtime_error(std::string("Save write failed: ") + sqlite3_errmsg(db));
   return true;
 }
 void ZiruDb::deletePlayerState(int64_t s) {
@@ -195,10 +209,14 @@ void ZiruDb::saveLeagueHistory(int64_t id, const std::string& json) {
 }
 void ZiruDb::saveMatchState(const std::string& state, const std::string& k, const std::string& v) {
   exec("BEGIN");
-  bool ok = run(db, "INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", {zj::Value(k), zj::Value(v)}) &&
-            run(db, "INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", {zj::Value("z27_division_state"), zj::Value(state)});
-  exec(ok ? "COMMIT" : "ROLLBACK");
-  if (!ok) throw std::runtime_error("saveMatchState failed");
+  try {
+    run(db, "INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", {zj::Value(k), zj::Value(v)});
+    run(db, "INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", {zj::Value("z27_division_state"), zj::Value(state)});
+    exec("COMMIT");
+  } catch (...) {
+    exec("ROLLBACK");
+    throw;
+  }
 }
 void ZiruDb::saveMeta(const std::string& k, const std::string& v) { run(db, "INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", {zj::Value(k), zj::Value(v)}); }
 void ZiruDb::savePlayer(int64_t s, int64_t pid, const std::string& json) {

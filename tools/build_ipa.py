@@ -26,20 +26,8 @@ EXPECTED_VERSION = ("11.1.1", "11.1.101")
 DYLIB_INSTALL_NAME = b"@executable_path/Frameworks/ZiruOffline.dylib"
 MOD_VERSION = "1.1.1"
 
-DEFAULT_COMMANDLINE = (
-    b"-t.MaxFPS=120 -FPS=120 -rhi.SyncInterval=0"
-    b" -r.ScreenPercentage=100"
-    b" -r.Tonemapper.Sharpen=0.75"
-    b" -r.PostProcessAAQuality=4"
-    b" -r.TemporalAAFilterSize=1.0"
-    b" -r.SkeletalMeshLODBias=0"
-    b" -r.StaticMeshLODDistanceScale=2.0"
-    b" -r.ContactShadows=1"
-    b" -r.Shadow.DistanceScale=1.8"
-    b" -r.ShadowQuality=3"
-    b" -r.MaxAnisotropy=8"
-    b" -r.Streaming.PoolSize=384\n"
-)
+# Leave frame pacing, texture streaming and quality under the game settings.
+DEFAULT_COMMANDLINE = b""
 
 # basic::PathGet(PathType): types 6 (cpk) and 7 (pak) are built from GetAppBundlePath() (x20).
 # Switch them to GetDocumentsPath() (x21) so the game reads Documents/cpk and Documents/pak,
@@ -60,54 +48,9 @@ PATCHES = [
     (0x1048AB730, 0xD10143FF, 0x3900001F, "SetupBeforeEulaAgree: sub sp -> strb wzr, [x0]"),
     (0x1048AB734, 0xA9034FF4, 0xD65F03C0, "SetupBeforeEulaAgree: stp -> ret"),
 
-    # FrameRateController table: Mode 0 = 120 FPS, Mode 1 = 90 FPS, Mode 2 = 60 FPS, Mode 3 = 30 FPS
-    (0x1057461F8, 0x0000003C, 0x00000078, "FrameRateController table: 60 -> 120 fps"),
-    (0x1057461FC, 0x0000001E, 0x0000005A, "FrameRateController table: 30 -> 90 fps"),
-    (0x105746200, 0x00000014, 0x0000003C, "FrameRateController table: 20 -> 60 fps"),
-    (0x105746204, 0x0000000F, 0x0000001E, "FrameRateController table: 15 -> 30 fps"),
-
-    # Strings "120 fps\0", "90 fps\0", "60 fps\0", "30 fps\0" placed in dead code space of SetupBeforeEulaAgree
-    (0x1048AB738, 0xA9047BFD, 0x20303231, "120fps string: '120 '"),
-    (0x1048AB73C, 0x910103FD, 0x00737066, "120fps string: 'fps\\0'"),
-    (0x1048AB740, 0xAA0003F3, 0x66203039, "90fps string: '90 f'"),
-    (0x1048AB744, 0x9404A059, 0x00007370, "90fps string: 'ps\\0\\0'"),
-    (0x1048AB748, 0xB40003E0, 0x66203036, "60fps string: '60 f'"),
-    (0x1048AB74C, 0xF9400414, 0x00007370, "60fps string: 'ps\\0\\0'"),
-    (0x1048AB750, 0xA901FFFF, 0x66203033, "30fps string: '30 f'"),
-    (0x1048AB754, 0xF90017FF, 0x00007370, "30fps string: 'ps\\0\\0'"),
-
-    # Trampoline for stringdb::StringDataManager::GetString: check IDs for 120, 90, 60, 30 fps
-    (0x1048AB758, 0xA9007FFF, 0x52802D28, "trampoline: mov w8, #0x169"),
-    (0x1048AB75C, 0xF9000BFF, 0x72A08E28, "trampoline: movk w8, #0x471, lsl #16"),
-    (0x1048AB760, 0x910063E0, 0x6B08003F, "trampoline: cmp w1, w8"),
-    (0x1048AB764, 0x97FFFE10, 0x540001A0, "trampoline: b.eq is_120"),
-    (0x1048AB768, 0x910063E0, 0x11000508, "trampoline: add w8, w8, #1"),
-    (0x1048AB76C, 0x910003E1, 0x6B08003F, "trampoline: cmp w1, w8"),
-    (0x1048AB770, 0x97FFFE2D, 0x54000180, "trampoline: b.eq is_90"),
-    (0x1048AB774, 0xAA1403E0, 0x52804A88, "trampoline: mov w8, #0x254"),
-    (0x1048AB778, 0x9404B3E0, 0x72A08E28, "trampoline: movk w8, #0x471, lsl #16"),
-    (0x1048AB77C, 0xA94023E0, 0x6B08003F, "trampoline: cmp w1, w8"),
-    (0x1048AB780, 0xEB00011F, 0x54000140, "trampoline: b.eq is_60"),
-    (0x1048AB784, 0x540000E0, 0x51000508, "trampoline: sub w8, w8, #1"),
-    (0x1048AB788, 0x910003E1, 0x6B08003F, "trampoline: cmp w1, w8"),
-    (0x1048AB78C, 0xAA1403E0, 0x54000120, "trampoline: b.eq is_30"),
-    (0x1048AB790, 0x9404B5D8, 0xD10103FF, "trampoline: sub sp, sp, #0x40"),
-    (0x1048AB794, 0x52800008, 0x140B20FC, "trampoline: b 0x104b73b84"),
-    (0x1048AB798, 0xF94003E0, 0x10FFFD00, "trampoline is_120: adr x0, 0x1048ab738"),
-    (0x1048AB79C, 0x14000002, 0xD65F03C0, "trampoline is_120: ret"),
-    (0x1048AB7A0, 0x52800028, 0x10FFFD00, "trampoline is_90: adr x0, 0x1048ab740"),
-    (0x1048AB7A4, 0x39000268, 0xD65F03C0, "trampoline is_90: ret"),
-    (0x1048AB7A8, 0xB4000060, 0x10FFFD00, "trampoline is_60: adr x0, 0x1048ab748"),
-    (0x1048AB7AC, 0xF90007E0, 0xD65F03C0, "trampoline is_60: ret"),
-    (0x1048AB7B0, 0x96DDE7F8, 0x10FFFD00, "trampoline is_30: adr x0, 0x1048ab750"),
-    (0x1048AB7B4, 0xF9400FE0, 0xD65F03C0, "trampoline is_30: ret"),
-
-    # Hook entry of stringdb::StringDataManager::GetString -> jump to trampoline (0x1048AB758)
-    (0x104B73B80, 0xD10103FF, 0x17F4DEF6, "GetString: sub sp -> b 0x1048ab758"),
-
     # Prevent match start crash in IMatchDataStoreObserver::execMatchCameraTypeChanged on null observer Context (x19 == 0)
     (0x1014D52E0, 0xF9400268, 0x14CF5936, "CameraChanged: ldr x8,[x19] -> b 0x1048ab7b8"),
-    (0x1048AB7B8, 0xB4000060, 0x340000B3, "camera trampoline: cbz x19, 0x1048ab7cc"),
+    (0x1048AB7B8, 0xB4000060, 0xB40000B3, "camera trampoline: cbz x19, 0x1048ab7cc"),
     (0x1048AB7BC, 0xF90013E0, 0xF9400268, "camera trampoline: ldr x8, [x19]"),
     (0x1048AB7C0, 0x96DDE7F4, 0xF9400108, "camera trampoline: ldr x8, [x8]"),
     (0x1048AB7C4, 0xA9447BFD, 0xAA1303E0, "camera trampoline: mov x0, x19"),

@@ -138,6 +138,19 @@ std::string OfflineServer::redirectUrl(const std::string& url) {
 Response OfflineServer::serve(Request& r) {
   std::lock_guard<std::recursive_mutex> g(mu);
   try {
+    if (cfg.iosPlayerLayout && r.readPos == 0) {
+      Bytes mp;
+      if (zc::decodeRequestToMsgpack(r.body, mp)) {
+        size_t pos = 0;
+        Value request = zc::unpackZiruValue(mp.data(), mp.size(), pos);
+        if (adaptIosPlayerParameters(request, false)) {
+          r.body = zc::encodeRequest(request);
+          r.headers["content-length"] = std::to_string(r.body.size());
+        }
+      }
+    }
+    // Early handlers must see this request, not the previous command's body.
+    ziruLastRequestBody = r.body;
     return serveInner(r);
   } catch (const std::exception& e) {
     // NanoHTTPD would drop the connection or answer 500

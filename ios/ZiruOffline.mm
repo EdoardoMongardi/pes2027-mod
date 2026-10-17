@@ -100,9 +100,10 @@ static void initPaths() {
   NSFileManager* fm = NSFileManager.defaultManager;
   [fm createDirectoryAtPath:[gSupport stringByAppendingPathComponent:@"GameData"] withIntermediateDirectories:YES attributes:nil error:nil];
   [fm createDirectoryAtPath:[gSupport stringByAppendingPathComponent:@"Save"] withIntermediateDirectories:YES attributes:nil error:nil];
-  // Data and saves are not iCloud-backed-up (several GB)
-  NSURL* u = [NSURL fileURLWithPath:gSupport];
-  [u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
+  // Only heavy resources are disposable. Saves should remain eligible for backup.
+  [[NSURL fileURLWithPath:gSupport] setResourceValue:@NO forKey:NSURLIsExcludedFromBackupKey error:nil];
+  [[NSURL fileURLWithPath:[gSupport stringByAppendingPathComponent:@"GameData"]]
+      setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
   NSString* logDir = [gDocs stringByAppendingPathComponent:@"PES2027-logs"];
   [fm createDirectoryAtPath:logDir withIntermediateDirectories:YES attributes:nil error:nil];
   gLogPath = [logDir stringByAppendingPathComponent:@"ziru.log"];
@@ -558,11 +559,12 @@ static zsv::OfflineServer& server() {
     }
     cfg.livedataDir = livedataDir;
     cfg.dataDir = std::string(gSupport.fileSystemRepresentation) + "/Save";
+    cfg.iosPlayerLayout = true;
     cfg.logFile = std::string([gDocs stringByAppendingPathComponent:@"PES2027-logs/offline_server.log"].fileSystemRepresentation);
     gServer.reset(new zsv::OfflineServer(cfg));
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ gServer->prewarmIosCommentary(); });
     gServer->startupAudit();
-    ZLog(@"server ready assets=%s livedata=%s", cfg.assetsDir.c_str(), cfg.livedataDir.c_str());
+    ZLog(@"server ready assets=%s livedata=%s save=%s layout=iOS147", cfg.assetsDir.c_str(), cfg.livedataDir.c_str(), cfg.dataDir.c_str());
   });
   return *gServer;
 }
@@ -865,7 +867,15 @@ static NSData* bodyOf(NSURLRequest* r) {
     r.headers.erase("content-length");
   }
   CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
-  zsv::Response resp = server().serve(r);
+  zsv::Response resp;
+  try {
+    resp = server().serve(r);
+  } catch (const std::exception& e) {
+    ZLog(@"[SAVE_ERROR] %s", e.what());
+    [self.client URLProtocol:self didFailWithError:[NSError errorWithDomain:@"PES2027.Save" code:1
+        userInfo:@{NSLocalizedDescriptionKey: @"Không thể mở dữ liệu lưu. Kiểm tra dung lượng trống và log."}]];
+    return;
+  }
   double ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000.0;
   ZLog(@"%s %s body=%lu -> %d %lu bytes (%.0f ms)", r.method.c_str(), r.uri.c_str(), (unsigned long)body.length, resp.status,
        (unsigned long)resp.body.size(), ms);
@@ -938,26 +948,6 @@ static void hookSetRequest(id self, SEL _cmd, const char* url, const char* cooki
   gOrigSetReq[I](self, _cmd, url ? red.c_str() : url, cookie, isPost, data, size, gzip);
 }
 
-// ---------------------------------------------------------------- real frame-rate cap (FramePace)
-// FMetalViewport::Present presents with afterMinimumDuration = 1 / FIOSPlatformRHIFramePacer::GetFramePace().
-// GetFramePace (0x101aee720) returns maximumFramesPerSecond / rhi.SyncInterval only when
-// [/Script/IOSRuntimeSettings.IOSRuntimeSettings] bEnableDynamicMaxFPS is true; eFootball's DefaultEngine.ini does
-// not set it, so it returns 60 / SyncInterval and every frame is held for >= 16.7 ms: the game can never exceed
-// 60 fps, whatever t.MaxFPS or CADisplayLink say. GetFramePace caches that ini value in two bytes of __DATA
-// (0x10716a062 = value, 0x10716a063 = "already read"); set both so the cap follows the screen (120 on ProMotion).
-static void enableDynamicMaxFps() {
-  intptr_t slide = _dyld_get_image_vmaddr_slide(0);
-  const uint32_t* code = (const uint32_t*)(0x101aee764 + slide);
-  if (code[0] != 0x39418d08 || ((const uint32_t*)(0x101aee7ac + slide))[0] != 0x39418908) {
-    ZLog(@"[FPS] GetFramePace does not match this binary - dynamic max FPS not enabled");
-    return;
-  }
-  volatile uint8_t* cached = (volatile uint8_t*)(0x10716a062 + slide);
-  cached[0] = 1;  // bEnableDynamicMaxFPS = true
-  cached[1] = 1;  // value already loaded from the ini
-  ZLog(@"[FPS] bEnableDynamicMaxFPS forced on: present pacing follows UIScreen.maximumFramesPerSecond");
-}
-
 // Measured frame rate: the renderer takes one drawable per presented frame.
 static std::atomic<uint32_t> gDrawables{0};
 static IMP gOrigNextDrawable;
@@ -973,47 +963,18 @@ static void startFpsMeter() {
   static dispatch_source_t keep;
   keep = t;
   dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), 10 * NSEC_PER_SEC, NSEC_PER_SEC);
+  __block CFTimeInterval previousSample = CACurrentMediaTime();
   dispatch_source_set_event_handler(t, ^{
+    CFTimeInterval now = CACurrentMediaTime();
+    double elapsed = now - previousSample;
+    previousSample = now;
     uint32_t n = gDrawables.exchange(0);
     if (!n) return;
     dispatch_async(dispatch_get_main_queue(), ^{
-      ZLog(@"[FPS] measured %.1f fps (screen max %ld Hz)", n / 10.0, (long)UIScreen.mainScreen.maximumFramesPerSecond);
+      ZLog(@"[FPS] %.1f drawables/s (screen max %ld Hz)", n / elapsed, (long)UIScreen.mainScreen.maximumFramesPerSecond);
     });
   });
   dispatch_resume(t);
-}
-
-// ---------------------------------------------------------------- 120 FPS Unlock
-static IMP gOrigSetPreferredFramesPerSecond = nullptr;
-static void hookSetPreferredFramesPerSecond(CADisplayLink* self, SEL _cmd, NSInteger fps) {
-  if (gOrigSetPreferredFramesPerSecond) {
-    ((void(*)(id, SEL, NSInteger))gOrigSetPreferredFramesPerSecond)(self, _cmd, 120);
-  }
-  if (@available(iOS 15.0, *)) {
-    self.preferredFrameRateRange = CAFrameRateRangeMake(60.0f, 120.0f, 120.0f);
-  }
-}
-
-static IMP gOrigDisplayLinkWithTarget = nullptr;
-static CADisplayLink* hookDisplayLinkWithTarget(Class cls, SEL _cmd, id target, SEL sel) {
-  CADisplayLink* link = ((CADisplayLink* (*)(id, SEL, id, SEL))gOrigDisplayLinkWithTarget)(cls, _cmd, target, sel);
-  if (link) {
-    link.preferredFramesPerSecond = 120;
-    if (@available(iOS 15.0, *)) {
-      link.preferredFrameRateRange = CAFrameRateRangeMake(60.0f, 120.0f, 120.0f);
-    }
-  }
-  return link;
-}
-
-static IMP gOrigSetPreferredFrameRateRange = nullptr;
-static void hookSetPreferredFrameRateRange(CADisplayLink* self, SEL _cmd, CAFrameRateRange range) {
-  range.minimum = 60.0f;
-  range.maximum = 120.0f;
-  range.preferred = 120.0f;
-  if (gOrigSetPreferredFrameRateRange) {
-    ((void(*)(id, SEL, CAFrameRateRange))gOrigSetPreferredFrameRateRange)(self, _cmd, range);
-  }
 }
 
 // ---------------------------------------------------------------- UE4 Graphics Enhancements (Phase 1)
@@ -1042,26 +1003,7 @@ static void setupGraphicsEnhancements() {
     }
   }
 
-  // Built-in Phase 1 Console-Grade Graphics preset:
-  // - 100% Native Retina Resolution & CAS Sharpening
-  // - High Quality TAA & 8x Anisotropy
-  // - LOD Lock Level 0 (no blurry player face/mesh pop-in at wide camera angles)
-  // - Contact Shadows & 1.8x Shadow Distance
-  const char16_t* kPhase1Graphics =
-      u" -r.ScreenPercentage=100"
-      u" -r.Tonemapper.Sharpen=0.75"
-      u" -r.PostProcessAAQuality=4"
-      u" -r.TemporalAAFilterSize=1.0"
-      u" -r.SkeletalMeshLODBias=0"
-      u" -r.StaticMeshLODDistanceScale=2.0"
-      u" -r.ContactShadows=1"
-      u" -r.Shadow.DistanceScale=1.8"
-      u" -r.ShadowQuality=3"
-      u" -r.MaxAnisotropy=8"
-      u" -r.Streaming.PoolSize=384";
-
-  appendFn(kPhase1Graphics);
-  ZLog(@"[GRAPHICS] Injected Phase 1 Ultra Graphics CVars (ScreenPercentage=100, LODBias=0, ContactShadows=1, MaxAnisotropy=8)");
+  ZLog(@"[GRAPHICS] using native quality settings (no forced Ultra CVars)");
 }
 
 // ---------------------------------------------------------------- launch gating
@@ -1075,12 +1017,24 @@ static void startGame();
 
 static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
   NSFileManager* fm = NSFileManager.defaultManager;
+  if ([linkPath.stringByStandardizingPath isEqualToString:targetPath.stringByStandardizingPath]) return;
   if (![fm fileExistsAtPath:targetPath]) return;
+  // Download/download can be the same directory on iOS. Never delete a file
+  // in order to create a link back to itself, or replace genuine iOS data
+  // with an Android alias of the same name.
+  struct stat linkStat, targetStat;
+  if (orig_stat && orig_stat(linkPath.fileSystemRepresentation, &linkStat) == 0 &&
+      orig_stat(targetPath.fileSystemRepresentation, &targetStat) == 0 &&
+      linkStat.st_dev == targetStat.st_dev && linkStat.st_ino == targetStat.st_ino) return;
   NSString* curDest = [fm destinationOfSymbolicLinkAtPath:linkPath error:nil];
   if (curDest && [curDest isEqualToString:targetPath]) return;
 
   BOOL isDir = NO;
   if ([fm fileExistsAtPath:linkPath isDirectory:&isDir]) {
+    if (!isDir && curDest == nil) {
+      ZLog(@"[DATA_PRESERVE] keeping existing file %@", linkPath.lastPathComponent);
+      return;
+    }
     if (isDir && curDest == nil) {
       NSArray* contents = [fm contentsOfDirectoryAtPath:linkPath error:nil];
       if (contents.count > 0) {
@@ -2027,17 +1981,7 @@ __attribute__((constructor)) static void ziruInit() {
       gGameStarted = true;
     }
 
-    // 120 FPS Unlock via CADisplayLink
-    Class dlCls = CADisplayLink.class;
-    if (dlCls) {
-      gOrigDisplayLinkWithTarget = swizzleClassMethod(dlCls, @selector(displayLinkWithTarget:selector:), (IMP)hookDisplayLinkWithTarget);
-      gOrigSetPreferredFramesPerSecond = swizzleInstance(dlCls, @selector(setPreferredFramesPerSecond:), (IMP)hookSetPreferredFramesPerSecond);
-      if (@available(iOS 15.0, *)) {
-        gOrigSetPreferredFrameRateRange = swizzleInstance(dlCls, @selector(setPreferredFrameRateRange:), (IMP)hookSetPreferredFrameRateRange);
-      }
-      ZLog(@"[120FPS] CADisplayLink 120 FPS hooks installed");
-    }
-    enableDynamicMaxFps();
+    ZLog(@"[FPS] using native game frame pacing and selected FPS");
     setupGraphicsEnhancements();
     startFpsMeter();
   }

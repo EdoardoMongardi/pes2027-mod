@@ -21,6 +21,7 @@
 #include "codec.hpp"
 #include "jvalue.hpp"
 #include "store.hpp"
+#include "ios_compat.hpp"
 
 namespace zsv {
 using namespace zj;
@@ -78,6 +79,7 @@ struct Config {
   std::string dataDir;      // ziru_save.db, prefs, Download/
   std::string logFile;      // offline_server.log ("" = disabled)
   bool dropAndroidLivedata = false;
+  bool iosPlayerLayout = false;  // 11.1.1 wire parameters; saves remain in Ziru format
   std::string downloadDir;   // where the game keeps downloaded files (commentary); "" = dataDir + "/Download"
   bool iosCommentary = false;  // commentary list from the installed file: real size/SHA-256, or empty when absent  // iOS: Ziru's livedata are Android paks (*_mobile_and.pak) the iOS client cannot apply
 };
@@ -133,6 +135,14 @@ class OfflineServer {
   std::string readAsset(const std::string& name);      // throws IOEx
   Response newFixed(int status, const std::string& mime, Bytes body);
   Response newFixedText(int status, const std::string& text);
+  Bytes encodeClientResponse(const Value& value) {
+    if (!cfg.iosPlayerLayout) return zc::encodeResponse(value);
+    Value wire = value;
+    if (value.t == Value::OBJ) wire = Value(Object::parse(value.o->toString()));
+    else if (value.t == Value::ARR) wire = Value(Array::parse(value.a->toString()));
+    adaptIosPlayerParameters(wire, true);
+    return zc::encodeResponse(wire);
+  }
   void logRequest(const std::string& a, const std::string& b);
   static JStr dbLoad(bool ok, std::string& s) { if (ok) return s; return std::nullopt; }
   JStr loadMeta(const std::string& k) { std::string s; return dbLoad(ziruDb->loadMeta(k, s), s); }

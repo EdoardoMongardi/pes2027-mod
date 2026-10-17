@@ -15,7 +15,7 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     }
   }
 
-  // 2. Fix appearance parameters [49:65] if all zeroes or pitch black/albino (skin 6 / 0 bug)
+  // 2. Restore only a missing appearance block, using a known player preset.
   ArrP params = cur->optJSONArray("parameters");
   if (params && params->length() >= 65) {
     bool allZero = true;
@@ -25,19 +25,13 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
         break;
       }
     }
-    int skin = params->optInt(49, 0);
-    bool pitchBlackOrAlbino = (skin == 6 || skin == 0);
-    if (allZero || pitchBlackOrAlbino) {
+    // A skin value alone cannot diagnose a missing texture. Preserve genuine
+    // appearance data; use a known preset only for a completely empty block.
+    if (allZero) {
       auto it = kAppearancePresets.find(base_id);
       if (it != kAppearancePresets.end()) {
         for (int i = 0; i < 16; i++) {
           params->put(49 + i, (int)it->second.v[i]);
-        }
-      } else {
-        // Natural default skin tone and appearance so player is never chalk white or pitch black
-        static const int32_t kDefAppearance[16] = {3, 1, 1, 1, 4, 0, 4, 18, 4, 8, 142, 0, 14, 0, 1, 1};
-        for (int i = 0; i < 16; i++) {
-          params->put(49 + i, kDefAppearance[i]);
         }
       }
     }
@@ -288,7 +282,7 @@ Response serveLivedataAsset(const std::string& name) {
 
 Response serveObjectAsEncryptedMsgPack(const ObjP& jo) {
   // packValue(null) packs nil – Java does not throw here
-  Response r = newFixed(200, "application/x-msgpack", zc::encodeResponse(jo ? Value(jo) : Value()));
+  Response r = newFixed(200, "application/x-msgpack", encodeClientResponse(jo ? Value(jo) : Value()));
   r.headers["Connection"] = "close";
   return r;
 }
