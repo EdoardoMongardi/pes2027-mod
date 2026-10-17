@@ -410,6 +410,37 @@ ObjP getZiruPlayerWrapper(const Value& obj, bool warehouse) {
   }
 }
 
+static std::unordered_map<int32_t, std::string> ziruBaseIdToRecordKey;
+
+ObjP getZiruPlayerWrapperByBaseId(int32_t baseId, bool warehouse = false) {
+  try {
+    ObjP recs = ziruPlayerRecordsCache;
+    if (!recs) {
+      recs = Object::parse(readAsset("responses/ZIRU_PLAYER_RECORDS.json"));
+      ziruPlayerRecordsCache = recs;
+      zs::logi("OFFLINE_SERVER", "[ZIRU_V41_CACHE_READY] ZIRU_PLAYER_RECORDS loaded once");
+    }
+    if (ziruBaseIdToRecordKey.empty() && recs) {
+      for (const auto& k : recs->keys()) {
+        try {
+          int64_t fullId = parseLong(k);
+          int32_t bid = (int32_t)(fullId & 0xFFFFFF);
+          if (bid > 0 && ziruBaseIdToRecordKey.find(bid) == ziruBaseIdToRecordKey.end()) {
+            ziruBaseIdToRecordKey[bid] = k;
+          }
+        } catch (...) {}
+      }
+    }
+    auto it = ziruBaseIdToRecordKey.find(baseId);
+    if (it != ziruBaseIdToRecordKey.end()) {
+      return getZiruPlayerWrapper(Value(it->second), warehouse);
+    }
+    return nullptr;
+  } catch (...) {
+    return nullptr;
+  }
+}
+
 Response handleZiruAdjustParamMinimal() {
   logRequest("ZIRU_V81_PROTOCOL", "[ZIRU_V81_ADJUST_ACK] exact rqid");
   return handleZiruProtocolAckV81(JStr("CMD_SEND_ADJUST_PARAM"));

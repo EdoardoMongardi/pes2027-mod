@@ -118,6 +118,57 @@ void z27ApplyProgressionPoints(const ArrP& params, const ObjP& prog, const ArrP&
   }
 }
 
+ArrP z27ResolvePlayStyle(int64_t id, const ObjP& existing = nullptr) {
+  if (existing) {
+    ArrP ps = existing->optJSONArray("play_style");
+    if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+  }
+  // 1. Try getZiruPlayerWrapper by exact ID
+  ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
+  if (w && w->optJSONObject("gameplayer")) {
+    ArrP ps = w->getJSONObject("gameplayer")->optJSONArray("play_style");
+    if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+  }
+  // 2. Try getZiruPlayerWrapper by base ID (lower 24 bits)
+  int32_t bid = (int32_t)(id & 0xFFFFFF);
+  ObjP wBase = getZiruPlayerWrapperByBaseId(bid);
+  if (wBase && wBase->optJSONObject("gameplayer")) {
+    ArrP ps = wBase->getJSONObject("gameplayer")->optJSONArray("play_style");
+    if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+  }
+  // 3. Try z27Entry() (CmdLogin.json)
+  try {
+    ArrP list = z27Entry()->optJSONArray("gameplayer_list");
+    if (list) {
+      for (int i = 0; i < list->length(); i++) {
+        ObjP o = list->optJSONObject(i);
+        if (!o) continue;
+        ObjP gid = o->optJSONObject("gameplayer_id");
+        if (!gid) continue;
+        int64_t oid = gid->optLong("id", 0);
+        if (oid == id || ((oid & 0xFFFFFF) == bid)) {
+          ArrP ps = o->optJSONArray("play_style");
+          if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+        }
+      }
+    }
+  } catch (...) {}
+  // 4. Semantic default from position parameters so NO player is ever "Basic"
+  int pos = 0;
+  if (existing) {
+    ArrP par = existing->optJSONArray("parameters");
+    if (par && par->length() > 0) pos = par->optInt(0, 0);
+  }
+  ArrP fallback = newArr();
+  if (pos == 1) { fallback->put(20); fallback->put(0); } // GK -> Offensive Goalkeeper
+  else if (pos == 2 || pos == 3 || pos == 4) { fallback->put(15); fallback->put(0); } // CB/LB/RB -> Build Up
+  else if (pos == 5 || pos == 6 || pos == 7 || pos == 8) { fallback->put(11); fallback->put(0); } // DMF/CMF/LMF/RMF -> Box-to-Box
+  else if (pos == 9) { fallback->put(10); fallback->put(0); } // AMF -> Hole Player
+  else if (pos == 10 || pos == 11) { fallback->put(6); fallback->put(0); } // LWG/RWG -> Prolific Winger
+  else { fallback->put(1); fallback->put(0); } // CF/SS -> Goal Poacher
+  return fallback;
+}
+
 ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
   if (!jo) return jo;
   try {
@@ -136,11 +187,15 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           if (!g2 || g2->optLong("id") != id) cur = jo;
         }
         ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
+        if (!w) {
+          w = getZiruPlayerWrapperByBaseId((int32_t)(id & 0xFFFFFF));
+        }
         ObjP base;
         if (w && (base = w->optJSONObject("gameplayer"))) {
           ArrP ib;
           if (!cur->optJSONArray("initial_booster_id_list") && (ib = base->optJSONArray("initial_booster_id_list"))) cur->put("initial_booster_id_list", ib);
-          if (base->has("play_style")) cur->put("play_style", base->get("play_style"));
+          auto ps = base->get("play_style");
+          if (ps && ps.isJSONArray() && ps.asJSONArray()->length() > 0 && ps.asJSONArray()->optInt(0, 0) > 0) cur->put("play_style", ps);
           ObjP bl = base->optJSONObject("level_info");
           int lim = bl ? bl->optInt("level_limit", 1) : 1;
           if (lim == 1 && (((int32_t)id) & 16777215) == 134665) {
@@ -164,7 +219,14 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           }
           li->put("customize_point", cp);
         }
+        ArrP curPs = cur->optJSONArray("play_style");
+        if (!curPs || curPs->length() == 0 || curPs->optInt(0, 0) <= 0) {
+          cur->put("play_style", z27ResolvePlayStyle(id, cur));
+        }
         z27ApplyAppearanceAndClub(cur);
+        if (serial > 0) {
+          ziruDb->savePlayer(serial, id, cur->toString());
+        }
         return ziruSyncActiveBooster(cur);
       }
     }

@@ -204,7 +204,9 @@ Response z27TeamChange(const std::string& cmd) {
       ei->put("base_team_id", curBase->getInt("base_team_id"));
       ei->put("base_team_license", curBase->optString("base_team_license", "LICENSED"));
       ObjP ack = z27Ack(cmd, req);
+      ack->put("base_team", newArr()->put(curBase));
       ack->put("entry_info", ei);
+      z27Restore(ack);
       logRequest("ZIRU_TEAM_COMMIT", "squad=" + str(sq) + " base=" + str(curBase->getInt("base_team_id")));
       return serveObjectAsEncryptedMsgPack(ack);
     }
@@ -330,7 +332,19 @@ void z27Restore(const ObjP& jo) {
         if (lp) {
           ObjP sv = Object::parse(*lp);
           if (sv->optJSONObject("gameplayer")) sv = sv->getJSONObject("gameplayer");
-          if (sv->getJSONObject("gameplayer_id")->getLong("id") == p->getJSONObject("gameplayer_id")->getLong("id")) gl->put(i, sv);
+          if (sv->getJSONObject("gameplayer_id")->getLong("id") == p->getJSONObject("gameplayer_id")->getLong("id")) {
+            ArrP svPs = sv->optJSONArray("play_style");
+            if (!svPs || svPs->length() == 0 || svPs->optInt(0, 0) <= 0) {
+              sv->put("play_style", z27ResolvePlayStyle(p->getJSONObject("gameplayer_id")->getLong("id"), p));
+              ziruDb->savePlayer(p->getJSONObject("gameplayer_id")->optLong("serial", 0), p->getJSONObject("gameplayer_id")->getLong("id"), sv->toString());
+            }
+            gl->put(i, sv);
+          }
+        } else {
+          ArrP pPs = p->optJSONArray("play_style");
+          if (!pPs || pPs->length() == 0 || pPs->optInt(0, 0) <= 0) {
+            p->put("play_style", z27ResolvePlayStyle(p->getJSONObject("gameplayer_id")->getLong("id"), p));
+          }
         }
       }
     }
@@ -547,17 +561,10 @@ ObjP z27Player(const ObjP& gid) {
     }
   }
   z27ApplyAppearanceAndClub(p);
-  if (serial > 0) {
-    JStr pr = loadProgression(serial);
-    if (pr && !pr->empty()) {
-      ObjP prog = Object::parse(*pr);
-      ObjP w = getZiruPlayerWrapper(Value((long long)gid->getLong("id")), false);
-      ArrP bp = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
-      ArrP params = p->optJSONArray("parameters");
-      if (params && bp) {
-        z27ApplyProgressionPoints(params, prog, bp);
-      }
-    }
+  ArrP curPs = p->optJSONArray("play_style");
+  if (!curPs || curPs->length() == 0 || curPs->optInt(0, 0) <= 0) {
+    p->put("play_style", z27ResolvePlayStyle(gid->getLong("id"), p));
+    if (serial > 0) ziruDb->savePlayer(serial, gid->getLong("id"), p->toString());
   }
   p = ziruSyncActiveBooster(p);
   ArrP addSkills = p->optJSONArray("additional_skill_id");
@@ -600,7 +607,11 @@ ObjP z27Home(const ObjP& active) {
     if (ib) pObj->put("initial_booster_id_list", Array::parse(ib->toString()));
     ArrP sk = p->optJSONArray("additional_skill_id");
     if (sk) pObj->put("additional_skill_id", Array::parse(sk->toString()));
-    if (p->has("play_style")) pObj->put("play_style", p->get("play_style"));
+    ArrP ps = p->optJSONArray("play_style");
+    if (!ps || ps->length() == 0 || ps->optInt(0, 0) <= 0) {
+      ps = z27ResolvePlayStyle(gid->getLong("id"), p);
+    }
+    pObj->put("play_style", ps);
     out->put(pObj);
   }
   home->put("player_list", out)->put("squad_gameplan", z27Copy(sq->getJSONObject("squad_gameplan")))->put("team_id", active->getJSONObject("home")->getInt("base_team_id"));

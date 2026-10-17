@@ -979,7 +979,7 @@ static void hookSetPreferredFramesPerSecond(CADisplayLink* self, SEL _cmd, NSInt
   }
   if (@available(iOS 15.0, *)) {
     float f = (float)targetFps;
-    self.preferredFrameRateRange = CAFrameRateRangeMake((targetFps <= 60) ? 60.0f : 60.0f, f, f);
+    self.preferredFrameRateRange = CAFrameRateRangeMake(f, f, f);
   }
 }
 
@@ -991,7 +991,8 @@ static CADisplayLink* hookDisplayLinkWithTarget(Class cls, SEL _cmd, id target, 
     if (maxFps < 60) maxFps = 60;
     link.preferredFramesPerSecond = maxFps;
     if (@available(iOS 15.0, *)) {
-      link.preferredFrameRateRange = CAFrameRateRangeMake(60.0f, (float)maxFps, (float)maxFps);
+      float f = (float)maxFps;
+      link.preferredFrameRateRange = CAFrameRateRangeMake(f, f, f);
     }
   }
   return link;
@@ -1001,15 +1002,10 @@ static IMP gOrigSetPreferredFrameRateRange = nullptr;
 static void hookSetPreferredFrameRateRange(CADisplayLink* self, SEL _cmd, CAFrameRateRange range) {
   float maxFps = (float)UIScreen.mainScreen.maximumFramesPerSecond;
   if (maxFps < 60.0f) maxFps = 60.0f;
-  if (range.preferred <= 60.0f && range.preferred > 0.0f) {
-    range.minimum = 60.0f;
-    range.maximum = 60.0f;
-    range.preferred = 60.0f;
-  } else {
-    range.minimum = 60.0f;
-    range.maximum = maxFps;
-    range.preferred = maxFps;
-  }
+  float target = (range.preferred <= 60.0f && range.preferred > 0.0f) ? 60.0f : maxFps;
+  range.minimum = target;
+  range.maximum = target;
+  range.preferred = target;
   if (gOrigSetPreferredFrameRateRange) {
     ((void(*)(id, SEL, CAFrameRateRange))gOrigSetPreferredFrameRateRange)(self, _cmd, range);
   }
@@ -1070,8 +1066,8 @@ static void setupGraphicsEnhancements() {
     }
   }
 
-  appendFn(u" -t.MaxFPS=120");
-  ZLog(@"[GRAPHICS] Unlocked engine tick cap to 120 FPS (-t.MaxFPS=120)");
+  appendFn(u" -t.MaxFPS=120 -r.FinishCurrentFrame=0 -r.OneFrameThreadLag=1");
+  ZLog(@"[GRAPHICS] Unlocked engine tick cap to 120 FPS with smooth frame pacing (-t.MaxFPS=120 -r.FinishCurrentFrame=0 -r.OneFrameThreadLag=1)");
 }
 
 // ---------------------------------------------------------------- launch gating

@@ -188,9 +188,11 @@ Response handleZiruMyLeagueStartGameV71() {
               if (item->has("uniform_number")) pObj->put("uniform_number", item->getInt("uniform_number"));
               ArrP ib = p->optJSONArray("initial_booster_id_list");
               if (ib) pObj->put("initial_booster_id_list", Array::parse(ib->toString()));
-              ArrP sk = p->optJSONArray("additional_skill_id");
-              if (sk) pObj->put("additional_skill_id", Array::parse(sk->toString()));
-              if (p->has("play_style")) pObj->put("play_style", p->get("play_style"));
+              ArrP ps = p->optJSONArray("play_style");
+              if (!ps || ps->length() == 0 || ps->optInt(0, 0) <= 0) {
+                ps = z27ResolvePlayStyle(gid->optLong("id", 0), p);
+              }
+              pObj->put("play_style", ps);
               out->put(pObj);
             }
           }
