@@ -35,8 +35,20 @@ Response z27Error(const std::string& msg, const std::exception& e) {
 ObjP z27Teams() { return nn(loadZiruJsonAssetObject("responses/ZIRU_MATCH_TEAMS.json"))->getJSONObject("teams"); }
 
 ObjP z27Team(int32_t id) {
+  if (id == 262143) {
+    ObjP syn = newObj()
+        ->put("base_team_id", 262143)
+        ->put("base_team_license", "UNKNOWN")
+        ->put("team_name", "PES Team")
+        ->put("team_name_short", "PES");
+    ArrP kits = newArr();
+    kits->put(newObj()->put("id", 1)->put("shirt_rgb", newArr()->put(255)->put(255)->put(255)));
+    kits->put(newObj()->put("id", 2)->put("shirt_rgb", newArr()->put(0)->put(0)->put(0)));
+    syn->put("kits", kits);
+    return syn;
+  }
   ObjP teams = z27Teams();
-  int32_t lookup_id = (id <= 0 || id == 262143) ? 100 : id;
+  int32_t lookup_id = (id <= 0) ? 100 : id;
   ObjP t = teams ? teams->optJSONObject(str(lookup_id)) : nullptr;
   if (!t && teams) {
     for (const char* tid : {"100", "109", "102", "173", "135"}) {
@@ -222,7 +234,7 @@ Response z27TeamChange(const std::string& cmd) {
         fb = newObj()->put("base_team_id", 100);
       }
       int tid = fb->getInt("base_team_id");
-      if (tid == 262143 || tid <= 0) {
+      if (tid <= 0) {
         tid = 100;
         fb->put("base_team_id", tid);
       }
