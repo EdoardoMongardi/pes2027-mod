@@ -118,7 +118,7 @@ void z27ApplyProgressionPoints(const ArrP& params, const ObjP& prog, const ArrP&
   }
 }
 
-ArrP z27ResolvePlayStyle(int64_t id, const ObjP& existing = nullptr) {
+ArrP z27ResolvePlayStyle(int64_t id, const ObjP& existing) {
   if (existing) {
     ArrP ps = existing->optJSONArray("play_style");
     if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;

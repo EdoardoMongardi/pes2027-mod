@@ -412,7 +412,7 @@ ObjP getZiruPlayerWrapper(const Value& obj, bool warehouse) {
 
 static std::unordered_map<int32_t, std::string> ziruBaseIdToRecordKey;
 
-ObjP getZiruPlayerWrapperByBaseId(int32_t baseId, bool warehouse = false) {
+ObjP getZiruPlayerWrapperByBaseId(int32_t baseId, bool warehouse) {
   try {
     ObjP recs = ziruPlayerRecordsCache;
     if (!recs) {
