@@ -140,7 +140,7 @@ class OfflineServer {
     Value wire = value;
     if (value.t == Value::OBJ) wire = Value(Object::parse(value.o->toString()));
     else if (value.t == Value::ARR) wire = Value(Array::parse(value.a->toString()));
-    adaptIosPlayerParameters(wire, true);
+    adaptIosPlayerData(wire, true);
     return zc::encodeResponse(wire);
   }
   void logRequest(const std::string& a, const std::string& b);

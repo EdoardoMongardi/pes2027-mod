@@ -15,27 +15,10 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     }
   }
 
-  // 2. Restore only a missing appearance block, using a known player preset.
-  ArrP params = cur->optJSONArray("parameters");
-  if (params && params->length() >= 65) {
-    bool allZero = true;
-    for (int i = 49; i <= 60; i++) {
-      if (params->optInt(i, 0) != 0) {
-        allZero = false;
-        break;
-      }
-    }
-    // A skin value alone cannot diagnose a missing texture. Preserve genuine
-    // appearance data; use a known preset only for a completely empty block.
-    if (allZero) {
-      auto it = kAppearancePresets.find(base_id);
-      if (it != kAppearancePresets.end()) {
-        for (int i = 0; i < 16; i++) {
-          params->put(49 + i, (int)it->second.v[i]);
-        }
-      }
-    }
-  }
+  // Do not write parameters[49..64] as a guessed skin/face block: iOS uses
+  // 49/50 for SecretAbility, 52..60 for MotionType, and 63..69 for COM skills.
+  // Actual face/kit textures must be repaired in the resource data.
+
 }
 
 void z27ApplyProgressionPoints(const ArrP& params, const ObjP& prog, const ArrP& baseParams) {
@@ -224,7 +207,7 @@ void sanitizeZiruAdditionalSkills(const ObjP& jo) {
         ArrP n = newArr();
         for (int k = 0; k < sk->length(); k++) {
           int v = sk->optInt(k);
-          if (v != 6 && v != 32 && v != 70) n->put(v);
+          if (isZiruSkillId(v) && n->length() < 5) n->put(v);
         }
         p->put("additional_skill_id", n);
       }

@@ -37,6 +37,26 @@ static ObjP result(OfflineServer& s, int64_t id, int a, int b, bool giveup = fal
 int main() {
   try {
     zs::setVerbose(false);
+    // Independent table extracted from iOS Player::GetDataLabel(SkillCard),
+    // VA 0x10578bc00. Compare semantic parameter labels for every source skill.
+    const int iosSkillLabels[74] = {
+      70,107,71,72,73,108,74,75,135,136,102,116,124,130,140,76,121,77,
+      120,101,78,103,104,109,127,143,134,79,80,81,114,128,82,110,83,84,
+      119,85,86,98,117,118,122,141,87,88,105,89,90,99,100,138,139,126,
+      129,91,92,93,106,111,112,113,125,137,115,94,123,132,142,95,131,96,97,133
+    };
+    auto skillIds = newArr(); for (int i = 0; i < 72; ++i) skillIds->put(i);
+    Value skillWire(newObj()->put("additional_skill_id", skillIds)->put("skillcard_id_list", skillIds)
+        ->put("skill_training_result", newObj()->put("additional_skill_id", 67)));
+    adaptIosPlayerData(skillWire, true);
+    for (int i = 0; i < 72; ++i) {
+      int target = skillWire.o->getJSONArray("additional_skill_id")->getInt(i);
+      check(iosSkillLabels[target] == kZiruSkillParameters[i], "skill enum must refer to the same actual skill parameter");
+      check(skillWire.o->getJSONArray("skillcard_id_list")->getInt(i) == target, "training list uses the same skill mapping");
+    }
+    check(skillWire.o->getJSONObject("skill_training_result")->getInt("additional_skill_id") == 69, "training result maps skill scalar");
+    adaptIosPlayerData(skillWire, false);
+    for (int i = 0; i < 72; ++i) check(skillWire.o->getJSONArray("additional_skill_id")->getInt(i) == i, "all skill IDs roundtrip to stable save format");
     char temp[] = "/tmp/pes-gameplay-XXXXXX";
     check(mkdtemp(temp), "temporary directory");
     std::string root(temp);
@@ -173,6 +193,31 @@ int main() {
       auto resumed = call(s, "CMD_CREATE_USER")->getJSONObject("entry_info");
       check(resumed->getJSONArray("gameplayer_list")->length() == 2, "CREATE_USER resumes recruits after process restart");
       check(resumed->getJSONArray("squad_list")->length() > 0, "CREATE_USER resumes saved squads");
+      auto owned = Object::parse(*s.loadPlayer(101));
+      owned->getJSONObject("gameplayer_id")->put("serial", 303);
+      auto params = owned->getJSONArray("parameters");
+      for (int id = 0; id < 72; ++id) params->put(kZiruSkillParameters[id], id == 0 ? 0 : 1);
+      owned->put("additional_skill_id", newArr());
+      s.ziruDb->savePlayer(303, 1, owned->toString());
+      asset(root, "CMD_USE_MYCLUB_ITEM.json", obj(R"({"result":"NOERR"})"));
+      auto req = newObj()->put("gameplayer_id_list", newArr()->put(owned->getJSONObject("gameplayer_id")))
+          ->put("training_index", 0)->put("item_list", newArr()->put(newObj()->put("present_num", 1)
+          ->put("item", newObj()->put("item_type", "SKILL_TRAINING"))));
+      auto awarded = call(s, "CMD_USE_MYCLUB_ITEM", req)->getJSONObject("skill_training_result")->getInt("additional_skill_id");
+      check(awarded == 0, "training excludes all built-in skills; ID zero is a real skill");
+    }
+    {
+      OfflineServer s(cfg);
+      auto players = call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+      bool retainedZero = false;
+      for (int i = 0; i < players->length(); ++i) {
+        auto p = players->getJSONObject(i);
+        if (p->getJSONObject("gameplayer_id")->getLong("serial") == 303) {
+          auto skills = p->getJSONArray("additional_skill_id");
+          retainedZero = skills->length() == 1 && skills->getInt(0) == 0;
+        }
+      }
+      check(retainedZero, "valid skill zero survives save, process restart and login");
     }
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
@@ -192,7 +237,7 @@ int main() {
       check(db.loadMeta("progress", progress) && progress == "retained" && prefs.getString("recruited_players", "") == "[1,2]", "DB and recruits survive exit without destructors");
     }
     std::filesystem::remove_all(root);
-    std::cout << "PASS: gameplay, iOS booster layout/roundtrip, CREATE_USER resume, D1 stale CPU migration, failed writes and abrupt-exit persistence\n";
+    std::cout << "PASS: gameplay, booster layout, all 72 skill mappings/roundtrip/training/skill-zero restart, CREATE_USER resume, D1 migration, failed writes and abrupt-exit persistence\n";
     return 0;
   } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << "\n"; return 1; }
 }

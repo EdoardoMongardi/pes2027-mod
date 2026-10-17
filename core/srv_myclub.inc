@@ -375,7 +375,7 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
       if (sk) {
         for (int i2 = 0; i2 < sk->length(); i2++) {
           int v = sk->optInt(i2);
-          if (v > 0) {
+          if (isZiruSkillId(v)) {
             if (vcontains(al, v)) continue;
             if (al.size() >= 5) break;
             al.push_back(v);
@@ -388,7 +388,7 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
         for (auto& part : split(s, ',')) {
           try {
             int v = parseInt(part);
-            if (vcontains(al, v)) continue;
+            if (!isZiruSkillId(v) || vcontains(al, v)) continue;
             if (al.size() >= 5) break;
             al.push_back(v);
           } catch (const NumberFormat&) {
@@ -427,7 +427,7 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     if (lp && !lp->empty() && (sk = Object::parse(*lp)->optJSONArray("additional_skill_id"))) {
       for (int i = 0; i < sk->length(); i++) {
         int v = sk->optInt(i);
-        if (v > 0) {
+        if (isZiruSkillId(v)) {
           if (vcontains(al, v)) continue;
           if (al.size() >= 5) break;
           al.push_back(v);
@@ -438,7 +438,7 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
       for (auto& part : split(s, ',')) {
         try {
           int v = parseInt(part);
-          if (!vcontains(al, v)) al.push_back(v);
+          if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
         } catch (const NumberFormat&) {
         }
       }
@@ -463,18 +463,17 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     }
     std::vector<std::string> sp_ = split(pool, ',');
     std::vector<int> candidates;
+    ObjP owned = z27OwnedPlayer(j);
+    ArrP baseSkills = owned ? owned->optJSONArray("parameters") : nullptr;
     for (const auto& s_item : sp_) {
       int val = parseInt(s_item);
-      if (!vcontains(al, val)) candidates.push_back(val);
+      bool builtIn = isZiruSkillId(val) && baseSkills && baseSkills->optInt(kZiruSkillParameters[val]) != 0;
+      if (isZiruSkillId(val) && !builtIn && !vcontains(al, val)) candidates.push_back(val);
     }
     int v = 70;
     if (!candidates.empty()) {
       v = candidates[rand() % candidates.size()];
-    } else {
-      for (int fallback_id : {70, 69, 67, 64}) {
-        if (!vcontains(al, fallback_id)) { v = fallback_id; break; }
-      }
-    }
+    } else throw IllegalState("No eligible additional skill remains");
     al.push_back(v);
     prefs.edit().putString(key, joinInts(al)).commit();
     saveZiruSkillsToDb(j, al);

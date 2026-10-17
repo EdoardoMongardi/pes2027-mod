@@ -143,7 +143,7 @@ Response OfflineServer::serve(Request& r) {
       if (zc::decodeRequestToMsgpack(r.body, mp)) {
         size_t pos = 0;
         Value request = zc::unpackZiruValue(mp.data(), mp.size(), pos);
-        if (adaptIosPlayerParameters(request, false)) {
+        if (adaptIosPlayerData(request, false)) {
           r.body = zc::encodeRequest(request);
           r.headers["content-length"] = std::to_string(r.body.size());
         }
