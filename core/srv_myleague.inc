@@ -36,7 +36,8 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
         e->put("level", lim + 1);
         e->put("experience", 0);
         expl->put(e);
-        ArrP cards = Array::parse("[0,1,2,3,4,5,6,7,10,15,17,19,20,21,22,23,26,27,28,31,32,33,34,36,37,38,43,46,48,54,55,56,57,58,59,60,64,67,69,70]");
+        ArrP cards = newArr();
+        for (int i = 0; i < 72; i++) cards->put(i);
         ObjP boost = Object::parse("{\"use_item_num_list_random\":[0,1],\"use_item_num_list_select\":[0,100]}");
         ObjP out = newObj();
         out->put("careerplan_list", career);

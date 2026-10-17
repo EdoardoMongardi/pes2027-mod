@@ -105,9 +105,10 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
         }
         for (int i = 0; i < acc->length(); i++) {
           ObjP o = acc->optJSONObject(i);
-          ObjP gp;
-          if (o && (gp = o->optJSONObject("gameplayer"))) {
-            int64_t s = gp->optJSONObject("gameplayer_id") ? gp->getJSONObject("gameplayer_id")->optLong("serial", 0) : 0;
+          ObjP gp = o ? o->optJSONObject("gameplayer") : nullptr;
+          if (!gp) gp = o;
+          if (gp && gp->optJSONObject("gameplayer_id")) {
+            int64_t s = gp->getJSONObject("gameplayer_id")->optLong("serial", 0);
             if (s > 0 && !have.count(s) && !isZiruPlayerSold(s)) {
               l2->put(gp);
               have.insert(s);

@@ -32,6 +32,7 @@ void applyZiruBoosterTrainingResponse(const ObjP& r13) {
     ObjP res = r13->optJSONObject("ability_training_result");
     if (!res) { res = newObj(); r13->put("ability_training_result", res); }
     res->put("ability_Id", r2);
+    res->put("ability_id", r2);
     res->put("is_success", "YES");
     logRequest("ZIRU_BOOSTER_V23", "[ZIRU_BOOSTER_V23] type=" + r0 + " serial=" + str(r4) + " slot=" + str(r3) + " ability_id=" + str(r2));
   } catch (const std::exception& e) {

@@ -15,10 +15,36 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     }
   }
 
-  // Do not write parameters[49..64] as a guessed skin/face block: iOS uses
-  // 49/50 for SecretAbility, 52..60 for MotionType, and 63..69 for COM skills.
-  // Actual face/kit textures must be repaired in the resource data.
+  // 2. Fix appearance parameters [49:65] if all zeroes or pitch black/albino (skin 6 / 0 bug)
+  auto fixAppearance = [&](const ArrP& params) {
+    if (!params || params->length() < 65) return;
+    bool allZero = true;
+    for (int i = 49; i <= 60; i++) {
+      if (params->optInt(i, 0) != 0) {
+        allZero = false;
+        break;
+      }
+    }
+    int skin = params->optInt(49, 0);
+    bool pitchBlackOrAlbino = (skin == 6 || skin == 0);
+    if (allZero || pitchBlackOrAlbino) {
+      auto it = kAppearancePresets.find(base_id);
+      if (it != kAppearancePresets.end()) {
+        for (int i = 0; i < 16; i++) {
+          params->put(49 + i, (int)it->second.v[i]);
+        }
+      } else {
+        // Natural default skin tone and appearance so player is never chalk white or pitch black
+        static const int32_t kDefAppearance[16] = {3, 1, 1, 1, 4, 0, 4, 18, 4, 8, 142, 0, 14, 0, 1, 1};
+        for (int i = 0; i < 16; i++) {
+          params->put(49 + i, kDefAppearance[i]);
+        }
+      }
+    }
+  };
 
+  fixAppearance(cur->optJSONArray("parameters"));
+  fixAppearance(cur->optJSONArray("original_parameters"));
 }
 
 void z27ApplyProgressionPoints(const ArrP& params, const ObjP& prog, const ArrP& baseParams) {
