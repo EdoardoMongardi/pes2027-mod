@@ -53,7 +53,7 @@ ObjP z27Team(int32_t id) {
   if (!t) {
     ObjP syn = newObj()
         ->put("base_team_id", lookup_id)
-        ->put("base_team_license", "UNKNOWN")
+        ->put("base_team_license", "LICENSED")
         ->put("team_name", "PES Team")
         ->put("team_name_short", "PES");
     ArrP kits = newArr();
@@ -69,14 +69,47 @@ ObjP z27Team(int32_t id) {
 }
 
 ObjP z27Identity(const ObjP& t) {
+  std::string lic = t ? t->optString("base_team_license", "LICENSED") : "LICENSED";
+  if (lic == "UNKNOWN" || lic.empty()) lic = "LICENSED";
   return newObj()
       ->put("base_team_id", nn(t)->getInt("base_team_id"))
-      ->put("base_team_license", t->optString("base_team_license", "UNKNOWN"))
+      ->put("base_team_license", lic)
       ->put("team_name", t->getString("team_name"))
       ->put("team_name_short", t->getString("team_name_short"));
 }
 
-ObjP z27Entry() { return nn(loadZiruJsonAssetObject("responses/CmdLogin.json"))->getJSONObject("entry_info"); }
+inline void z27InjectTrainingItems(const ObjP& entry) {
+  if (!entry) return;
+  ArrP items = entry->optJSONArray("item_list");
+  if (!items) {
+    items = newArr();
+    entry->put("item_list", items);
+  }
+  bool hasSelect = false;
+  for (int i = 0; i < items->length(); i++) {
+    ObjP it = items->optJSONObject(i);
+    ObjP item = it ? it->optJSONObject("item") : nullptr;
+    if (item) {
+      std::string t = item->optString("item_type", "");
+      if (t == "SKILL_TRAINING_SELECT") hasSelect = true;
+      if (t == "SKILL_TRAINING" || t == "SKILL_TRAINING_CATEGORY" || t == "SKILL_TRAINING_SELECT" || t == "POSITION_TRAINING" || t == "ABILITY_TRAINING_RANDOM" || t == "ABILITY_TRAINING_SELECT") {
+        it->put("inventory_num", 999999);
+      }
+    }
+  }
+  if (!hasSelect) {
+    ObjP selItem = newObj();
+    ObjP inner = newObj()->put("item_type", "SKILL_TRAINING_SELECT")->put("grade", 0)->put("effect", 0);
+    selItem->put("item", inner)->put("inventory_num", 999999);
+    items->put(selItem);
+  }
+}
+
+ObjP z27Entry() {
+  ObjP e = nn(loadZiruJsonAssetObject("responses/CmdLogin.json"))->getJSONObject("entry_info");
+  z27InjectTrainingItems(e);
+  return e;
+}
 
 int32_t z27Main() { return z27Int("main_squad_id", z27Entry()->getInt("main_squad_id")); }
 
@@ -104,6 +137,7 @@ ObjP z27Base(int32_t id) {
     ident->put("team_name", m->optString("team_name", defName));
     std::string defShort = z27Team(m->getInt("base_team_id"))->getString("team_name_short");
     ident->put("team_name_short", m->optString("team_name_short", defShort));
+    ident->put("base_team_license", "LICENSED");
     return ident;
   }
   ArrP list = z27Entry()->getJSONArray("squad_list");
@@ -323,12 +357,13 @@ void z27Restore(const ObjP& jo) {
       }
     }
     target->put("main_squad_id", mainId);
-    target->put("current_gameplayer_warehouse_list_max", 900);
-    target->put("warehouse_player_max", 900);
-    target->put("current_gameplayer_list_max", 900);
-    target->put("gameplayer_list_max", 900);
-    target->put("unlock_gameplayer_frame", 900);
-    target->put("unlock_gameplayer_warehouse_frame", 900);
+    z27InjectTrainingItems(target);
+    target->put("current_gameplayer_warehouse_list_max", 100000);
+    target->put("warehouse_player_max", 100000);
+    target->put("current_gameplayer_list_max", 100000);
+    target->put("gameplayer_list_max", 100000);
+    target->put("unlock_gameplayer_frame", 100000);
+    target->put("unlock_gameplayer_warehouse_frame", 100000);
     JStr kits = loadMeta("z27_kits_" + str(mainId));
     target->put("set_uniform_list", z27Uniform(z27Base(mainId), kits ? Array::parse(*kits) : nullptr)->getJSONArray("uniform_list"));
     ArrP gl = target->optJSONArray("gameplayer_list");
@@ -921,12 +956,12 @@ std::optional<Response> z27Route(const std::string& uri) {
   }
   if (contains(up, "CMDGETMYCLUBENTRYINFO") || contains(up, "CMDGETENTRYINFO")) {
     ObjP entry = z27Entry();
-    entry->put("current_gameplayer_warehouse_list_max", 900);
-    entry->put("warehouse_player_max", 900);
-    entry->put("current_gameplayer_list_max", 900);
-    entry->put("gameplayer_list_max", 900);
-    entry->put("unlock_gameplayer_frame", 900);
-    entry->put("unlock_gameplayer_warehouse_frame", 900);
+    entry->put("current_gameplayer_warehouse_list_max", 100000);
+    entry->put("warehouse_player_max", 100000);
+    entry->put("current_gameplayer_list_max", 100000);
+    entry->put("gameplayer_list_max", 100000);
+    entry->put("unlock_gameplayer_frame", 100000);
+    entry->put("unlock_gameplayer_warehouse_frame", 100000);
     ObjP put = z27Ack("CMD_GET_MYCLUB_ENTRY_INFO", z27Request())->put("entry_info", entry);
     z27Restore(put);
     return serveObjectAsEncryptedMsgPack(put);

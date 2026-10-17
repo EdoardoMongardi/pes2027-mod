@@ -15,36 +15,26 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     }
   }
 
-  // 2. Fix appearance parameters [49:65] if all zeroes or pitch black/albino (skin 6 / 0 bug)
-  auto fixAppearance = [&](const ArrP& params) {
-    if (!params || params->length() < 65) return;
-    bool allZero = true;
-    for (int i = 49; i <= 60; i++) {
-      if (params->optInt(i, 0) != 0) {
-        allZero = false;
-        break;
-      }
+  // 2. Synchronize parameters[61] (Offensive PlayStyle) and parameters[62] (Defensive PlayStyle) with play_style
+  ArrP ps = cur->optJSONArray("play_style");
+  ArrP params = cur->optJSONArray("parameters");
+  if (params && params->length() >= 63 && ps && ps->length() > 0) {
+    int st1 = ps->optInt(0, 0);
+    if (st1 > 0) params->put(61, st1);
+    if (ps->length() > 1) {
+      int st2 = ps->optInt(1, 0);
+      if (st2 > 0) params->put(62, st2);
     }
-    int skin = params->optInt(49, 0);
-    bool pitchBlackOrAlbino = (skin == 0);
-    if (allZero || pitchBlackOrAlbino) {
-      auto it = kAppearancePresets.find(base_id);
-      if (it != kAppearancePresets.end() && it->second.v[0] > 0) {
-        for (int i = 0; i < 16; i++) {
-          params->put(49 + i, (int)it->second.v[i]);
-        }
-      } else {
-        // Natural default skin tone and appearance so player is never chalk white or pitch black
-        static const int32_t kDefAppearance[16] = {3, 1, 1, 1, 4, 0, 4, 18, 4, 8, 142, 0, 14, 0, 1, 1};
-        for (int i = 0; i < 16; i++) {
-          params->put(49 + i, kDefAppearance[i]);
-        }
-      }
+  }
+  ArrP origParams = cur->optJSONArray("original_parameters");
+  if (origParams && origParams->length() >= 63 && ps && ps->length() > 0) {
+    int st1 = ps->optInt(0, 0);
+    if (st1 > 0) origParams->put(61, st1);
+    if (ps->length() > 1) {
+      int st2 = ps->optInt(1, 0);
+      if (st2 > 0) origParams->put(62, st2);
     }
-  };
-
-  fixAppearance(cur->optJSONArray("parameters"));
-  fixAppearance(cur->optJSONArray("original_parameters"));
+  }
 }
 
 void z27ApplyProgressionPoints(const ArrP& params, const ObjP& prog, const ArrP& baseParams) {

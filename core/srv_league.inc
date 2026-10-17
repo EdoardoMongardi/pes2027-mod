@@ -251,7 +251,7 @@ void decodeZiruMyclubItemRequest(const Bytes& b) {
           }
         } else if (k == "training_index") {
           ziruTrainingIndex = u.unpackInt();
-        } else if (k == "ability_id" || k == "ability_Id") {
+        } else if (k == "ability_id" || k == "ability_Id" || k == "skill_id" || k == "additional_skill_id") {
           ziruAbilityId = u.unpackInt();
         } else if (k == "skill_training_category_type") {
           auto vt = u.nextType();

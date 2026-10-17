@@ -129,12 +129,13 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
   if (jo && (resumesSave || name == "responses/CmdGetMyclubEntryInfo.json" || name == "responses/CmdGetEntryInfo.json")) {
     ObjP ei = jo->optJSONObject("entry_info");
     if (ei) {
-      ei->put("current_gameplayer_warehouse_list_max", 900);
-      ei->put("warehouse_player_max", 900);
-      ei->put("current_gameplayer_list_max", 900);
-      ei->put("gameplayer_list_max", 900);
-      ei->put("unlock_gameplayer_frame", 900);
-      ei->put("unlock_gameplayer_warehouse_frame", 900);
+      z27InjectTrainingItems(ei);
+      ei->put("current_gameplayer_warehouse_list_max", 100000);
+      ei->put("warehouse_player_max", 100000);
+      ei->put("current_gameplayer_list_max", 100000);
+      ei->put("gameplayer_list_max", 100000);
+      ei->put("unlock_gameplayer_frame", 100000);
+      ei->put("unlock_gameplayer_warehouse_frame", 100000);
     }
   }
   if (jo && (name == "responses/CmdGetMyclubAgentlist.json" || name == "responses/get_myclub_mainmenu_info.json")) applyZiruRemainingCounts(jo);
@@ -257,6 +258,19 @@ Response serveInner(Request& r) {
     jo->put("rqid", rq);
     jo->put("msgid", "CMD_CHECK_STRING");
     jo->put("check_result", "OK");
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
+  if (contains(uri, "CMD_GET_MYCLUB_SELECT_SKILL")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_GET_MYCLUB_SELECT_SKILL");
+    jo->put("is_success", "YES");
+    ArrP list = newArr();
+    for (int i = 0; i < 74; i++) list->put(i);
+    jo->put("select_skill_list", list);
     return serveObjectAsEncryptedMsgPack(jo);
   }
   if (contains(uri, "CMD_CREATE_MYCLUB_SQUAD")) {

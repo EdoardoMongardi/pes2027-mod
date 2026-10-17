@@ -554,7 +554,7 @@ static std::string joinInts(const std::vector<int32_t>& v) {
 
 void applyZiruSkillTrainingResponse(const ObjP& jo) {
   try {
-    if (!ziruItemType || (*ziruItemType != "SKILL_TRAINING" && *ziruItemType != "SKILL_TRAINING_CATEGORY")) return;
+    if (!ziruItemType || (*ziruItemType != "SKILL_TRAINING" && *ziruItemType != "SKILL_TRAINING_CATEGORY" && *ziruItemType != "SKILL_TRAINING_SELECT")) return;
     int64_t j = ziruTargetSerial;
     if (j == 0) return;
     zs::Prefs& prefs = sp("almanac_state");
@@ -610,9 +610,21 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
       if (isZiruSkillId(val) && !builtIn && !vcontains(al, val)) candidates.push_back(val);
     }
     int v = 70;
-    if (!candidates.empty()) {
-      v = candidates[rand() % candidates.size()];
-    } else throw IllegalState("No eligible additional skill remains");
+    if (*ziruItemType == "SKILL_TRAINING_SELECT") {
+      int chosen = cfg.iosPlayerLayout ? iosSkillId(ziruAbilityId, false) : ziruAbilityId;
+      if (!isZiruSkillId(chosen)) chosen = ziruAbilityId;
+      if (isZiruSkillId(chosen)) {
+        v = chosen;
+      } else if (!candidates.empty()) {
+        v = candidates[0];
+      }
+    } else {
+      if (!candidates.empty()) {
+        v = candidates[rand() % candidates.size()];
+      } else throw IllegalState("No eligible additional skill remains");
+    }
+    auto itDup = std::find(al.begin(), al.end(), v);
+    if (itDup != al.end()) al.erase(itDup);
     al.push_back(v);
     prefs.edit().putString(key, joinInts(al)).commit();
     saveZiruSkillsToDb(j, al);
@@ -621,20 +633,28 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
       params->put(kZiruSkillParameters[v], 1);
       saveZiruPlayerToDb(owned);
     }
-    logRequest("ZIRU_SKILL_V22", "[ZIRU_SKILL_V22] random skill awarded: " + str(v));
+    logRequest("ZIRU_SKILL_V22", "[ZIRU_SKILL_V22] skill awarded: " + str(v));
     ObjP res = jo->optJSONObject("skill_training_result");
     if (!res) { res = newObj(); jo->put("skill_training_result", res); }
     res->put("additional_skill_id", v);
     res->put("is_success", "YES");
     ArrP items = jo->optJSONArray("item_list");
     if (items) {
+      bool hasSel = false;
       for (int i8 = 0; i8 < items->length(); i8++) {
         ObjP it = items->optJSONObject(i8);
         ObjP item;
         if (it && (item = it->optJSONObject("item"))) {
           std::string t = item->optString("item_type", "");
-          if (t == "SKILL_TRAINING" || t == "SKILL_TRAINING_CATEGORY") it->put("inventory_num", 999999);
+          if (t == "SKILL_TRAINING_SELECT") hasSel = true;
+          if (t == "SKILL_TRAINING" || t == "SKILL_TRAINING_CATEGORY" || t == "SKILL_TRAINING_SELECT") it->put("inventory_num", 999999);
         }
+      }
+      if (!hasSel) {
+        ObjP it = newObj();
+        it->put("item", newObj()->put("item_type", "SKILL_TRAINING_SELECT")->put("grade", 0)->put("effect", 0));
+        it->put("inventory_num", 999999);
+        items->put(it);
       }
     }
   } catch (const std::exception& e) {
