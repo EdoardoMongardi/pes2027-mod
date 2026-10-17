@@ -948,6 +948,65 @@ static void hookSetRequest(id self, SEL _cmd, const char* url, const char* cooki
   gOrigSetReq[I](self, _cmd, url ? red.c_str() : url, cookie, isPost, data, size, gzip);
 }
 
+// ---------------------------------------------------------------- real frame-rate cap (FramePace)
+// FMetalViewport::Present presents with afterMinimumDuration = 1 / FIOSPlatformRHIFramePacer::GetFramePace().
+// GetFramePace (0x101aee720) returns maximumFramesPerSecond / rhi.SyncInterval only when
+// [/Script/IOSRuntimeSettings.IOSRuntimeSettings] bEnableDynamicMaxFPS is true; eFootball's DefaultEngine.ini does
+// not set it, so it returns 60 / SyncInterval and every frame is held for >= 16.7 ms: the game can never exceed
+// 60 fps, whatever t.MaxFPS or CADisplayLink say. GetFramePace caches that ini value in two bytes of __DATA
+// (0x10716a062 = value, 0x10716a063 = "already read"); set both so the cap follows the screen (120 on ProMotion).
+static void enableDynamicMaxFps() {
+  intptr_t slide = _dyld_get_image_vmaddr_slide(0);
+  const uint32_t* code = (const uint32_t*)(0x101aee764 + slide);
+  if (code[0] != 0x39418d08 || ((const uint32_t*)(0x101aee7ac + slide))[0] != 0x39418908) {
+    ZLog(@"[FPS] GetFramePace does not match this binary - dynamic max FPS not enabled");
+    return;
+  }
+  volatile uint8_t* cached = (volatile uint8_t*)(0x10716a062 + slide);
+  cached[0] = 1;  // bEnableDynamicMaxFPS = true
+  cached[1] = 1;  // value already loaded from the ini
+  ZLog(@"[FPS] bEnableDynamicMaxFPS forced on: present pacing follows UIScreen.maximumFramesPerSecond");
+}
+
+// ---------------------------------------------------------------- 120 FPS Unlock
+static IMP gOrigSetPreferredFramesPerSecond = nullptr;
+static void hookSetPreferredFramesPerSecond(CADisplayLink* self, SEL _cmd, NSInteger fps) {
+  NSInteger maxFps = (NSInteger)UIScreen.mainScreen.maximumFramesPerSecond;
+  if (maxFps < 60) maxFps = 60;
+  if (gOrigSetPreferredFramesPerSecond) {
+    ((void(*)(id, SEL, NSInteger))gOrigSetPreferredFramesPerSecond)(self, _cmd, maxFps);
+  }
+  if (@available(iOS 15.0, *)) {
+    self.preferredFrameRateRange = CAFrameRateRangeMake(60.0f, (float)maxFps, (float)maxFps);
+  }
+}
+
+static IMP gOrigDisplayLinkWithTarget = nullptr;
+static CADisplayLink* hookDisplayLinkWithTarget(Class cls, SEL _cmd, id target, SEL sel) {
+  CADisplayLink* link = ((CADisplayLink* (*)(id, SEL, id, SEL))gOrigDisplayLinkWithTarget)(cls, _cmd, target, sel);
+  if (link) {
+    NSInteger maxFps = (NSInteger)UIScreen.mainScreen.maximumFramesPerSecond;
+    if (maxFps < 60) maxFps = 60;
+    link.preferredFramesPerSecond = maxFps;
+    if (@available(iOS 15.0, *)) {
+      link.preferredFrameRateRange = CAFrameRateRangeMake(60.0f, (float)maxFps, (float)maxFps);
+    }
+  }
+  return link;
+}
+
+static IMP gOrigSetPreferredFrameRateRange = nullptr;
+static void hookSetPreferredFrameRateRange(CADisplayLink* self, SEL _cmd, CAFrameRateRange range) {
+  float maxFps = (float)UIScreen.mainScreen.maximumFramesPerSecond;
+  if (maxFps < 60.0f) maxFps = 60.0f;
+  range.minimum = 60.0f;
+  range.maximum = maxFps;
+  range.preferred = maxFps;
+  if (gOrigSetPreferredFrameRateRange) {
+    ((void(*)(id, SEL, CAFrameRateRange))gOrigSetPreferredFrameRateRange)(self, _cmd, range);
+  }
+}
+
 // Measured frame rate: the renderer takes one drawable per presented frame.
 static std::atomic<uint32_t> gDrawables{0};
 static IMP gOrigNextDrawable;
@@ -1003,7 +1062,8 @@ static void setupGraphicsEnhancements() {
     }
   }
 
-  ZLog(@"[GRAPHICS] using native quality settings (no forced Ultra CVars)");
+  appendFn(u" -t.MaxFPS=120");
+  ZLog(@"[GRAPHICS] Unlocked engine tick cap to 120 FPS (-t.MaxFPS=120)");
 }
 
 // ---------------------------------------------------------------- launch gating
@@ -1998,7 +2058,17 @@ __attribute__((constructor)) static void ziruInit() {
       gGameStarted = true;
     }
 
-    ZLog(@"[FPS] using native game frame pacing and selected FPS");
+    // 120 FPS Unlock via CADisplayLink & Dynamic Max FPS
+    Class dlCls = CADisplayLink.class;
+    if (dlCls) {
+      gOrigDisplayLinkWithTarget = swizzleClassMethod(dlCls, @selector(displayLinkWithTarget:selector:), (IMP)hookDisplayLinkWithTarget);
+      gOrigSetPreferredFramesPerSecond = swizzleInstance(dlCls, @selector(setPreferredFramesPerSecond:), (IMP)hookSetPreferredFramesPerSecond);
+      if (@available(iOS 15.0, *)) {
+        gOrigSetPreferredFrameRateRange = swizzleInstance(dlCls, @selector(setPreferredFrameRateRange:), (IMP)hookSetPreferredFrameRateRange);
+      }
+      ZLog(@"[120FPS] CADisplayLink 120 FPS hooks installed");
+    }
+    enableDynamicMaxFps();
     setupGraphicsEnhancements();
     startFpsMeter();
   }

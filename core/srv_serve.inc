@@ -117,19 +117,6 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
       }
     }
   }
-  if (jo && name == "responses/get_stadium_data.json" && cfg.iosPlayerLayout) {
-    ArrP list = jo->optJSONArray("data_list");
-    if (list) {
-      ArrP keep = std::make_shared<Array>();
-      for (int i = 0; i < list->length(); i++) {
-        ObjP o = list->optJSONObject(i);
-        std::string n = o ? o->optString("name", "") : "";
-        if (n.find("_mobile_and") != std::string::npos) continue;
-        keep->put(list->opt(i));
-      }
-      jo->put("data_list", keep);
-    }
-  }
   if (jo && name == "responses/CMD_USE_MYCLUB_ITEM.json") {
     applyZiruPositionTrainingResponse(jo);
     applyZiruBoosterTrainingResponse(jo);
