@@ -138,11 +138,20 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
       ei->put("unlock_gameplayer_warehouse_frame", 100000);
     }
   }
+  if (jo && resumesSave) {
+    jo->put("gp", 999999999LL);
+    ObjP ci = jo->optJSONObject("coin_info");
+    if (!ci) { ci = newObj(); jo->put("coin_info", ci); }
+    ci->put("coin", 999999LL);
+    ObjP user = jo->optJSONObject("user");
+    if (user) user->put("gp", 999999999LL);
+  }
   if (jo && (name == "responses/CmdGetMyclubAgentlist.json" || name == "responses/get_myclub_mainmenu_info.json")) applyZiruRemainingCounts(jo);
   if (jo && name == "responses/get_myclub_mainmenu_info.json") {
-    jo->put("gp", 99999999999LL);
+    jo->put("gp", 999999999LL);
     ObjP ci = jo->optJSONObject("coin_info");
-    if (ci) ci->put("coin", 9999999LL);
+    if (!ci) { ci = newObj(); jo->put("coin_info", ci); }
+    ci->put("coin", 999999LL);
     // Main-menu banners of type AGENT are the entry points to Ziru's packs (EPIC 1368, BIG TIME 1348, SHOW TIME 1374).
     // The client's EAnnouncementType has only AGENT(0) EVENT CAMPAIGN PACK COMPETITION COMEBACK_ACHIEVEMENT
     // (CmdGetMainmenuInfo literals); there is no NONE, so "NONE" falls back to AGENT 0 and tapping the banner opens an

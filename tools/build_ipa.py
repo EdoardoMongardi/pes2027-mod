@@ -409,6 +409,16 @@ def make_ios_fonts(apk, report):
         except Exception:
             pass
     if not d:
+        for fdir in [r"D:\PES2027\fonts_vn", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fonts_vn")]:
+            if os.path.isdir(fdir):
+                fonts = {}
+                for fn in sorted(os.listdir(fdir)):
+                    if fn.endswith(".ufont"):
+                        fonts[fn] = open(os.path.join(fdir, fn), "rb").read()
+                if fonts:
+                    log(f"font: loaded {len(fonts)} full Vietnamese UI fonts from {fdir}")
+                    report["fonts"] = {k: {"size": len(v), "sha256": hashlib.sha256(v).hexdigest()} for k, v in sorted(fonts.items())}
+                    return fonts
         log("font: ZFont_Orginal.pak not found – Vietnamese font fix skipped")
         return {}
     magic = d.rfind(struct.pack("<I", 0x5A6F12E1))

@@ -95,29 +95,28 @@ inline void z27InjectTrainingItems(const ObjP& entry) {
     items = newArr();
     entry->put("item_list", items);
   }
-  bool hasSelectSkill = false;
-  bool hasSelectPos = false;
+  std::set<std::string> existing;
   for (int i = 0; i < items->length(); i++) {
     ObjP it = items->optJSONObject(i);
     ObjP item = it ? it->optJSONObject("item") : nullptr;
     if (item) {
-      std::string t = item->optString("item_type", "");
-      if (t == "SKILL_TRAINING_SELECT") hasSelectSkill = true;
-      if (t == "POSITION_TRAINING_SELECT") hasSelectPos = true;
+      existing.insert(item->optString("item_type", ""));
       it->put("inventory_num", 999999);
     }
   }
-  if (!hasSelectSkill) {
-    ObjP selItem = newObj();
-    ObjP inner = newObj()->put("item_type", "SKILL_TRAINING_SELECT")->put("grade", 0)->put("effect", 0);
-    selItem->put("item", inner)->put("inventory_num", 999999);
-    items->put(selItem);
-  }
-  if (!hasSelectPos) {
-    ObjP selItem = newObj();
-    ObjP inner = newObj()->put("item_type", "POSITION_TRAINING_SELECT")->put("grade", 0)->put("effect", 0);
-    selItem->put("item", inner)->put("inventory_num", 999999);
-    items->put(selItem);
+  const char* needed[] = {
+      "SKILL_TRAINING", "SKILL_TRAINING_CATEGORY", "SKILL_TRAINING_SELECT",
+      "POSITION_TRAINING", "POSITION_TRAINING_SELECT",
+      "ABILITY_TRAINING_SELECT", "ABILITY_TRAINING_RANDOM",
+      "LEVEL_TRAINING", "EXTEND_PLAYER"
+  };
+  for (const char* t : needed) {
+    if (!existing.count(t)) {
+      ObjP selItem = newObj();
+      ObjP inner = newObj()->put("item_type", t)->put("grade", 0)->put("effect", 0);
+      selItem->put("item", inner)->put("inventory_num", 999999);
+      items->put(selItem);
+    }
   }
 }
 

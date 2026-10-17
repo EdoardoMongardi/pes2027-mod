@@ -1242,12 +1242,11 @@ static BOOL checkDirectFolderData(NSString** why) {
       NSString* ext = f.pathExtension.lowercaseString;
       // Stadium paks/ucas/utoc and version_stadium.bin must be in Download/ for AddStadiumDlTask
       if ([f containsString:@"pc3002"] || [f containsString:@"pc3012"] || [f containsString:@"stadium"]) {
-        ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
-        if ([f containsString:@"_mobile_and"]) {
-          NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
-          ensureSymlink([dlDir stringByAppendingPathComponent:iosName], target);
+        // ONLY link native iOS stadium files! NEVER alias Android stadium files to iOS (breaks Apple Metal spectator shader)
+        if (![f containsString:@"_mobile_and"]) {
+          ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
+          ZLog(@"[STADIUM] Linked native iOS stadium mod file %@ to Download/", f);
         }
-        ZLog(@"[STADIUM] Linked stadium mod file %@ to Download/", f);
         continue;
       }
       if ([f containsString:@"_mobile_and"]) {
