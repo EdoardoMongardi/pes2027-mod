@@ -398,10 +398,12 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
       ArrP ja = newArr();
       for (int v : al) ja->put(v);
       p->put("additional_skill_id", ja);
-      saveZiruPlayerToDb(p);
+      JStr saved = loadPlayer(serial);
+      if (!saved || *saved != p->toString()) saveZiruPlayerToDb(p);
     }
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_SKILL_V2] login merge/reapply failed ") + e.what());
+    throw;
   }
 }
 
@@ -494,6 +496,7 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     }
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_SKILL_V2] response/persistence failed ") + e.what());
+    throw;
   }
 }
 

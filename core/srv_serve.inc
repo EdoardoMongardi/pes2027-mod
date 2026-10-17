@@ -18,14 +18,15 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
       if (!jo->has(key)) jo->put(key, login->get(key));
     }
   }
+  bool resumesSave = name == "responses/CmdLogin.json" || name == "responses/CmdCreateUser.json";
   ObjP req;
   if (jo && ziruLastRequestBody && (req = decodeZiruRequestJson(ziruLastRequestBody))) {
     jo->put("rqid", (long long)req->optLong("rqid", 0));
     std::string msgid = req->optString("msgid", "");
     if (!msgid.empty()) jo->put("msgid", msgid);
   }
-  if (jo && (name == "responses/CmdLogin.json" || name == "responses/get_user_eula_info.json")) {
-    if (name == "responses/CmdLogin.json") patchLocalLivedataUrls(jo);
+  if (jo && (resumesSave || name == "responses/get_user_eula_info.json")) {
+    if (resumesSave) patchLocalLivedataUrls(jo);
     ObjP eula = jo->optJSONObject("user_eula_info");
     if (eula) {
       eula->put("eula_privacy_action", "NONE");
@@ -74,7 +75,7 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
       prefs.edit().putString("recruited_players", out).commit();
     }
     std::string rp;
-    if (name == "responses/CmdLogin.json" && !(rp = sp("almanac_state").getString("recruited_players", "")).empty()) {
+    if (resumesSave && !(rp = sp("almanac_state").getString("recruited_players", "")).empty()) {
       ArrP acc = Array::parse(rp);
       ObjP ei = jo->optJSONObject("entry_info");
       ArrP l2;
@@ -92,10 +93,10 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     applyZiruBoosterTrainingResponse(jo);
     applyZiruSkillTrainingResponse(jo);
   }
-  if (jo && name == "responses/CmdLogin.json") filterZiruSoldPlayersFromLogin(jo);
-  if (jo && name == "responses/CmdLogin.json") applyZiruSquadStateToLogin(jo);
-  if (jo && name == "responses/CmdLogin.json") normalizeZiruAllLoginPlayers(jo);
-  if (jo && (name == "responses/CmdLogin.json" || name == "responses/CmdGetMyclubEntryInfo.json" || name == "responses/CmdGetEntryInfo.json")) {
+  if (jo && resumesSave) filterZiruSoldPlayersFromLogin(jo);
+  if (jo && resumesSave) applyZiruSquadStateToLogin(jo);
+  if (jo && resumesSave) normalizeZiruAllLoginPlayers(jo);
+  if (jo && (resumesSave || name == "responses/CmdGetMyclubEntryInfo.json" || name == "responses/CmdGetEntryInfo.json")) {
     ObjP ei = jo->optJSONObject("entry_info");
     if (ei) {
       ei->put("current_gameplayer_warehouse_list_max", 900);

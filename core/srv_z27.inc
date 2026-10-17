@@ -324,6 +324,7 @@ void z27Restore(const ObjP& jo) {
     }
   } catch (const std::exception& e) {
     logRequest("ZIRU_RESTORE_ERROR", e.what());
+    throw;
   }
 }
 

@@ -377,6 +377,7 @@ void z27RepairLoginRoster(const ObjP& jo) {
     applyZiruSkillStateToLogin(jo);
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("Login roster repair failed ") + e.what());
+    throw;
   }
 }
 

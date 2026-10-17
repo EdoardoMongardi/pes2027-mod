@@ -140,14 +140,18 @@ void ZiruDb::exec(const std::string& sql) {
 }
 bool ZiruDb::queryOne(const std::string& sql, const std::vector<std::string>& args, std::string& out) {
   sqlite3_stmt* st = nullptr;
-  if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return false;
+  if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK)
+    throw std::runtime_error(std::string("Save read prepare failed: ") + sqlite3_errmsg(db));
   for (size_t i = 0; i < args.size(); i++) sqlite3_bind_text(st, (int)i + 1, args[i].c_str(), -1, SQLITE_TRANSIENT);
   bool ok = false;
-  if (sqlite3_step(st) == SQLITE_ROW) {
+  int result = sqlite3_step(st);
+  if (result == SQLITE_ROW) {
     const unsigned char* t = sqlite3_column_text(st, 0);
     if (t) { out.assign((const char*)t, sqlite3_column_bytes(st, 0)); ok = true; }
   }
   sqlite3_finalize(st);
+  if (result != SQLITE_ROW && result != SQLITE_DONE)
+    throw std::runtime_error(std::string("Save read failed: ") + sqlite3_errmsg(db));
   return ok;
 }
 static void bindAll(sqlite3_stmt* st, const std::vector<zj::Value>& a) {
