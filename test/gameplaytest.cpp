@@ -85,9 +85,9 @@ int main() {
     asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
     {
       OfflineServer s(cfg);
-      check(s.z27State()->getInt("division") == 1, "unlocked D1 by default");
+      check(s.z27State()->getInt("division") == 10, "starts at D10 by default");
       s.ziruDb->saveMeta("z27_division_state", R"({"division":10,"best":10,"point":0,"matches":0,"win":0,"draw":0,"lose":0,"sequence":0,"completed":{}})");
-      s.ziruDb->saveMeta("z27_div1_set", "1");
+      s.ziruDb->saveMeta("z27_div10_reset_v3", "1");
       auto first = call(s, "CMD_GET_VSCOM_OPPONENT"); auto id = first->getLong("game_id");
       check(coachId(call(s, "CMD_START_GAME", newObj()->put("game_id", (long long)id))) == 100, "selected coach on first start");
       call(s, "CMD_SET_MYCLUB_SQUAD_INFO", newObj()->put("squad_id", 9)->put("squad_data", newObj()->put("coach", newArr()->put(coachRef(200, 2222)))));
@@ -170,18 +170,18 @@ int main() {
       auto pd = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", p->getJSONObject("gameplayer_id")))->getJSONArray("original_parameters");
       check(pd->length() == 147 && pd->getInt(144) == 12 && pd->getInt(145) == 77, "149-element canonical records preserve owned booster slots");
       s.ziruDb->saveMeta("z27_division_state", R"({"division":10,"best":10,"point":0,"matches":0,"win":0,"draw":0,"lose":0,"sequence":0,"completed":{}})");
-      s.ziruDb->saveMeta("z27_div1_set", "");
+      s.ziruDb->saveMeta("z27_div10_reset_v3", "");
       auto active = s.z27Meta("z27_active_match");
-      active->put("division", 10)->put("cpu_level", "EASY");
+      active->put("division", 10)->put("cpu_level", "NORMAL");
       s.ziruDb->saveMeta("z27_active_match", active->toString());
-      check(sqlite3_exec(s.ziruDb->db, "DELETE FROM meta WHERE k='z27_div1_set'", nullptr, nullptr, nullptr) == SQLITE_OK, "prepare legacy save");
-      check(s.z27State()->getInt("division") == 1, "legacy rank migrates to D1");
+      check(sqlite3_exec(s.ziruDb->db, "DELETE FROM meta WHERE k='z27_div10_reset_v3'", nullptr, nullptr, nullptr) == SQLITE_OK, "prepare legacy save");
+      check(s.z27State()->getInt("division") == 10, "legacy rank migrates to D10");
       auto selected = call(s, "CMD_GET_VSCOM_OPPONENT");
-      check(selected->getString("cpu_level") == "LEGEND" && s.z27Active()->getInt("division") == 1, "cached EASY opponent migrates with D1");
+      check(selected->getString("cpu_level") == "NORMAL" && s.z27Active()->getInt("division") == 10, "cached opponent migrates with D10");
       active = s.z27Meta("z27_active_match");
-      active->put("division", 10)->put("cpu_level", "EASY");
+      active->put("division", 10)->put("cpu_level", "NORMAL");
       s.ziruDb->saveMeta("z27_active_match", active->toString());
-      check(call(s, "CMD_GET_VSCOM_OPPONENT")->getString("cpu_level") == "LEGEND", "already-migrated D1 saves also repair old D10 snapshots");
+      check(call(s, "CMD_GET_VSCOM_OPPONENT")->getString("cpu_level") == "NORMAL", "already-migrated D10 saves maintain D10 snapshots");
       sqlite3_exec(s.ziruDb->db, "PRAGMA query_only=ON", nullptr, nullptr, nullptr);
       bool failed = false;
       try { s.ziruDb->saveMeta("must_not_succeed", "1"); } catch (const std::exception&) { failed = true; }

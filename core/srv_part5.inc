@@ -151,6 +151,10 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
             lim = 33;
             logRequest("ZIRU_V16_LEVEL", "[ZIRU_V16_ADRIANO_FALLBACK] base_id=134665 level_limit=33");
           }
+          if ((((int32_t)id) & 16777215) == 4522 || id == 89138556572074LL) {
+            lim = 36;
+            logRequest("ZIRU_CR7_UNLOCK", "[ZIRU_CR7_UNNERFED] Unlocked Prime CR7 level limit to 36");
+          }
           ObjP li = cur->optJSONObject("level_info");
           if (!li) { li = newObj(); cur->put("level_info", li); }
           li->put("level_limit", lim);
@@ -195,6 +199,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           }
         }
         z27ApplyAppearanceAndClub(cur);
+        applyZiruRonaldoMaxProgression(cur);
         if (serial > 0) {
           ziruDb->savePlayer(serial, id, cur->toString());
         }

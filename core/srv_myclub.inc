@@ -345,19 +345,40 @@ void applyZiruRonaldoMaxProgression(const ObjP& jo) {
   if (!jo) return;
   try {
     ObjP gid = jo->optJSONObject("gameplayer_id");
-    ArrP p;
-    if (!gid || gid->optLong("id", 0) != 89138556572074LL || !(p = jo->optJSONArray("parameters"))) return;
-    p->put(14, 87); p->put(17, 83); p->put(18, 79); p->put(19, 81); p->put(20, 89); p->put(23, 87); p->put(27, 81);
-    p->put(28, 84); p->put(34, 90); p->put(35, 85); p->put(36, 78); p->put(37, 94); p->put(38, 83); p->put(39, 88); p->put(40, 82);
+    if (!gid) return;
+    int64_t pid = gid->optLong("id", 0);
+    int32_t base_id = (int32_t)(pid & 0xFFFFFF);
+    if (base_id != 4522 && pid != 89138556572074LL) return;
+    ArrP p = jo->optJSONArray("parameters");
+    if (p && p->length() >= 41) {
+      // Prime Cristiano Ronaldo God-Tier Base Stats (Unlocked from Ziru nerf)
+      p->put(14, 96); // Offensive Awareness
+      p->put(17, 92); // Ball Control
+      p->put(18, 92); // Dribbling
+      p->put(19, 90); // Tight Possession
+      p->put(20, 97); // Finishing
+      p->put(23, 95); // Heading
+      p->put(27, 88); // Place Kicking
+      p->put(28, 86); // Curl
+      p->put(34, 99); // Kicking Power
+      p->put(35, 96); // Speed
+      p->put(36, 93); // Acceleration
+      p->put(37, 93); // Physical Contact
+      p->put(38, 99); // Jump (Iconic CR7 Leap)
+      p->put(40, 92); // Stamina
+    }
     ObjP li = jo->optJSONObject("level_info");
     if (li) {
-      li->put("level", li->optInt("level_limit", 1));
-      li->put("customize_point", 0);
+      int lim = std::max(36, li->optInt("level_limit", 36));
+      li->put("level_limit", lim);
+      li->put("level", lim);
+      int cp = ziruProgressionBudget(lim);
+      li->put("customize_point", cp);
       li->put("exp_current_level", 0);
       li->put("exp_to_next_level", 0);
     }
   } catch (const std::exception& e) {
-    zs::loge("OFFLINE_SERVER", std::string("[ZIRU_RONALDO_EXISTING_ERR] ") + e.what());
+    zs::loge("OFFLINE_SERVER", std::string("[ZIRU_RONALDO_UNLOCKED_ERR] ") + e.what());
   }
 }
 
