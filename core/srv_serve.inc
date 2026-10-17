@@ -250,6 +250,32 @@ Response serveInner(Request& r) {
     return *x;
   }
   logRequest(uri, r.method);
+  if (contains(uri, "CMD_GET_STADIUM_DATA")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_GET_STADIUM_DATA");
+    ArrP dl = newArr();
+    // pc3002 (San Siro) iOS Metal
+    dl->put(newObj()->put("name", "pc3002_mobile_ios.pak")->put("size", 365)->put("hash", "b372aca3413c2d69234f5824db8af78cb367ca0fdee4df624fa32978bf1ace43")->put("version", 2026081300)->put("changelist_number", 0));
+    dl->put(newObj()->put("name", "pc3002_mobile_ios.ucas")->put("size", 265236240LL)->put("hash", "17692d16a12593ece3f1731b108b5b6ff6724e548dac4a8bb2a69c662fcd394d")->put("version", 2026081300)->put("changelist_number", 0));
+    dl->put(newObj()->put("name", "pc3002_mobile_ios.utoc")->put("size", 433519)->put("hash", "18a8e47bedce4432caabe605d76f0daea58174dbd6f65330236ad3869fab7976")->put("version", 2026081300)->put("changelist_number", 0));
+    // pc3012 (Olimpico) iOS Metal
+    dl->put(newObj()->put("name", "pc3012_mobile_ios.pak")->put("size", 365)->put("hash", "70b014d170e45373acf526c1ca411ad57586ed9de54d961751cac1b286961c75")->put("version", 2026081300)->put("changelist_number", 0));
+    dl->put(newObj()->put("name", "pc3012_mobile_ios.ucas")->put("size", 337073200LL)->put("hash", "ee0d8036003bcafef1cc33d62d94b40cd25a6792695f1c8f418119f05ed1bb55")->put("version", 2026081300)->put("changelist_number", 0));
+    dl->put(newObj()->put("name", "pc3012_mobile_ios.utoc")->put("size", 358860)->put("hash", "abfe6d236970e7bfdeebc52d05d27cf1252726b6131d1da25e927b2a9b3fb09b")->put("version", 2026081300)->put("changelist_number", 0));
+    // Fallback Android entries
+    dl->put(newObj()->put("name", "pc3002_mobile_and.pak")->put("size", 365)->put("hash", "309b85b66d43ffacc84a089f2d126df9d562235ace135f93f71788cbee5c0435")->put("version", 2026081300)->put("changelist_number", 0));
+    dl->put(newObj()->put("name", "pc3002_mobile_and.ucas")->put("size", 256385664LL)->put("hash", "c49cc0d71a5742e9115ab3fbaa0ecca7bb84b97a18880e1ce666f95ba9613f2d")->put("version", 2026081300)->put("changelist_number", 0));
+    dl->put(newObj()->put("name", "pc3002_mobile_and.utoc")->put("size", 452371)->put("hash", "f0e8075357b615df925a000fab6d31742bab30a69c3cf882277035229a6009c4")->put("version", 2026081300)->put("changelist_number", 0));
+    dl->put(newObj()->put("name", "pc3012_mobile_and.pak")->put("size", 365)->put("hash", "69ad7ceeb380b8d7ec8e8a37d0b4dedbf97a2850c91fdaa25a0931d7c59f7d79")->put("version", 2026081300)->put("changelist_number", 0));
+    dl->put(newObj()->put("name", "pc3012_mobile_and.ucas")->put("size", 315269552LL)->put("hash", "a072d59554961e25567de8c0bccc2e07faa9eea798db3deae92155846fe39b32")->put("version", 2026081300)->put("changelist_number", 0));
+    dl->put(newObj()->put("name", "pc3012_mobile_and.utoc")->put("size", 372972)->put("hash", "33f29247895757fd711998c804629104b0ca10b176b77f21047cdb4b094ca4fb")->put("version", 2026081300)->put("changelist_number", 0));
+    jo->put("data_list", dl);
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
   if (contains(uri, "CMD_CHECK_STRING")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;

@@ -121,9 +121,43 @@ inline void z27InjectTrainingItems(const ObjP& entry) {
   }
 }
 
+inline void z27BoostCoach(const ObjP& c) {
+  if (!c) return;
+  c->put("possession", 99);
+  c->put("short_counter", 99);
+  c->put("long_ball", 99);
+  c->put("long_counter", 99);
+  c->put("side_attack", 99);
+  c->put("overload", 99);
+}
+
+inline void z27BoostAllCoaches(const ObjP& entry) {
+  if (!entry) return;
+  ArrP cl = entry->optJSONArray("coach_list");
+  if (cl) {
+    for (int i = 0; i < cl->length(); i++) {
+      z27BoostCoach(cl->optJSONObject(i));
+    }
+  }
+  ArrP sqs = entry->optJSONArray("squad_list");
+  if (sqs) {
+    for (int i = 0; i < sqs->length(); i++) {
+      ObjP sq = sqs->optJSONObject(i);
+      ObjP sd = sq ? sq->optJSONObject("squad_data") : nullptr;
+      ArrP co = sd ? sd->optJSONArray("coach") : nullptr;
+      if (co) {
+        for (int j = 0; j < co->length(); j++) {
+          z27BoostCoach(co->optJSONObject(j));
+        }
+      }
+    }
+  }
+}
+
 ObjP z27Entry() {
   ObjP e = nn(loadZiruJsonAssetObject("responses/CmdLogin.json"))->getJSONObject("entry_info");
   z27InjectTrainingItems(e);
+  z27BoostAllCoaches(e);
   return e;
 }
 
@@ -374,6 +408,7 @@ void z27Restore(const ObjP& jo) {
     }
     target->put("main_squad_id", mainId);
     z27InjectTrainingItems(target);
+    z27BoostAllCoaches(target);
     target->put("current_gameplayer_warehouse_list_max", 100000);
     target->put("warehouse_player_max", 100000);
     target->put("current_gameplayer_list_max", 100000);
@@ -408,9 +443,11 @@ void z27Restore(const ObjP& jo) {
           ObjP sv = Object::parse(*lp);
           if (sv->optJSONObject("gameplayer")) sv = sv->getJSONObject("gameplayer");
           if (sv->getJSONObject("gameplayer_id")->getLong("id") == p->getJSONObject("gameplayer_id")->getLong("id")) {
+            z27ApplyAppearanceAndClub(sv);
             ArrP svPs = sv->optJSONArray("play_style");
             if (!svPs || svPs->length() == 0 || svPs->optInt(0, 0) <= 0) {
               sv->put("play_style", z27ResolvePlayStyle(p->getJSONObject("gameplayer_id")->getLong("id"), p));
+              z27ApplyAppearanceAndClub(sv);
               ziruDb->savePlayer(p->getJSONObject("gameplayer_id")->optLong("serial", 0), p->getJSONObject("gameplayer_id")->getLong("id"), sv->toString());
             }
             gl->put(i, sv);

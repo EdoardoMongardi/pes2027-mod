@@ -15,6 +15,7 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
       ArrP params;
       if (j > 0 && (w = getZiruPlayerWrapper(Value((long long)j), false)) && (gp = w->optJSONObject("gameplayer")) &&
           (params = gp->optJSONArray("parameters"))) {
+        z27ApplyAppearanceAndClub(gp);
         int64_t j2 = ziruPlayerDataSerial;
         JStr lp;
         ArrP saved;
