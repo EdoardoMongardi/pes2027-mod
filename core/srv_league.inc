@@ -380,7 +380,7 @@ void filterZiruSoldPlayersFromLogin(const ObjP& jo) {
   }
 }
 
-ObjP getZiruPlayerWrapper(const Value& obj, bool warehouse) {
+ObjP getZiruPlayerWrapper(const Value& obj, bool warehouse = false) {
   try {
     std::string key = str(obj);
     ObjP recs = ziruPlayerRecordsCache;
@@ -410,10 +410,9 @@ ObjP getZiruPlayerWrapper(const Value& obj, bool warehouse) {
   }
 }
 
-static std::unordered_map<int32_t, std::string> ziruBaseIdToRecordKey;
-
-ObjP getZiruPlayerWrapperByBaseId(int32_t baseId, bool warehouse) {
+ObjP getZiruPlayerWrapperByBaseId(int32_t baseId, bool warehouse = false) {
   try {
+    static std::unordered_map<int32_t, std::string> ziruBaseIdToRecordKey;
     ObjP recs = ziruPlayerRecordsCache;
     if (!recs) {
       recs = Object::parse(readAsset("responses/ZIRU_PLAYER_RECORDS.json"));
@@ -439,6 +438,62 @@ ObjP getZiruPlayerWrapperByBaseId(int32_t baseId, bool warehouse) {
   } catch (...) {
     return nullptr;
   }
+}
+
+ArrP z27ResolvePlayStyle(int64_t id, const ObjP& existing = nullptr) {
+  if (existing) {
+    ArrP ps = existing->optJSONArray("play_style");
+    if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+  }
+  // 1. Try getZiruPlayerWrapper by exact ID
+  ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
+  if (w && w->optJSONObject("gameplayer")) {
+    ArrP ps = w->getJSONObject("gameplayer")->optJSONArray("play_style");
+    if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+  }
+  // 2. Try getZiruPlayerWrapper by base ID (lower 24 bits)
+  int32_t bid = (int32_t)(id & 0xFFFFFF);
+  ObjP wBase = getZiruPlayerWrapperByBaseId(bid);
+  if (wBase && wBase->optJSONObject("gameplayer")) {
+    ArrP ps = wBase->getJSONObject("gameplayer")->optJSONArray("play_style");
+    if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+  }
+  // 3. Try CmdLogin.json
+  try {
+    std::string s = readAsset("responses/CmdLogin.json");
+    if (!s.empty()) {
+      ObjP root = Object::parse(s);
+      ObjP entry = root ? root->optJSONObject("entry_info") : nullptr;
+      ArrP list = entry ? entry->optJSONArray("gameplayer_list") : nullptr;
+      if (list) {
+        for (int i = 0; i < list->length(); i++) {
+          ObjP o = list->optJSONObject(i);
+          if (!o) continue;
+          ObjP gid = o->optJSONObject("gameplayer_id");
+          if (!gid) continue;
+          int64_t oid = gid->optLong("id", 0);
+          if (oid == id || ((oid & 0xFFFFFF) == bid)) {
+            ArrP ps = o->optJSONArray("play_style");
+            if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+          }
+        }
+      }
+    }
+  } catch (...) {}
+  // 4. Semantic default from position parameters so NO player is ever "Basic"
+  int pos = 0;
+  if (existing) {
+    ArrP par = existing->optJSONArray("parameters");
+    if (par && par->length() > 0) pos = par->optInt(0, 0);
+  }
+  ArrP fallback = newArr();
+  if (pos == 1) { fallback->put(20); fallback->put(0); } // GK -> Offensive Goalkeeper
+  else if (pos == 2 || pos == 3 || pos == 4) { fallback->put(15); fallback->put(0); } // CB/LB/RB -> Build Up
+  else if (pos == 5 || pos == 6 || pos == 7 || pos == 8) { fallback->put(11); fallback->put(0); } // DMF/CMF/LMF/RMF -> Box-to-Box
+  else if (pos == 9) { fallback->put(10); fallback->put(0); } // AMF -> Hole Player
+  else if (pos == 10 || pos == 11) { fallback->put(6); fallback->put(0); } // LWG/RWG -> Prolific Winger
+  else { fallback->put(1); fallback->put(0); } // CF/SS -> Goal Poacher
+  return fallback;
 }
 
 Response handleZiruAdjustParamMinimal() {

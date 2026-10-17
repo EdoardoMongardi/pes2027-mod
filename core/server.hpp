@@ -151,12 +151,6 @@ class OfflineServer {
   JStr loadSquad(int32_t id) { std::string s; return dbLoad(ziruDb->loadSquad(id, s), s); }
   void saveSquad(int32_t id, const std::string& s) { ziruDb->saveSquad(id, s); }
 
-  ObjP z27Entry();
-  ArrP z27ResolvePlayStyle(int64_t id, const ObjP& existing = nullptr);
-  ObjP getZiruPlayerWrapper(const Value& obj, bool warehouse = false);
-  ObjP getZiruPlayerWrapperByBaseId(int32_t baseId, bool warehouse = false);
-  ObjP z27Player(const ObjP& gid);
-
 #include "srv_myclub.inc"
 #include "srv_league.inc"
 #include "srv_myleague.inc"
