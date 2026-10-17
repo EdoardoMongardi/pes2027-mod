@@ -1238,6 +1238,11 @@ static BOOL checkDirectFolderData(NSString** why) {
     NSString* sp = [pakDir stringByAppendingPathComponent:stale];
     if ([fm fileExistsAtPath:sp]) [fm removeItemAtPath:sp error:nil];
   }
+  for (NSString* f in [fm contentsOfDirectoryAtPath:pakDir error:nil]) {
+    if ([f hasPrefix:@"pc92"]) {
+      [fm removeItemAtPath:[pakDir stringByAppendingPathComponent:f] error:nil];
+    }
+  }
 
   NSString* liveDir = [gDocs stringByAppendingPathComponent:@"livedata"];
   if ([fm fileExistsAtPath:liveDir]) {
@@ -1255,20 +1260,10 @@ static BOOL checkDirectFolderData(NSString** why) {
         NSString* link = [liveDir stringByAppendingPathComponent:iosName];
         ensureSymlink(link, target);
       }
-      if ([ext isEqualToString:@"pak"] || [ext isEqualToString:@"ucas"] || [ext isEqualToString:@"utoc"]) {
-        ensureSymlink([pakDir stringByAppendingPathComponent:f], target);
+      if ([ext isEqualToString:@"pak"] || [ext isEqualToString:@"ucas"] || [ext isEqualToString:@"utoc"] || [ext isEqualToString:@"cpk"]) {
         ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
         if ([f containsString:@"_mobile_and"]) {
           NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
-          ensureSymlink([pakDir stringByAppendingPathComponent:iosName], target);
-          ensureSymlink([dlDir stringByAppendingPathComponent:iosName], target);
-        }
-      } else if ([ext isEqualToString:@"cpk"]) {
-        ensureSymlink([cpkDir stringByAppendingPathComponent:f], target);
-        ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
-        if ([f containsString:@"_mobile_and"]) {
-          NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
-          ensureSymlink([cpkDir stringByAppendingPathComponent:iosName], target);
           ensureSymlink([dlDir stringByAppendingPathComponent:iosName], target);
         }
       }

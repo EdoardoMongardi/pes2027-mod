@@ -329,6 +329,7 @@ Response serveInner(Request& r) {
     jo->put("msgid", msgid);
     return serveObjectAsEncryptedMsgPack(jo);
   }
+  if (contains(uri, "CMD_GET_AGE_GATE_REQUIREMENTS") || contains(uri, "CmdGetAgeGateRequirements")) return handleZiruStartupAck("CMD_GET_AGE_GATE_REQUIREMENTS");
   if (contains(uri, "CMD_SET_USER_EULA_INFO") || contains(uri, "CmdSetUserEulaInfo")) return handleZiruStartupAck("CMD_SET_USER_EULA_INFO");
   if (contains(uri, "CMD_USE_MYCLUB_CAREERPLAN")) return handleZiruCareerplan(r);
   logAlmanacAgentRequestBody(r);
