@@ -1234,11 +1234,6 @@ static BOOL checkDirectFolderData(NSString** why) {
     NSString* sp = [pakDir stringByAppendingPathComponent:stale];
     if ([fm fileExistsAtPath:sp]) [fm removeItemAtPath:sp error:nil];
   }
-  for (NSString* f in [fm contentsOfDirectoryAtPath:pakDir error:nil]) {
-    if ([f hasPrefix:@"pc92"]) {
-      [fm removeItemAtPath:[pakDir stringByAppendingPathComponent:f] error:nil];
-    }
-  }
 
   NSString* liveDir = [gDocs stringByAppendingPathComponent:@"livedata"];
   if ([fm fileExistsAtPath:liveDir]) {
@@ -1248,6 +1243,10 @@ static BOOL checkDirectFolderData(NSString** why) {
       // Stadium paks/ucas/utoc and version_stadium.bin must be in Download/ for AddStadiumDlTask
       if ([f containsString:@"pc3002"] || [f containsString:@"pc3012"] || [f containsString:@"stadium"]) {
         ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
+        if ([f containsString:@"_mobile_and"]) {
+          NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
+          ensureSymlink([dlDir stringByAppendingPathComponent:iosName], target);
+        }
         ZLog(@"[STADIUM] Linked stadium mod file %@ to Download/", f);
         continue;
       }
@@ -1256,10 +1255,20 @@ static BOOL checkDirectFolderData(NSString** why) {
         NSString* link = [liveDir stringByAppendingPathComponent:iosName];
         ensureSymlink(link, target);
       }
-      if ([ext isEqualToString:@"pak"] || [ext isEqualToString:@"ucas"] || [ext isEqualToString:@"utoc"] || [ext isEqualToString:@"cpk"]) {
+      if ([ext isEqualToString:@"pak"] || [ext isEqualToString:@"ucas"] || [ext isEqualToString:@"utoc"]) {
+        ensureSymlink([pakDir stringByAppendingPathComponent:f], target);
         ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
         if ([f containsString:@"_mobile_and"]) {
           NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
+          ensureSymlink([pakDir stringByAppendingPathComponent:iosName], target);
+          ensureSymlink([dlDir stringByAppendingPathComponent:iosName], target);
+        }
+      } else if ([ext isEqualToString:@"cpk"]) {
+        ensureSymlink([cpkDir stringByAppendingPathComponent:f], target);
+        ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
+        if ([f containsString:@"_mobile_and"]) {
+          NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
+          ensureSymlink([cpkDir stringByAppendingPathComponent:iosName], target);
           ensureSymlink([dlDir stringByAppendingPathComponent:iosName], target);
         }
       }
@@ -1271,6 +1280,20 @@ static BOOL checkDirectFolderData(NSString** why) {
     for (NSString* f in [fm contentsOfDirectoryAtPath:foundDl error:nil]) {
       NSString* src = [foundDl stringByAppendingPathComponent:f];
       NSString* dst = [dlDir stringByAppendingPathComponent:f];
+      ensureSymlink(dst, src);
+      if ([f containsString:@"_mobile_and"]) {
+        NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
+        ensureSymlink([dlDir stringByAppendingPathComponent:iosName], src);
+      }
+    }
+  }
+
+  // Ensure every _mobile_and file in Download has a corresponding _mobile_ios symlink
+  for (NSString* f in [fm contentsOfDirectoryAtPath:dlDir error:nil]) {
+    if ([f containsString:@"_mobile_and"]) {
+      NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
+      NSString* dst = [dlDir stringByAppendingPathComponent:iosName];
+      NSString* src = [dlDir stringByAppendingPathComponent:f];
       ensureSymlink(dst, src);
     }
   }

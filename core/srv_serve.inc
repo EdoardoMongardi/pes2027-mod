@@ -249,12 +249,6 @@ Response serveInner(Request& r) {
     return *x;
   }
   logRequest(uri, r.method);
-  if (contains(uri, "CMD_GET_STADIUM_DATA")) {
-    ObjP jo = newObj()->put("data_list", newArr())->put("result", "NOERR")->put("msgid", "CMD_GET_STADIUM_DATA");
-    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
-    if (req) jo->put("rqid", (long long)req->optLong("rqid", 1));
-    return serveObjectAsEncryptedMsgPack(jo);
-  }
   if (contains(uri, "CMD_CHECK_STRING")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;
