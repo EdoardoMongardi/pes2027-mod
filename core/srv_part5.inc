@@ -26,10 +26,10 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
       }
     }
     int skin = params->optInt(49, 0);
-    bool pitchBlackOrAlbino = (skin == 6 || skin == 0);
+    bool pitchBlackOrAlbino = (skin == 0);
     if (allZero || pitchBlackOrAlbino) {
       auto it = kAppearancePresets.find(base_id);
-      if (it != kAppearancePresets.end()) {
+      if (it != kAppearancePresets.end() && it->second.v[0] > 0) {
         for (int i = 0; i < 16; i++) {
           params->put(49 + i, (int)it->second.v[i]);
         }
@@ -172,6 +172,28 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
         if (!curPs || curPs->length() == 0 || curPs->optInt(0, 0) <= 0) {
           cur->put("play_style", z27ResolvePlayStyle(id, cur));
         }
+        ArrP addSkills = cur->optJSONArray("additional_skill_id");
+        if ((!addSkills || addSkills->length() == 0) && serial > 0) {
+          std::string s = sp("almanac_state").getString("ziru_skills_" + str(serial), "");
+          if (!s.empty()) {
+            addSkills = newArr();
+            for (auto& part : split(s, ',')) {
+              try { addSkills->put(parseInt(part)); } catch (...) {}
+            }
+            cur->put("additional_skill_id", addSkills);
+          }
+        }
+        if (addSkills) {
+          ArrP params = cur->optJSONArray("parameters");
+          if (params && params->length() >= 142) {
+            for (int i = 0; i < addSkills->length(); i++) {
+              int skId = addSkills->optInt(i, -1);
+              if (isZiruSkillId(skId)) {
+                params->put(kZiruSkillParameters[skId], 1);
+              }
+            }
+          }
+        }
         z27ApplyAppearanceAndClub(cur);
         if (serial > 0) {
           ziruDb->savePlayer(serial, id, cur->toString());
@@ -192,11 +214,22 @@ ObjP resolveZiruCoachFromLoginV73(int64_t id) {
     ObjP ei;
     ArrP cl;
     if (!login || !(ei = login->optJSONObject("entry_info")) || !(cl = ei->optJSONArray("coach_list"))) return nullptr;
+    auto boostCoach = [](const ObjP& c) -> ObjP {
+      ObjP res = Object::parse(c->toString());
+      res->put("possession", 99);
+      res->put("short_counter", 99);
+      res->put("long_ball", 99);
+      res->put("long_counter", 99);
+      res->put("side_attack", 99);
+      res->put("overload", 99);
+      return res;
+    };
     for (int i = 0; i < cl->length(); i++) {
       ObjP c = cl->optJSONObject(i);
       ObjP cid;
-      if (c && (cid = c->optJSONObject("coach_id")) && cid->optLong("id", 0) == id) return Object::parse(c->toString());
+      if (c && (cid = c->optJSONObject("coach_id")) && cid->optLong("id", 0) == id) return boostCoach(c);
     }
+    if (cl->length() > 0) return boostCoach(cl->getJSONObject(0));
     return nullptr;
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V73_ML_COACH_RESOLVE_ERR] ") + e.what());

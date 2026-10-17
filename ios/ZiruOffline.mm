@@ -979,7 +979,7 @@ static void hookSetPreferredFramesPerSecond(CADisplayLink* self, SEL _cmd, NSInt
   }
   if (@available(iOS 15.0, *)) {
     float f = (float)targetFps;
-    self.preferredFrameRateRange = CAFrameRateRangeMake(f, f, f);
+    self.preferredFrameRateRange = CAFrameRateRangeMake(60.0f, f, f);
   }
 }
 
@@ -992,7 +992,7 @@ static CADisplayLink* hookDisplayLinkWithTarget(Class cls, SEL _cmd, id target, 
     link.preferredFramesPerSecond = maxFps;
     if (@available(iOS 15.0, *)) {
       float f = (float)maxFps;
-      link.preferredFrameRateRange = CAFrameRateRangeMake(f, f, f);
+      link.preferredFrameRateRange = CAFrameRateRangeMake(60.0f, f, f);
     }
   }
   return link;
@@ -1003,7 +1003,7 @@ static void hookSetPreferredFrameRateRange(CADisplayLink* self, SEL _cmd, CAFram
   float maxFps = (float)UIScreen.mainScreen.maximumFramesPerSecond;
   if (maxFps < 60.0f) maxFps = 60.0f;
   float target = (range.preferred <= 60.0f && range.preferred > 0.0f) ? 60.0f : maxFps;
-  range.minimum = target;
+  range.minimum = 60.0f;
   range.maximum = target;
   range.preferred = target;
   if (gOrigSetPreferredFrameRateRange) {
@@ -1066,8 +1066,8 @@ static void setupGraphicsEnhancements() {
     }
   }
 
-  appendFn(u" -t.MaxFPS=120 -r.FinishCurrentFrame=0 -r.OneFrameThreadLag=1");
-  ZLog(@"[GRAPHICS] Unlocked engine tick cap to 120 FPS with smooth frame pacing (-t.MaxFPS=120 -r.FinishCurrentFrame=0 -r.OneFrameThreadLag=1)");
+  appendFn(u" -t.MaxFPS=120");
+  ZLog(@"[GRAPHICS] Unlocked engine tick cap to 120 FPS (-t.MaxFPS=120)");
 }
 
 // ---------------------------------------------------------------- launch gating

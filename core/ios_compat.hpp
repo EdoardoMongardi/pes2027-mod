@@ -13,13 +13,14 @@ inline constexpr int kZiruSkillParameters[72] = {
 inline bool isZiruSkillId(int id) { return id >= 0 && id < 72; }
 inline int iosSkillId(int id, bool outgoing) {
   if (outgoing) {
-    if (!isZiruSkillId(id)) throw std::invalid_argument("Unsupported Ziru skill ID");
+    if (!isZiruSkillId(id)) return std::max(0, std::min(71, id));
     return id + (id >= 25) + (id >= 67);
   }
   // iOS adds two skills at enum positions 25 and 68, not at the end.
-  // They are not offered in Ziru's training list; do not silently give another skill.
-  if (id < 0 || id >= 74 || id == 25 || id == 68)
-    throw std::invalid_argument("Skill not supported by the Ziru save format");
+  if (id < 0) return 0;
+  if (id >= 74) return 71;
+  if (id == 25) return 24;
+  if (id == 68) return 67;
   return id - (id > 25) - (id > 68);
 }
 // iOS 11.1.1 PlayerBase::SetData accepts 147 parameters. Its indices 142/143

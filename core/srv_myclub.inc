@@ -403,6 +403,14 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
       ArrP ja = newArr();
       for (int v : al) ja->put(v);
       p->put("additional_skill_id", ja);
+      ArrP params = p->optJSONArray("parameters");
+      if (params && params->length() >= 142) {
+        for (int v : al) {
+          if (isZiruSkillId(v)) {
+            params->put(kZiruSkillParameters[v], 1);
+          }
+        }
+      }
       JStr saved = loadPlayer(serial);
       if (!saved || *saved != p->toString()) saveZiruPlayerToDb(p);
     }

@@ -230,6 +230,10 @@ void z27SaveSquad(const std::optional<Bytes>& body) {
   if (!data) throw IllegalArg("No squad_data");
   ObjP cur = z27Squad(sq);
   for (auto& k : data->keys()) cur->put(k, data->get(k));
+  ArrP curCoach = cur->optJSONArray("coach");
+  if (!curCoach || curCoach->length() == 0) {
+    cur->put("coach", newArr()->put(newObj()->put("coach_id", newObj()->put("id", 17608292273375LL)->put("serial", 359042717000000009LL))));
+  }
   ObjP fb = z27FindBase(req);
   if (fb) z27Team(fb->getInt("base_team_id"));
   std::string s = cur->toString();
@@ -284,16 +288,36 @@ void z27Restore(const ObjP& jo) {
       ObjP s = squads->getJSONObject(i);
       int id = s->getInt("squad_id");
       if (id == mainId) found = true;
-      if (loadSquad(id)) s->put("squad_data", z27Squad(id));
+      if (loadSquad(id)) {
+        ObjP sqData = z27Squad(id);
+        ArrP coachArr = sqData->optJSONArray("coach");
+        if (!coachArr || coachArr->length() == 0) {
+          sqData->put("coach", newArr()->put(newObj()->put("coach_id", newObj()->put("id", 17608292273375LL)->put("serial", 359042717000000009LL))));
+          ziruDb->saveSquad(id, sqData->toString());
+        }
+        s->put("squad_data", sqData);
+      }
       s->put("base_team", newArr()->put(z27Base(id)));
     }
-    if (!found)
-      squads->put(newObj()->put("squad_id", mainId)->put("name", "Dream Team")->put("squad_data", z27Squad(mainId))->put("base_team", newArr()->put(z27Base(mainId))));
+    if (!found) {
+      ObjP sqData = z27Squad(mainId);
+      ArrP coachArr = sqData->optJSONArray("coach");
+      if (!coachArr || coachArr->length() == 0) {
+        sqData->put("coach", newArr()->put(newObj()->put("coach_id", newObj()->put("id", 17608292273375LL)->put("serial", 359042717000000009LL))));
+        ziruDb->saveSquad(mainId, sqData->toString());
+      }
+      squads->put(newObj()->put("squad_id", mainId)->put("name", "Dream Team")->put("squad_data", sqData)->put("base_team", newArr()->put(z27Base(mainId))));
+    }
     std::set<int> present;
     for (int i = 0; i < squads->length(); i++) present.insert(squads->getJSONObject(i)->getInt("squad_id"));
     for (int id = 1; id <= 20; id++) {
       if (present.find(id) == present.end() && loadSquad(id)) {
         ObjP sq = z27Squad(id);
+        ArrP coachArr = sq->optJSONArray("coach");
+        if (!coachArr || coachArr->length() == 0) {
+          sq->put("coach", newArr()->put(newObj()->put("coach_id", newObj()->put("id", 17608292273375LL)->put("serial", 359042717000000009LL))));
+          ziruDb->saveSquad(id, sq->toString());
+        }
         std::string sname = sq->optString("squad_name", "Tactics " + str(id));
         squads->put(newObj()->put("squad_id", id)->put("name", sname)->put("squad_data", sq)->put("base_team", newArr()->put(z27Base(id))));
       }
@@ -357,30 +381,29 @@ void z27Restore(const ObjP& jo) {
 ObjP z27State() {
   ObjP m = z27Meta("z27_division_state");
   if (m) {
-    if (!loadMeta("z27_div1_set")) {
-      m->put("division", 1);
-      m->put("best", 1);
+    if (!loadMeta("z27_div10_reset_v3")) {
+      m->put("division", 10);
+      m->put("best", 10);
       m->put("point", 0);
       m->put("matches", 0);
       m->put("win", 0);
       m->put("draw", 0);
       m->put("lose", 0);
-      // A pre-migration EASY opponent must not survive the move to D1.
       ObjP active = z27Meta("z27_active_match");
       if (active) {
-        active->put("division", 1)->put("cpu_level", z27Difficulty(1));
+        active->put("division", 10)->put("cpu_level", z27Difficulty(10));
         z27PutMeta("z27_active_match", active->toString());
       }
       z27PutMeta("z27_division_state", m->toString());
-      z27PutMeta("z27_div1_set", "1");
+      z27PutMeta("z27_div10_reset_v3", "1");
     }
     return m;
   }
-  z27PutMeta("z27_div1_set", "1");
-  int div = std::max(1, std::min(10, z27Int("ziru_league_division", 1)));
+  z27PutMeta("z27_div10_reset_v3", "1");
+  int div = std::max(1, std::min(10, z27Int("ziru_league_division", 10)));
   return newObj()
       ->put("division", div)
-      ->put("best", std::min(div, z27Int("ziru_league_best_division", div)))
+      ->put("best", std::max(div, z27Int("ziru_league_best_division", div)))
       ->put("point", z27Int("ziru_league_point", 0))
       ->put("matches", z27Int("ziru_league_matches", 0))
       ->put("win", z27Int("ziru_league_win", 0))
@@ -391,11 +414,10 @@ ObjP z27State() {
 }
 
 std::string z27Difficulty(int d) {
-  if (d >= 9) return "EASY";
-  if (d >= 7) return "NORMAL";
-  if (d == 6) return "HARD";
-  if (d >= 4) return "VERYHARD";
-  if (d >= 2) return "SUPERSTAR";
+  if (d >= 9) return "NORMAL";
+  if (d >= 7) return "HARD";
+  if (d >= 5) return "VERYHARD";
+  if (d >= 3) return "HARDEST";
   return "LEGEND";
 }
 
@@ -473,17 +495,14 @@ ObjP z27Opponent(const ObjP& active) {
   for (int i = 0; i < 40; i++) order->put(i < 23 ? i : 255);
   plan->getJSONObject("match_plan_settings")->put("order", order)->put("captain", 1)->put("set_piece_taker", Array::parse("[7,7,10,7,7,7]"));
   sd->put("player_list", refs);
-  int div = active->optInt("division", 10);
-  if (div <= 3) {
-    for (int i = 0; i < players->length(); i++) {
-      ObjP p = players->getJSONObject(i);
-      ObjP li = p->optJSONObject("level_info");
-      if (li) {
-        int lim = li->optInt("level_limit", li->optInt("level", 1));
-        li->put("level", lim);
-        li->put("exp_current_level", 0);
-        li->put("exp_to_next_level", 0);
-      }
+  for (int i = 0; i < players->length(); i++) {
+    ObjP p = players->getJSONObject(i);
+    ObjP li = p->optJSONObject("level_info");
+    if (li) {
+      int lim = li->optInt("level_limit", li->optInt("level", 1));
+      li->put("level", lim);
+      li->put("exp_current_level", 0);
+      li->put("exp_to_next_level", 0);
     }
   }
   tpl->put("player_list", players)
@@ -499,10 +518,15 @@ Response z27SelectOpponent() {
   try {
     ObjP req = z27Request();
     ObjP st = z27State();
+    std::string userCpu = req ? req->optString("cpu_level", "") : "";
+    std::string effectiveCpu = z27Difficulty(st->getInt("division"));
+    if (!userCpu.empty() && (userCpu == "VERYEASY" || userCpu == "EASY" || userCpu == "NORMAL" || userCpu == "HARD" || userCpu == "VERYHARD" || userCpu == "HARDEST" || userCpu == "LEGEND")) {
+      effectiveCpu = userCpu;
+    }
     ObjP m = z27Meta("z27_active_match");
     if (m) {
       if (!st->getJSONObject("completed")->has(str(m->getLong("game_id")))) m->put("division", st->getInt("division"));
-      m->put("cpu_level", z27Difficulty(m->getInt("division")));
+      m->put("cpu_level", effectiveCpu);
       z27PutMeta("z27_active_match", m->toString());
     }
     if (!m || st->getJSONObject("completed")->has(str(m->getLong("game_id")))) {
@@ -516,7 +540,7 @@ Response z27SelectOpponent() {
               ->put("profile", z27Copy(prof))
               ->put("home", z27Base(z27Main()))
               ->put("away", z27Identity(z27Team(prof->getInt("base_team_id"))))
-              ->put("cpu_level", z27Difficulty(st->getInt("division")))
+              ->put("cpu_level", effectiveCpu)
               ->put("squad_id", z27Main())
               ->put("created_at", (long long)(now / 1000));
       z27PutMeta("z27_active_match", m->toString());
@@ -616,13 +640,20 @@ ObjP z27Home(const ObjP& active) {
   }
   home->put("player_list", out)->put("squad_gameplan", z27Copy(sq->getJSONObject("squad_gameplan")))->put("team_id", active->getJSONObject("home")->getInt("base_team_id"));
   ArrP co = sq->optJSONArray("coach");
-  if (!co || co->length() == 0) throw IllegalState("Missing selected HOME coach");
-  ObjP ref = co->getJSONObject(0);
-  int64_t cid = ref->getJSONObject("coach_id")->getLong("id");
-  ObjP coach = resolveZiruCoachFromLoginV73(cid);
-  if (!coach) throw IllegalState("Unknown HOME coach " + str(cid));
-  // The serial identifies the selected owned instance, including duplicate coaches.
-  coach->put("coach_id", z27Copy(ref->getJSONObject("coach_id")));
+  ObjP coach;
+  if (!co || co->length() == 0) {
+    coach = resolveZiruCoachFromLoginV73(17608292273375LL);
+    if (!coach) coach = resolveZiruCoachFromLoginV73(8388824LL);
+  } else {
+    ObjP ref = co->getJSONObject(0);
+    int64_t cid = ref->getJSONObject("coach_id")->getLong("id");
+    coach = resolveZiruCoachFromLoginV73(cid);
+    if (!coach) coach = resolveZiruCoachFromLoginV73(17608292273375LL);
+    if (coach && ref->optJSONObject("coach_id")) {
+      coach->put("coach_id", z27Copy(ref->getJSONObject("coach_id")));
+    }
+  }
+  if (!coach) throw IllegalState("Unknown HOME coach");
   home->put("coach", coach);
   return home;
 }
