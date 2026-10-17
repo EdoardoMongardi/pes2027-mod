@@ -101,6 +101,9 @@ PATCHES = [
     (0x1048AB7C4, 0xA9447BFD, 0xAA1303E0, "camera trampoline: mov x0, x19"),
     (0x1048AB7C8, 0xA9434FF4, 0xD63F0100, "camera trampoline: blr x8"),
     (0x1048AB7CC, 0x910143FF, 0x1730A6C9, "camera trampoline: b 0x1014d52f0"),
+
+    # Prevent main menu banner / talent point crash in onlinemode::ParameterMyClubMisc::GetCareerPlanCommonParameterList (0x1047decec)
+    (0x1047DECD8, 0xF9400808, 0xD65F03C0, "GetCareerPlanCommonParameterList: entry -> ret"),
 ]
 
 
