@@ -104,6 +104,12 @@ PATCHES = [
 
     # Prevent main menu banner / talent point crash in onlinemode::ParameterMyClubMisc::GetCareerPlanCommonParameterList (0x1047decec)
     (0x1047DECD8, 0xF9400808, 0xD65F03C0, "GetCareerPlanCommonParameterList: entry -> ret"),
+
+    # Prevent AddStadiumDlTask crash (0x1046fe0b4) when processing stadium download data
+    (0x1046FD3C8, 0x3941C008, 0x52800020, "AddStadiumDlTask::IsEnd: mov w0, #1"),
+    (0x1046FD3CC, 0x7100411F, 0xD65F03C0, "AddStadiumDlTask::IsEnd: ret"),
+    (0x1046FD3D8, 0xD10103FF, 0xD65F03C0, "AddStadiumDlTask::Action: entry -> ret"),
+    (0x1046FDE4C, 0xD10243FF, 0xD65F03C0, "AddStadiumDlTask::Bind: entry -> ret"),
 ]
 
 
