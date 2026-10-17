@@ -140,8 +140,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
         if (w && (base = w->optJSONObject("gameplayer"))) {
           ArrP ib;
           if (!cur->optJSONArray("initial_booster_id_list") && (ib = base->optJSONArray("initial_booster_id_list"))) cur->put("initial_booster_id_list", ib);
-          auto ps = base->get("play_style");
-          if (ps) cur->put("play_style", ps);
+          if (base->has("play_style")) cur->put("play_style", base->get("play_style"));
           ObjP bl = base->optJSONObject("level_info");
           int lim = bl ? bl->optInt("level_limit", 1) : 1;
           if (lim == 1 && (((int32_t)id) & 16777215) == 134665) {

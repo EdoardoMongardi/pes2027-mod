@@ -192,7 +192,6 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     z27Restore(jo);
     z27RepairLoginRoster(jo);
   }
-  adaptIosPlayerData(root, true);
   Response r = newFixed(200, "application/x-msgpack", encodeClientResponse(root));
   r.headers["Connection"] = "close";
   return r;
