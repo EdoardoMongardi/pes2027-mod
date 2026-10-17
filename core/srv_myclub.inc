@@ -382,6 +382,111 @@ void applyZiruRonaldoMaxProgression(const ObjP& jo) {
   }
 }
 
+inline const std::unordered_map<int32_t, std::pair<int, int>>& getZiruCanonicalWeakFootMap() {
+  static const std::unordered_map<int32_t, std::pair<int, int>> kMap = {
+    {52, {3, 3}},
+    {812, {3, 2}},    // Ruud Gullit legend base
+    {852, {1, 0}},
+    {866, {1, 0}},
+    {867, {2, 3}},    // Kaka
+    {3758, {2, 2}},
+    {4073, {1, 1}},
+    {4522, {3, 2}},   // Cristiano Ronaldo
+    {7444, {1, 0}},
+    {7511, {2, 0}},   // Lionel Messi
+    {33185, {2, 1}},
+    {33702, {2, 2}},
+    {34881, {3, 2}},
+    {40240, {3, 3}},  // Neymar Jr
+    {40323, {2, 1}},
+    {40352, {3, 2}},  // Luis Suárez
+    {41126, {2, 2}},
+    {44379, {3, 2}},  // Kevin De Bruyne
+    {45097, {3, 3}},  // Son Heung-Min
+    {45993, {1, 1}},
+    {57123, {1, 1}},
+    {104677, {2, 2}},
+    {104717, {1, 1}},
+    {108959, {2, 1}},
+    {109941, {1, 1}},
+    {110718, {2, 2}},  // Ousmane Dembélé
+    {113960, {2, 2}},
+    {114105, {2, 2}},
+    {115881, {2, 0}},
+    {116543, {2, 1}},
+    {129369, {1, 0}},
+    {132933, {3, 2}},
+    {133543, {2, 0}},  // Erling Haaland
+    {134577, {1, 0}},
+    {134589, {2, 1}},
+    {134594, {2, 2}},
+    {134595, {2, 2}},
+    {134604, {1, 0}},
+    {134605, {2, 1}},
+    {134608, {2, 1}},
+    {134634, {3, 2}},  // Ruud Gullit (Epic / Big Time)
+    {134635, {3, 3}},
+    {134637, {3, 2}},
+    {134639, {2, 1}},
+    {137962, {3, 2}},
+    {137990, {2, 2}},
+    {138000, {2, 0}},
+    {138392, {1, 1}},
+    {139679, {2, 2}},
+    {160577, {1, 1}},
+    {166176, {3, 3}}
+  };
+  return kMap;
+}
+
+void applyZiruWeakFootFix(const ObjP& jo) {
+  if (!jo) return;
+  try {
+    ObjP gid = jo->optJSONObject("gameplayer_id");
+    if (!gid) return;
+    int64_t pid = gid->optLong("id", 0);
+    int32_t base_id = (int32_t)(pid & 0xFFFFFF);
+    ArrP p = jo->optJSONArray("parameters");
+    if (!p || p->length() < 46) return;
+
+    if (pid == 88041460993514LL || base_id == 134634 || base_id == 812) {
+      p->put(33, 3); // Weak Foot Accuracy: Very High
+      p->put(45, 2); // Weak Foot Usage: Frequently
+      return;
+    }
+    if (base_id == 40352) { // Luis Suárez
+      p->put(33, 3); // Weak Foot Accuracy: Very High
+      p->put(45, 2); // Weak Foot Usage: Frequently
+      return;
+    }
+
+    const auto& map = getZiruCanonicalWeakFootMap();
+    auto it = map.find(base_id);
+    if (it != map.end()) {
+      p->put(33, it->second.first);
+      p->put(45, it->second.second);
+      return;
+    }
+
+    if (p->optInt(33, 0) <= 0) {
+      int finish = p->optInt(20, 50);
+      int pass = p->optInt(21, 50);
+      int dribble = p->optInt(18, 50);
+      int maxAtt = std::max({finish, pass, dribble});
+      if (maxAtt >= 85) {
+        p->put(33, 3);
+      } else if (maxAtt >= 75) {
+        p->put(33, 2);
+      } else {
+        p->put(33, 1);
+      }
+      if (p->optInt(45, 0) <= 0 && maxAtt >= 75) {
+        p->put(45, 1);
+      }
+    }
+  } catch (...) {}
+}
+
 static bool vcontains(const std::vector<int32_t>& v, int32_t x) { return std::find(v.begin(), v.end(), x) != v.end(); }
 
 void applyZiruSkillStateToLogin(const ObjP& jo) {

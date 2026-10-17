@@ -150,6 +150,9 @@ class OfflineServer {
   JStr loadProgression(int64_t serial) { std::string s; return dbLoad(ziruDb->loadProgression(serial, s), s); }
   JStr loadSquad(int32_t id) { std::string s; return dbLoad(ziruDb->loadSquad(id, s), s); }
   void saveSquad(int32_t id, const std::string& s) { ziruDb->saveSquad(id, s); }
+  ObjP z27Team(int32_t id);
+  ObjP z27Uniform(const ObjP& base, const ArrP& sel);
+  ObjP z27ContrastAwayUniform(int32_t homeTeamId, int32_t awayTeamId, const ObjP& homeUniform);
 
 #include "srv_myclub.inc"
 #include "srv_league.inc"

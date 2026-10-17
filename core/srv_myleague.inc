@@ -136,7 +136,10 @@ Response handleZiruMyLeagueEnterV71() {
     if (!loadMeta("ziru_myleague_point")) ziruLeagueSaveInt("ziru_myleague_point", 9760);
     if (!loadMeta("ziru_myleague_team_id")) ziruLeagueSaveInt("ziru_myleague_team_id", 100);
     if (!loadMeta("ziru_myleague_compe_unit_id")) ziruLeagueSaveInt("ziru_myleague_compe_unit_id", 113);
-    return handleZiruLeagueStatic("responses/ZIRU_ML_SET_SEASON_ENTER.json");
+    ObjP jo = loadZiruJsonAssetObject("responses/ZIRU_ML_SET_SEASON_ENTER.json");
+    patchZiruMyLeagueCommonState(jo);
+    if (req) jo->put("rqid", (long long)req->optLong("rqid", 1));
+    return serveObjectAsEncryptedMsgPack(jo);
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V81_1_ENTER_ERR] ") + e.what());
     return handleZiruLeagueStatic("responses/ZIRU_ML_SET_SEASON_ENTER.json");

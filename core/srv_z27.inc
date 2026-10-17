@@ -583,8 +583,9 @@ ObjP z27Player(const ObjP& gid) {
       if (p->getJSONObject("gameplayer_id")->optLong("serial", -1) == serial && p->getJSONObject("gameplayer_id")->getLong("id") == gid->getLong("id")) break;
       i++;
     }
-  }
   z27ApplyAppearanceAndClub(p);
+  applyZiruRonaldoMaxProgression(p);
+  applyZiruWeakFootFix(p);
   ArrP curPs = p->optJSONArray("play_style");
   if (!curPs || curPs->length() == 0 || curPs->optInt(0, 0) <= 0) {
     p->put("play_style", z27ResolvePlayStyle(gid->getLong("id"), p));
@@ -639,6 +640,7 @@ ObjP z27Home(const ObjP& active) {
     out->put(pObj);
   }
   home->put("player_list", out)->put("squad_gameplan", z27Copy(sq->getJSONObject("squad_gameplan")))->put("team_id", active->getJSONObject("home")->getInt("base_team_id"));
+  home->put("base_team", newArr()->put(active->getJSONObject("home")));
   ArrP co = sq->optJSONArray("coach");
   ObjP coach;
   if (!co || co->length() == 0) {
@@ -685,6 +687,44 @@ ArrP z27AwayKits(const ObjP& active, const ObjP& homeUniform) {
   ArrP out = newArr()->put(ak->getJSONObject(bi)->getInt("id"));
   for (int i = 0; i < ak->length(); i++) if (i != bi) out->put(ak->getJSONObject(i)->getInt("id"));
   return out;
+}
+
+ObjP z27ContrastAwayUniform(int32_t homeTeamId, int32_t awayTeamId, const ObjP& homeUniform) {
+  ObjP ht = z27Team(homeTeamId);
+  ObjP at = z27Team(awayTeamId);
+  if (!at) return z27Uniform(z27Team(awayTeamId), nullptr);
+  ArrP ak = at->optJSONArray("kits");
+  if (!ak || ak->length() == 0 || !ht || !homeUniform) return z27Uniform(at, nullptr);
+  ArrP huList = homeUniform->optJSONArray("uniform_list");
+  int first = (huList && huList->length() > 0) ? huList->optInt(0, 0) : 0;
+  ArrP rgb = nullptr;
+  ArrP hk = ht->optJSONArray("kits");
+  if (hk) {
+    for (int i = 0; i < hk->length(); i++) {
+      ObjP k = hk->optJSONObject(i);
+      if (k && k->optInt("id", 0) == first) { rgb = k->optJSONArray("shirt_rgb"); break; }
+    }
+    if (!rgb && hk->length() > 0 && hk->optJSONObject(0)) rgb = hk->optJSONObject(0)->optJSONArray("shirt_rgb");
+  }
+  if (!rgb) return z27Uniform(at, nullptr);
+  int best = -1, bi = 0;
+  for (int i = 0; i < ak->length(); i++) {
+    ObjP k = ak->optJSONObject(i);
+    ArrP c = k ? k->optJSONArray("shirt_rgb") : nullptr;
+    if (!c || c->length() < 3) continue;
+    int d = 0;
+    for (int idx = 0; idx < 3; idx++) {
+      int x = c->optInt(idx, 0) - rgb->optInt(idx, 0);
+      d += x * x;
+    }
+    if (d > best) { best = d; bi = i; }
+  }
+  ArrP out = newArr();
+  if (ak->optJSONObject(bi)) out->put(ak->optJSONObject(bi)->optInt("id", 0));
+  for (int i = 0; i < ak->length(); i++) {
+    if (i != bi && ak->optJSONObject(i)) out->put(ak->optJSONObject(i)->optInt("id", 0));
+  }
+  return newObj()->put("base_team_id", awayTeamId)->put("uniform_list", out);
 }
 
 Response z27Start() {
