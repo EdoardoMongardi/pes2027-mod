@@ -75,25 +75,34 @@ void logf(const char* fmt, ...) {
 
 std::u16string widen(const std::string& s) { return std::u16string(s.begin(), s.end()); }   // bundle paths are ASCII
 
+std::string narrow(const char16_t* s) {
+  std::string r;
+  if (s)
+    for (; *s && r.size() < 600; s++) r += (*s < 128) ? (char)*s : '?';
+  return r;
+}
+
 // Index of the font file `name` refers to, or -1. Matches ".../Assets/ui/Font/<font>.ufont" (case-insensitive).
 int fontIndex(const char16_t* name) {
   if (!name) return -1;
-  size_t n = 0;
-  while (name[n]) n++;
+  std::string lower = narrow(name);
+  for (auto& c : lower) {
+    if (c == '\\') c = '/';
+    else c = (char)tolower((unsigned char)c);
+  }
   for (int i = 0; i < kNumFonts; i++) {
     std::string want = std::string("/assets/ui/font/") + kFonts[i] + ".ufont";
-    size_t w = want.size();
-    if (n < w) continue;
-    bool ok = true;
-    for (size_t k = 0; k < w && ok; k++) {
-      char16_t c = name[n - w + k];
-      if (c == u'\\') c = u'/';
-      if (c >= u'A' && c <= u'Z') c = (char16_t)(c - u'A' + u'a');
-      char d = want[k];
-      if (d >= 'A' && d <= 'Z') d = (char)(d - 'A' + 'a');
-      ok = c == (char16_t)d;
+    for (auto& c : want) c = (char)tolower((unsigned char)c);
+    if (lower.size() >= want.size() && lower.compare(lower.size() - want.size(), want.size(), want) == 0) {
+      return i;
     }
-    if (ok) return i;
+  }
+  // Redirect Tazugane and any other UI font fallbacks to full Vietnamese UI fonts
+  if (lower.find("/font/") != std::string::npos && lower.find(".ufont") != std::string::npos) {
+    if (lower.find("blk") != std::string::npos || lower.find("bold") != std::string::npos || lower.find("heavy") != std::string::npos) {
+      return 0; // eFootballSans-Bold (full Vietnamese)
+    }
+    return 2;   // eFootballSans-Regular (full Vietnamese)
   }
   return -1;
 }
@@ -140,13 +149,6 @@ bool ZMemFileHandle::Read(uint8_t* dst, int64_t n) {
   if (pos_ == (int64_t)data_->size() && gFullReads[idx_].fetch_add(1) < 2)
     logf("[FONT] %s.ufont read to the end by the engine (%zu bytes, Ziru font)", kFonts[idx_], data_->size());
   return true;
-}
-
-std::string narrow(const char16_t* s) {
-  std::string r;
-  if (s)
-    for (; *s && r.size() < 600; s++) r += (*s < 128) ? (char)*s : '?';
-  return r;
 }
 
 // Log (once per path) every font-like file the engine opens through the pak layer, ours or not.
