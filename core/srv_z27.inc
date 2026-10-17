@@ -71,7 +71,7 @@ ObjP z27Team(int32_t id) {
 ObjP z27Identity(const ObjP& t) {
   return newObj()
       ->put("base_team_id", nn(t)->getInt("base_team_id"))
-      ->put("base_team_license", t->optString("base_team_license", "LICENSED"))
+      ->put("base_team_license", t->optString("base_team_license", "UNKNOWN"))
       ->put("team_name", t->getString("team_name"))
       ->put("team_name_short", t->getString("team_name_short"));
 }
