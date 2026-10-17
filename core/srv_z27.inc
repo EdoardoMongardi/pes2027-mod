@@ -583,6 +583,7 @@ ObjP z27Player(const ObjP& gid) {
       if (p->getJSONObject("gameplayer_id")->optLong("serial", -1) == serial && p->getJSONObject("gameplayer_id")->getLong("id") == gid->getLong("id")) break;
       i++;
     }
+  }
   z27ApplyAppearanceAndClub(p);
   applyZiruRonaldoMaxProgression(p);
   applyZiruWeakFootFix(p);
