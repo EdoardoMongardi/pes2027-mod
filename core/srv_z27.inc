@@ -53,7 +53,7 @@ ObjP z27Team(int32_t id) {
   if (!t) {
     ObjP syn = newObj()
         ->put("base_team_id", lookup_id)
-        ->put("base_team_license", "LICENSED")
+        ->put("base_team_license", "UNKNOWN")
         ->put("team_name", "PES Team")
         ->put("team_name_short", "PES");
     ArrP kits = newArr();
@@ -408,7 +408,12 @@ void z27InfoState(ObjP jo, const ObjP& st) {
 ObjP z27Active() {
   ObjP m = z27Meta("z27_active_match");
   if (!m) throw IllegalState("No selected opponent; request GET_VSCOM_OPPONENT first");
+  ObjP state = z27State();
+  if (!state->getJSONObject("completed")->has(str(m->getLong("game_id")))) {
+    m->put("division", state->getInt("division"));
+  }
   m->put("cpu_level", z27Difficulty(m->getInt("division")));
+  z27PutMeta("z27_active_match", m->toString());
   return m;
 }
 
@@ -470,6 +475,7 @@ Response z27SelectOpponent() {
     ObjP st = z27State();
     ObjP m = z27Meta("z27_active_match");
     if (m) {
+      if (!st->getJSONObject("completed")->has(str(m->getLong("game_id")))) m->put("division", st->getInt("division"));
       m->put("cpu_level", z27Difficulty(m->getInt("division")));
       z27PutMeta("z27_active_match", m->toString());
     }

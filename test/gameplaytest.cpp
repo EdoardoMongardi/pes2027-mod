@@ -158,6 +158,10 @@ int main() {
       check(s.z27State()->getInt("division") == 1, "legacy rank migrates to D1");
       auto selected = call(s, "CMD_GET_VSCOM_OPPONENT");
       check(selected->getString("cpu_level") == "LEGEND" && s.z27Active()->getInt("division") == 1, "cached EASY opponent migrates with D1");
+      active = s.z27Meta("z27_active_match");
+      active->put("division", 10)->put("cpu_level", "EASY");
+      s.ziruDb->saveMeta("z27_active_match", active->toString());
+      check(call(s, "CMD_GET_VSCOM_OPPONENT")->getString("cpu_level") == "LEGEND", "already-migrated D1 saves also repair old D10 snapshots");
       sqlite3_exec(s.ziruDb->db, "PRAGMA query_only=ON", nullptr, nullptr, nullptr);
       bool failed = false;
       try { s.ziruDb->saveMeta("must_not_succeed", "1"); } catch (const std::exception&) { failed = true; }
