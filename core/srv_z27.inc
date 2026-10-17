@@ -83,21 +83,27 @@ inline void z27InjectTrainingItems(const ObjP& entry) {
     items = newArr();
     entry->put("item_list", items);
   }
-  bool hasSelect = false;
+  bool hasSelectSkill = false;
+  bool hasSelectPos = false;
   for (int i = 0; i < items->length(); i++) {
     ObjP it = items->optJSONObject(i);
     ObjP item = it ? it->optJSONObject("item") : nullptr;
     if (item) {
       std::string t = item->optString("item_type", "");
-      if (t == "SKILL_TRAINING_SELECT") hasSelect = true;
-      if (t == "SKILL_TRAINING" || t == "SKILL_TRAINING_CATEGORY" || t == "SKILL_TRAINING_SELECT" || t == "POSITION_TRAINING" || t == "ABILITY_TRAINING_RANDOM" || t == "ABILITY_TRAINING_SELECT") {
-        it->put("inventory_num", 999999);
-      }
+      if (t == "SKILL_TRAINING_SELECT") hasSelectSkill = true;
+      if (t == "POSITION_TRAINING_SELECT") hasSelectPos = true;
+      it->put("inventory_num", 999999);
     }
   }
-  if (!hasSelect) {
+  if (!hasSelectSkill) {
     ObjP selItem = newObj();
     ObjP inner = newObj()->put("item_type", "SKILL_TRAINING_SELECT")->put("grade", 0)->put("effect", 0);
+    selItem->put("item", inner)->put("inventory_num", 999999);
+    items->put(selItem);
+  }
+  if (!hasSelectPos) {
+    ObjP selItem = newObj();
+    ObjP inner = newObj()->put("item_type", "POSITION_TRAINING_SELECT")->put("grade", 0)->put("effect", 0);
     selItem->put("item", inner)->put("inventory_num", 999999);
     items->put(selItem);
   }

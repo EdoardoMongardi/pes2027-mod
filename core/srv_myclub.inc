@@ -114,7 +114,7 @@ static inline int z27GetPositionIndexByName(const std::string& name) {
 
 void applyZiruPositionTrainingResponse(const ObjP& jo) {
   try {
-    if (!(ziruItemType && *ziruItemType == "POSITION_TRAINING")) return;
+    if (!(ziruItemType && (*ziruItemType == "POSITION_TRAINING" || *ziruItemType == "POSITION_TRAINING_SELECT"))) return;
     int64_t j = ziruTargetSerial;
     if (j > 0) {
       JStr lp = loadPlayer(j);
@@ -224,7 +224,7 @@ void applyZiruPositionTrainingResponse(const ObjP& jo) {
               ObjP item;
               if (it && (item = it->optJSONObject("item"))) {
                 std::string t = item->optString("item_type", "");
-                if (t == "POSITION_TRAINING") it->put("inventory_num", 999999);
+                if (t == "POSITION_TRAINING" || t == "POSITION_TRAINING_SELECT") it->put("inventory_num", 999999);
               }
             }
           }
