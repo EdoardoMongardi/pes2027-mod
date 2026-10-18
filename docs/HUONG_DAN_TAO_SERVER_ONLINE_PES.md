@@ -131,7 +131,7 @@ sudo cat /etc/pes2027-online/client.json
 Kết quả sẽ có định dạng như sau:
 ```json
 {
-  "server": "https://18.138.110.85:8443",
+  "server": "https://<IP_PUBLIC_VPS>:8443",
   "enabled": true,
   "token": "a1b2c3d4e5f6...",
   "cert_sha256": "3e9b142f..."

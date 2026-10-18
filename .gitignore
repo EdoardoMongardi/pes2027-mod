@@ -6,3 +6,7 @@ __pycache__/
 /online/logs/
 /online/server.env
 /online/client.json
+*.log
+.hash-cache.json
+build-report.json
+
