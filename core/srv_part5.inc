@@ -100,16 +100,16 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
       if (base_id == 40352) origParams->put(12, 2);
       if (origParams->optInt(14, 0) < 80) origParams->put(14, 84);
     }
-    // Normalize ID to base ID so Konami engine loads 44379_.uasset / 40352_.uasset thumbnail
-    if (pid > 0xFFFFFF && cur->optString("type", "NORMAL") == "NORMAL") {
-      gid->put("id", (long long)base_id);
-      pid = base_id;
-    }
   }
 
   // 2. Fix skin tone parameter 49 if 0 (chalk-white albino bug)
   auto restoreAppearance = [&](const ArrP& values) {
     if (!values || values->length() < 61) return;
+    if (base_id == 133543) {
+      // Licensed Haaland model: parameters 49..60 must remain 0 so native 3D face/braids load properly
+      for (int i = 0; i < 12; ++i) values->put(49 + i, 0);
+      return;
+    }
     bool missing = true;
     bool corrupt = false;
     for (int i = 49; i <= 60; ++i) if (values->optInt(i, 0) == 99) corrupt = true;
@@ -129,7 +129,7 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
   };
   restoreAppearance(params);
   if (params && params->length() >= 65) {
-    if (params->optInt(49, 0) <= 0) params->put(49, 3);
+    if (base_id != 133543 && params->optInt(49, 0) <= 0) params->put(49, 3);
   }
 
   // 3. Synchronize parameters[61] (Offensive PlayStyle), parameters[62] (Defensive PlayStyle), and COM styles 63..69
@@ -151,7 +151,7 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     ArrP origParams = cur->optJSONArray("original_parameters");
     restoreAppearance(origParams);
     if (origParams && origParams->length() >= 70) {
-      if (origParams->optInt(49, 0) <= 0) origParams->put(49, 3);
+      if (base_id != 133543 && origParams->optInt(49, 0) <= 0) origParams->put(49, 3);
       if (st1 > 0) origParams->put(61, st1);
       origParams->put(62, st2);
       z27ApplyComPlayStyles(origParams, origParams->optInt(0, 0), st1);

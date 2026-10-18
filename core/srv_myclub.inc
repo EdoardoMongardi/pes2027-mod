@@ -603,14 +603,6 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
         }
       }
     }
-    if (al.size() >= 5) {
-      int i2 = ziruTrainingIndex;
-      if (i2 > 0) i2--;
-      if (i2 < 0 || i2 >= (int)al.size()) i2 = 0;
-      int old = al[i2];
-      al.erase(al.begin() + i2);
-      logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_V18_REPLACE] slot=" + str(i2) + " old=" + str(old));
-    }
     std::string pool = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71";
     if (*ziruItemType == "SKILL_TRAINING_CATEGORY") {
       std::string c = resolveZiruSkillCategory();
@@ -645,9 +637,19 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
         v = candidates[rand() % candidates.size()];
       } else throw IllegalState("No eligible additional skill remains");
     }
-    auto itDup = std::find(al.begin(), al.end(), v);
-    if (itDup != al.end()) al.erase(itDup);
-    al.push_back(v);
+
+    int slot = ziruTrainingIndex;
+    if (slot >= 0 && slot < (int)al.size()) {
+      int old = al[slot];
+      al[slot] = v;
+      logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_V18_REPLACE] slot=" + str(slot) + " old=" + str(old) + " new=" + str(v));
+    } else if (al.size() < 5) {
+      al.push_back(v);
+    } else {
+      int old = al[0];
+      al[0] = v;
+      logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_V18_REPLACE] slot=0 old=" + str(old) + " new=" + str(v));
+    }
 
     ArrP ja = newArr();
     for (int skillId : al) ja->put(skillId);
@@ -659,12 +661,11 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     if (!w) w = getZiruPlayerWrapperByBaseId(bid);
     ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
     ArrP params = owned->optJSONArray("parameters");
-    if (baseParams && params && baseParams->length() >= 70 && params->length() >= 70) {
-      for (int idx = 70; idx <= 141; ++idx) {
-        if (baseParams->optInt(idx, 0) == 1) params->put(idx, 1);
-      }
-    }
     if (params && params->length() >= 142) {
+      for (int idx = 70; idx <= 141; ++idx) {
+        int bVal = (baseParams && idx < baseParams->length()) ? baseParams->optInt(idx, 0) : 0;
+        params->put(idx, bVal);
+      }
       for (int skillId : al) {
         if (isZiruSkillId(skillId)) {
           int pIdx = kZiruSkillParameters[skillId];

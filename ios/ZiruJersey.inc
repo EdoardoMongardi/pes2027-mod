@@ -80,6 +80,9 @@ static void draw(void* actor, void* canvas) {
   originalDraw(actor, canvas);
 }
 
+extern "C" int32_t gZiruHomeTeamId;
+extern "C" int32_t gZiruAwayTeamId;
+
 static std::string lookupShirtName(void* actor, int uniformNumber) {
   if (uniformNumber <= 0 || uniformNumber > 99) return "";
 
@@ -93,8 +96,10 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   uint8_t* match = base + 0x6c4c0;
   int32_t actorTeamId = actor ? *(int32_t*)((uint8_t*)actor + 0xe10) : -1;
 
-  uint32_t homeTeamId = *(uint32_t*)(match + 0x620);
-  uint32_t awayTeamId = *(uint32_t*)(match + 0x620 + 0x5d8);
+  uint32_t homeTeamId = *(uint32_t*)(match + 0x11d0 + 0x10);
+  uint32_t awayTeamId = *(uint32_t*)(match + 0x11d0 + 0x188 + 0x10);
+  if (homeTeamId == 0 && gZiruHomeTeamId > 0) homeTeamId = (uint32_t)gZiruHomeTeamId;
+  if (awayTeamId == 0 && gZiruAwayTeamId > 0) awayTeamId = (uint32_t)gZiruAwayTeamId;
 
   int preferredSide = -1;
   if (actorTeamId > 0) {
@@ -110,7 +115,9 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
       uint16_t num = *(uint16_t*)(p + 0x1ec);
       if (num == (uint16_t)uniformNumber) {
         const char* name = nullptr;
-        if (*(uint8_t*)(p + 0x19b) & 0x80) {
+        // In Konami GetNamePrint (0x104bc2a20):
+        // if ((*(uint8_t*)(p + 0x19b) & 0x80) == 0) -> +0xc6 is valid name!
+        if ((*(uint8_t*)(p + 0x19b) & 0x80) == 0) {
           name = (const char*)(p + 0xc6);
         }
         if (!name || !name[0]) {
@@ -129,8 +136,7 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   };
 
   if (preferredSide >= 0) {
-    std::string res = checkSide(preferredSide);
-    if (!res.empty()) return res;
+    return checkSide(preferredSide); // CRITICAL: NEVER cross over to opposing team!
   }
   std::string res = checkSide(0);
   if (!res.empty()) return res;

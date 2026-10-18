@@ -1,5 +1,8 @@
 // ---- z27: division league / squads / kits (OfflineServer.java ~3801-4682) ----
 
+extern "C" int32_t gZiruHomeTeamId = 0;
+extern "C" int32_t gZiruAwayTeamId = 0;
+
 ObjP z27Meta(const std::string& k) {
   JStr m = loadMeta(k);
   if (!m || m->empty()) return nullptr;
@@ -498,9 +501,6 @@ void z27Restore(const ObjP& jo) {
           if (sv->optJSONObject("gameplayer")) sv = sv->getJSONObject("gameplayer");
           int64_t svPid = sv->getJSONObject("gameplayer_id")->getLong("id");
           if (svPid == pPid || (svPid & 0xFFFFFF) == bid) {
-            if ((bid == 44379 || bid == 40352) && sv->optString("type", "NORMAL") == "NORMAL") {
-              sv->getJSONObject("gameplayer_id")->put("id", (long long)bid);
-            }
             z27ApplyAppearanceAndClub(sv);
             ObjP w = getZiruPlayerWrapper(Value((long long)sv->getJSONObject("gameplayer_id")->getLong("id")), false);
             if (!w) w = getZiruPlayerWrapperByBaseId(bid);
@@ -645,10 +645,8 @@ ObjP z27State() {
 }
 
 std::string z27Difficulty(int d) {
-  if (d >= 9) return "NORMAL";
-  if (d >= 7) return "HARD";
-  if (d >= 5) return "VERYHARD";
-  if (d >= 3) return "HARDEST";
+  if (d >= 9) return "HARDEST";
+  if (d >= 7) return "HARDEST";
   return "LEGEND";
 }
 
@@ -912,10 +910,12 @@ ObjP z27Home(const ObjP& active) {
   for (int i = 0; i < pl->length(); i++) {
     ObjP gid = pl->getJSONObject(i)->getJSONObject("gameplayer_id");
     ObjP p = z27Player(gid);
+    int squadNum = pl->getJSONObject(i)->optInt("uniform_number", 0);
+    if (squadNum <= 0) squadNum = p->optInt("uniform_number", i + 1);
     ObjP pObj = newObj()->put("gameplayer_id", z27Copy(gid))
                        ->put("parameters", Array::parse(p->getJSONArray("parameters")->toString()))
                        ->put("averaged_overall", 0)
-                       ->put("uniform_number", p->optInt("uniform_number", pl->getJSONObject(i)->optInt("uniform_number", i + 1)));
+                       ->put("uniform_number", squadNum);
     ArrP ib = p->optJSONArray("initial_booster_id_list");
     if (ib) pObj->put("initial_booster_id_list", Array::parse(ib->toString()));
     ArrP sk = p->optJSONArray("additional_skill_id");
@@ -1113,6 +1113,8 @@ Response z27Start() {
       act->put("home_uniform", hu)->put("away_uniform", z27Uniform(act->getJSONObject("away"), z27AwayKits(act, hu)))->put("started", true);
       z27PutMeta("z27_active_match", act->toString());
     }
+    gZiruHomeTeamId = current->getJSONObject("home")->optInt("base_team_id", 0);
+    gZiruAwayTeamId = act->getJSONObject("away")->optInt("base_team_id", 0);
     ObjP out = nn(loadZiruJsonAssetObject("responses/ZIRU_START_GAME.json"));
     out->put("rqid", (long long)req->optLong("rqid", 1))
         ->put("game_id", (long long)gid)
