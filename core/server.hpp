@@ -156,6 +156,7 @@ class OfflineServer {
   JStr loadProgression(int64_t serial) { std::string s; return dbLoad(ziruDb->loadProgression(serial, s), s); }
   JStr loadSquad(int32_t id) { std::string s; return dbLoad(ziruDb->loadSquad(id, s), s); }
   void saveSquad(int32_t id, const std::string& s) { ziruDb->saveSquad(id, s); }
+  int32_t z28RandomBooster(bool isGk = false);
 
 #include "srv_myclub.inc"
 #include "srv_league.inc"

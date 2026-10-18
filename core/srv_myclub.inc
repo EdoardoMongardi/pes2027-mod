@@ -4,15 +4,6 @@ void applyZiruBoosterTrainingResponse(const ObjP& r13) {
   try {
     if (!ziruItemType) return;
     std::string r0 = *ziruItemType;
-    int32_t r2;
-    if (r0 == "ABILITY_TRAINING_RANDOM") {
-      r2 = z28RandomBooster();
-    } else if (r0 == "ABILITY_TRAINING_SELECT") {
-      r2 = ziruAbilityId;
-      if (r2 <= 0) { logRequest("ZIRU_BOOSTER_V23", "[ZIRU_BOOSTER_V23_FAIL] missing target/ability"); return; }
-    } else {
-      return;
-    }
     int32_t r3 = ziruTrainingIndex;
     if (!(r3 >= 0 && r3 < 3)) r3 = 1;
     int64_t r4 = ziruTargetSerial;
@@ -27,6 +18,17 @@ void applyZiruBoosterTrainingResponse(const ObjP& r13) {
     }
     r8 = ziruSyncActiveBooster(r8);
     ArrP r9 = nn(r8)->optJSONArray("parameters");
+    bool isGk = (r9 && r9->length() > 0 && r9->optInt(0, -1) == 0);
+
+    int32_t r2;
+    if (r0 == "ABILITY_TRAINING_RANDOM") {
+      r2 = z28RandomBooster(isGk);
+    } else if (r0 == "ABILITY_TRAINING_SELECT") {
+      r2 = ziruAbilityId;
+      if (r2 <= 0) { logRequest("ZIRU_BOOSTER_V23", "[ZIRU_BOOSTER_V23_FAIL] missing target/ability"); return; }
+    } else {
+      return;
+    }
     if (r9 && r9->length() >= 145) r9->put(142 + r3, r2);
     ArrP ib = r8->optJSONArray("initial_booster_id_list");
     if (!ib) { ib = newArr()->put(0)->put(0)->put(0); r8->put("initial_booster_id_list", ib); }

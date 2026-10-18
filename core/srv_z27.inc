@@ -214,8 +214,13 @@ ObjP z27Squad(int32_t id) {
       if (gid) {
         int64_t pid = gid->optLong("id", 0);
         int32_t bid = (int32_t)(pid & 0xFFFFFF);
-        if ((bid == 44379 || bid == 40352) && pid > 0xFFFFFF) {
-          gid->put("id", (long long)bid);
+        if (bid == 40352 && pid <= 0xFFFFFF) {
+          int team = item ? item->optInt("initial_base_team_id", 0) : 0;
+          int64_t upgradedPid = (team == 1254) ? 88029918174624LL : 89133993205152LL;
+          gid->put("id", upgradedPid);
+          mod = true;
+        } else if (bid == 44379 && pid <= 0xFFFFFF) {
+          gid->put("id", 106788187843931LL);
           mod = true;
         }
       }
@@ -490,18 +495,37 @@ void z27Restore(const ObjP& jo) {
         int64_t serial = p->getJSONObject("gameplayer_id")->optLong("serial", 0);
         int64_t pPid = p->getJSONObject("gameplayer_id")->getLong("id");
         int32_t bid = (int32_t)(pPid & 0xFFFFFF);
+        if (bid == 40352 && pPid <= 0xFFFFFF) {
+          int team = p->optInt("initial_base_team_id", 0);
+          pPid = (team == 1254) ? 88029918174624LL : 89133993205152LL;
+          p->getJSONObject("gameplayer_id")->put("id", pPid);
+        } else if (bid == 44379 && pPid <= 0xFFFFFF) {
+          pPid = 106788187843931LL;
+          p->getJSONObject("gameplayer_id")->put("id", pPid);
+        }
         JStr lp = loadPlayer(serial);
         if (lp) {
           ObjP sv = Object::parse(*lp);
           if (sv->optJSONObject("gameplayer")) sv = sv->getJSONObject("gameplayer");
           int64_t svPid = sv->getJSONObject("gameplayer_id")->getLong("id");
+          if ((svPid & 0xFFFFFF) == 40352 && svPid <= 0xFFFFFF) {
+            int team = sv->optInt("initial_base_team_id", 0);
+            svPid = (team == 1254) ? 88029918174624LL : 89133993205152LL;
+            sv->getJSONObject("gameplayer_id")->put("id", svPid);
+            ziruDb->savePlayer(serial, svPid, sv->toString());
+          } else if ((svPid & 0xFFFFFF) == 44379 && svPid <= 0xFFFFFF) {
+            svPid = 106788187843931LL;
+            sv->getJSONObject("gameplayer_id")->put("id", svPid);
+            ziruDb->savePlayer(serial, svPid, sv->toString());
+          }
           if (svPid == pPid || (svPid & 0xFFFFFF) == bid) {
             z27ApplyAppearanceAndClub(sv);
             ObjP w = getZiruPlayerWrapper(Value((long long)sv->getJSONObject("gameplayer_id")->getLong("id")), false);
             if (!w) w = getZiruPlayerWrapperByBaseId(bid);
             ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
             ArrP svParams = sv->optJSONArray("parameters");
-            if (baseParams && svParams && baseParams->length() >= 142 && svParams->length() >= 142) {
+            if (baseParams && svParams && baseParams->length() >= 142) {
+              while (svParams->length() < 145) svParams->put(0);
               for (int idx = 70; idx <= 141; idx++) {
                 if (baseParams->optInt(idx, 0) == 1) svParams->put(idx, 1);
               }
@@ -855,6 +879,16 @@ ObjP z27Player(const ObjP& gid) {
   }
   int64_t pid = gid->getLong("id");
   int32_t bid = (int32_t)(pid & 0xFFFFFF);
+  if (bid == 40352 && pid <= 0xFFFFFF) {
+    int team = p ? p->optInt("initial_base_team_id", 0) : 0;
+    pid = (team == 1254) ? 88029918174624LL : 89133993205152LL;
+    gid->put("id", pid);
+    if (p && p->optJSONObject("gameplayer_id")) p->getJSONObject("gameplayer_id")->put("id", pid);
+  } else if (bid == 44379 && pid <= 0xFFFFFF) {
+    pid = 106788187843931LL;
+    gid->put("id", pid);
+    if (p && p->optJSONObject("gameplayer_id")) p->getJSONObject("gameplayer_id")->put("id", pid);
+  }
   ArrP curPs = p->optJSONArray("play_style");
   if (!curPs || curPs->length() == 0 || curPs->optInt(0, 0) <= 0) {
     p->put("play_style", z27ResolvePlayStyle(pid, p));

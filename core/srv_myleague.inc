@@ -56,14 +56,22 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
         e->put("experience", 0);
         expl->put(e);
         ArrP cards = newArr();
-        for (int i = 0; i < 72; i++) cards->put(i);
+        for (int i = 0; i < 74; i++) {
+          int pIdx = kZiruSkillParameters[i];
+          if (pIdx < params->length() && params->optInt(pIdx, 0) == 1) {
+            cards->put(i);
+          }
+        }
         ObjP boost = Object::parse("{\"use_item_num_list_random\":[0,1],\"use_item_num_list_select\":[0,100]}");
         ObjP out = newObj();
         out->put("careerplan_list", career);
         out->put("experience_list", expl);
         out->put("skillcard_id_list", cards);
         out->put("booster_training_info", boost);
+        out->put("parameters", params);
         out->put("original_parameters", params);
+        ArrP addSkills = gp->optJSONArray("additional_skill_id");
+        if (addSkills) out->put("additional_skill_id", addSkills);
         out->put("result", "NOERR");
         out->put("rqid", (long long)ziruPlayerDataRqid);
         out->put("msgid", "CMD_GET_MYCLUB_PLAYER_DATA");

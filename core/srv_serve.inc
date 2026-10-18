@@ -138,10 +138,11 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     applyZiruSkillTrainingResponse(jo);
     z27InjectTrainingItems(jo);
   }
-  if (jo && resumesSave) filterZiruSoldPlayersFromLogin(jo);
-  if (jo && resumesSave) applyZiruSquadStateToLogin(jo);
-  if (jo && resumesSave) normalizeZiruAllLoginPlayers(jo);
-  if (jo && (resumesSave || name == "responses/CmdGetMyclubEntryInfo.json" || name == "responses/CmdGetEntryInfo.json")) {
+  bool isEntryInfo = (resumesSave || name == "responses/CmdGetMyclubEntryInfo.json" || name == "responses/CmdGetEntryInfo.json");
+  if (jo && isEntryInfo) filterZiruSoldPlayersFromLogin(jo);
+  if (jo && isEntryInfo) applyZiruSquadStateToLogin(jo);
+  if (jo && isEntryInfo) normalizeZiruAllLoginPlayers(jo);
+  if (jo && isEntryInfo) {
     ObjP ei = jo->optJSONObject("entry_info");
     if (ei) {
       z27InjectTrainingItems(ei);

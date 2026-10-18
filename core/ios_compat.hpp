@@ -54,7 +54,7 @@ inline bool adaptIosPlayerData(zj::Value& value, bool outgoing) {
         for (int i = 0; i < item.a->length(); ++i) skills->put(iosSkillId(item.a->getInt(i), outgoing));
         value.o->put(key, skills);
         changed = true;
-      } else if ((key == "additional_skill_id" || key == "ability_id" || key == "ability_Id" || key == "skill_id") && (item.t == zj::Value::INT || item.t == zj::Value::LONG)) {
+      } else if ((key == "additional_skill_id" || key == "skill_id") && (item.t == zj::Value::INT || item.t == zj::Value::LONG)) {
         value.o->put(key, iosSkillId((int)item.n, outgoing));
         changed = true;
       } else if ((key == "parameters" || key == "original_parameters") && item.t == zj::Value::ARR) {
