@@ -1,5 +1,19 @@
 // ---- MyClub: recruit / training / skills (OfflineServer.java ~105-800) ----
 
+int32_t z28RandomBooster(bool isGk = false) {
+  ArrP a = nn(loadZiruJsonAssetObject("responses/ZIRU_RANDOM_BOOSTERS.json"))->getJSONArray("ability_ids");
+  static const std::set<int> gkBoosters = {22, 33, 44, 73, 79, 85, 271, 451, 495, 502};
+  zc::JavaRandom r;
+  int attempts = 0;
+  while (attempts++ < 100) {
+    int32_t b = a->getInt(r.nextInt(a->length()));
+    bool isGkBooster = (gkBoosters.find(b) != gkBoosters.end());
+    if (isGk && isGkBooster) return b;
+    if (!isGk && !isGkBooster) return b;
+  }
+  return isGk ? 22 : 12; // fallback GK Saving vs Outfield Agility
+}
+
 void applyZiruBoosterTrainingResponse(const ObjP& r13) {
   try {
     if (!ziruItemType) return;
