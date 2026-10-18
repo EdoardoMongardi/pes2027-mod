@@ -2098,6 +2098,7 @@ static void startGame() {
 }
 
 #include "ZiruMods.inc"
+#include "ZiruJersey.inc"
 
 static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* opts) {
   gDelegate = self;
@@ -2106,8 +2107,11 @@ static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* o
 
   // Complete mod batches are activated before Unreal opens any containers.
   std::string modSummary, modError;
-  bool modsOK = zm::activatePending([gSupport stringByAppendingPathComponent:@"PendingMods"].fileSystemRepresentation,
-      gDocs.fileSystemRepresentation, modSummary, modError);
+  bool modsOK = false;
+  try {
+    modsOK = zm::activatePending([gSupport stringByAppendingPathComponent:@"PendingMods"].fileSystemRepresentation,
+        gDocs.fileSystemRepresentation, modSummary, modError);
+  } catch (const std::exception& e) { modError = e.what(); }
   ZLog(@"[MOD] %s %s", modSummary.c_str(), modError.c_str());
 
   // Let UE4 initialize its window and Metal graphics first!
@@ -2167,6 +2171,7 @@ __attribute__((constructor)) static void ziruInit() {
   @autoreleasepool {
     initPaths();
     initCrashHandler();
+    zjersey::install();
     zfont::install([gBundleAssets stringByAppendingPathComponent:@"fonts"].fileSystemRepresentation,
                    gDocs.fileSystemRepresentation, [](const char* line) { ZLog(@"%s", line); });
     zweb::install([](const char* line) { ZLog(@"%s", line); });
