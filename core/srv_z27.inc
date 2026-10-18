@@ -642,8 +642,10 @@ ObjP z27State() {
 }
 
 std::string z27Difficulty(int d) {
-  if (d >= 9) return "HARDEST";
-  if (d >= 7) return "HARDEST";
+  if (d >= 9) return "NORMAL";
+  if (d >= 7) return "HARD";
+  if (d >= 5) return "VERYHARD";
+  if (d >= 3) return "HARDEST";
   return "LEGEND";
 }
 
