@@ -1349,6 +1349,19 @@ static BOOL checkDirectFolderData(NSString** why) {
     }
   }
 
+  // Safety guard: ensure base engine paks (pc3001, pc3011, pc3600, pc3611) stay in pakDir, never in dlDir!
+  for (NSString* core in @[@"pc3001", @"pc3011", @"pc3600", @"pc3611"]) {
+    for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
+      NSString* name = [NSString stringWithFormat:@"%@_mobile_ios%@", core, ext];
+      NSString* wrong = [dlDir stringByAppendingPathComponent:name];
+      NSString* right = [pakDir stringByAppendingPathComponent:name];
+      if ([fm fileExistsAtPath:wrong] && ![fm fileExistsAtPath:right]) {
+        [fm moveItemAtPath:wrong toPath:right error:nil];
+        ZLog(@"[CORE_PAK] Restored %@ from Download/ to pak/", name);
+      }
+    }
+  }
+
   NSString* liveDir = [gDocs stringByAppendingPathComponent:@"livedata"];
   if ([fm fileExistsAtPath:liveDir]) {
     for (NSString* f in [fm contentsOfDirectoryAtPath:liveDir error:nil]) {
