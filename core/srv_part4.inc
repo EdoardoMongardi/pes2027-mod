@@ -206,6 +206,15 @@ Response handleZiruMyLeagueStartGameV71() {
                 ps = z27ResolvePlayStyle(gid->optLong("id", 0), p);
               }
               pObj->put("play_style", ps);
+              ArrP params = pObj->getJSONArray("parameters");
+              if (params && params->length() >= 70 && ps && ps->length() > 0) {
+                int st1 = ps->optInt(0, 0);
+                int pos = params->optInt(0, 0);
+                int st2 = ps->length() > 1 ? ps->optInt(1, 0) : z27GetDefensiveStyle(pos, st1);
+                params->put(61, st1);
+                params->put(62, st2);
+                z27ApplyComPlayStyles(params, pos, st1);
+              }
               out->put(pObj);
             }
           }
@@ -215,7 +224,11 @@ Response handleZiruMyLeagueStartGameV71() {
         ObjP c0;
         if (co && (c0 = co->optJSONObject(0))) home->put("coach", c0);
         ObjP gp = sd->optJSONObject("squad_gameplan");
-        if (gp) home->put("squad_gameplan", gp);
+        if (gp) {
+          ObjP sdWrap = newObj()->put("squad_gameplan", gp);
+          z27ActivateCoachLink(sdWrap);
+          home->put("squad_gameplan", gp);
+        }
       }
     }
 

@@ -137,8 +137,14 @@ inline void z27ActivateCoachLink(const ObjP& sqData) {
   if (!forms) return;
   for (int i = 0; i < forms->length(); i++) {
     ObjP f = forms->optJSONObject(i);
-    ArrP cld = f ? f->optJSONArray("coach_link_data") : nullptr;
-    if (cld && cld->length() > 0) {
+    if (!f) continue;
+    ArrP cld = f->optJSONArray("coach_link_data");
+    if (!cld || cld->length() == 0) {
+      cld = newArr();
+      cld->put(newObj()->put("is_link_on", "YES")->put("key_member_Id", 0)->put("link_member_Id", 1));
+      cld->put(newObj()->put("is_link_on", "YES")->put("key_member_Id", 2)->put("link_member_Id", 3));
+      f->put("coach_link_data", cld);
+    } else {
       for (int k = 0; k < cld->length(); k++) {
         ObjP link = cld->optJSONObject(k);
         if (link) {
@@ -187,18 +193,22 @@ ObjP z27Entry() {
 int32_t z27Main() { return z27Int("main_squad_id", z27Entry()->getInt("main_squad_id")); }
 
 ObjP z27Squad(int32_t id) {
+  ObjP res;
   JStr s = loadSquad(id);
   if (s) {
     ObjP jo = Object::parse(*s);
-    return jo->optJSONObject("squad_data") ? jo->getJSONObject("squad_data") : jo;
+    res = jo->optJSONObject("squad_data") ? jo->getJSONObject("squad_data") : jo;
+  } else {
+    ArrP list = z27Entry()->getJSONArray("squad_list");
+    for (int i = 0; i < list->length(); i++) {
+      ObjP sq = list->getJSONObject(i);
+      if (sq->optInt("squad_id", -1) == id) { res = z27Copy(sq->getJSONObject("squad_data")); break; }
+    }
+    if (!res && list->length() > 0) res = z27Copy(list->getJSONObject(0)->getJSONObject("squad_data"));
   }
-  ArrP list = z27Entry()->getJSONArray("squad_list");
-  for (int i = 0; i < list->length(); i++) {
-    ObjP sq = list->getJSONObject(i);
-    if (sq->optInt("squad_id", -1) == id) return z27Copy(sq->getJSONObject("squad_data"));
-  }
-  if (list->length() > 0) return z27Copy(list->getJSONObject(0)->getJSONObject("squad_data"));
-  throw IllegalState("Unknown squad " + str(id));
+  if (!res) throw IllegalState("Unknown squad " + str(id));
+  z27ActivateCoachLink(res);
+  return res;
 }
 
 ObjP z27Base(int32_t id) {
@@ -587,6 +597,22 @@ ObjP z27Opponent(const ObjP& active) {
     ObjP gp = z27Copy(w->getJSONObject("gameplayer"));
     ObjP gid = newObj()->put("id", (long long)ids->getLong(i))->put("serial", (long long)(800000000000000LL + (int64_t)(prof->getInt("profile_id") * 100) + i));
     gp->put("gameplayer_id", gid)->put("uniform_number", i + 1);
+    z27ApplyAppearanceAndClub(gp);
+    applyZiruWeakFootFix(gp);
+    ArrP ps = gp->optJSONArray("play_style");
+    if (!ps || ps->length() == 0 || ps->optInt(0, 0) <= 0) {
+      ps = z27ResolvePlayStyle(ids->getLong(i), gp);
+      gp->put("play_style", ps);
+    }
+    ArrP params = gp->optJSONArray("parameters");
+    if (params && params->length() >= 70 && ps && ps->length() > 0) {
+      int st1 = ps->optInt(0, 0);
+      int pos = params->optInt(0, 0);
+      int st2 = ps->length() > 1 ? ps->optInt(1, 0) : z27GetDefensiveStyle(pos, st1);
+      params->put(61, st1);
+      params->put(62, st2);
+      z27ApplyComPlayStyles(params, pos, st1);
+    }
     players->put(gp);
     refs->put(newObj()->put("gameplayer_id", z27Copy(gid))->put("uniform_number", i + 1));
   }
@@ -600,12 +626,19 @@ ObjP z27Opponent(const ObjP& active) {
         ->put("team_style", prof->getInt("team_style"))
         ->put("use_multi_formation", "NO");
     ArrP cl = f->optJSONArray("coach_link_data");
-    if (cl) {
+    if (!cl || cl->length() == 0) {
+      cl = newArr();
+      cl->put(newObj()->put("is_link_on", "YES")->put("key_member_Id", 0)->put("link_member_Id", 1));
+      cl->put(newObj()->put("is_link_on", "YES")->put("key_member_Id", 2)->put("link_member_Id", 3));
+      f->put("coach_link_data", cl);
+    } else {
       for (int k = 0; k < cl->length(); k++) {
         ObjP link = cl->getJSONObject(k);
-        link->put("is_link_on", "YES");
-        link->put("key_member_Id", k * 2);
-        link->put("link_member_Id", k * 2 + 1);
+        if (link) {
+          link->put("is_link_on", "YES");
+          link->put("key_member_Id", k * 2);
+          link->put("link_member_Id", k * 2 + 1);
+        }
       }
     }
   }
@@ -702,14 +735,14 @@ ObjP z27Player(const ObjP& gid) {
       i++;
     }
   }
-  z27ApplyAppearanceAndClub(p);
-  applyZiruRonaldoMaxProgression(p);
-  applyZiruWeakFootFix(p);
   ArrP curPs = p->optJSONArray("play_style");
   if (!curPs || curPs->length() == 0 || curPs->optInt(0, 0) <= 0) {
     p->put("play_style", z27ResolvePlayStyle(gid->getLong("id"), p));
     if (serial > 0) ziruDb->savePlayer(serial, gid->getLong("id"), p->toString());
   }
+  z27ApplyAppearanceAndClub(p);
+  applyZiruRonaldoMaxProgression(p);
+  applyZiruWeakFootFix(p);
   p = ziruSyncActiveBooster(p);
   ArrP addSkills = p->optJSONArray("additional_skill_id");
   if (!addSkills && serial > 0) {
@@ -754,11 +787,24 @@ ObjP z27Home(const ObjP& active) {
     ArrP ps = p->optJSONArray("play_style");
     if (!ps || ps->length() == 0 || ps->optInt(0, 0) <= 0) {
       ps = z27ResolvePlayStyle(gid->getLong("id"), p);
+      p->put("play_style", ps);
     }
     pObj->put("play_style", ps);
+    ArrP params = pObj->getJSONArray("parameters");
+    if (params && params->length() >= 70 && ps && ps->length() > 0) {
+      int st1 = ps->optInt(0, 0);
+      int pos = params->optInt(0, 0);
+      int st2 = ps->length() > 1 ? ps->optInt(1, 0) : z27GetDefensiveStyle(pos, st1);
+      params->put(61, st1);
+      params->put(62, st2);
+      z27ApplyComPlayStyles(params, pos, st1);
+    }
     out->put(pObj);
   }
-  home->put("player_list", out)->put("squad_gameplan", z27Copy(sq->getJSONObject("squad_gameplan")))->put("team_id", active->getJSONObject("home")->getInt("base_team_id"));
+  ObjP gp = z27Copy(sq->getJSONObject("squad_gameplan"));
+  ObjP sdWrap = newObj()->put("squad_gameplan", gp);
+  z27ActivateCoachLink(sdWrap);
+  home->put("player_list", out)->put("squad_gameplan", gp)->put("team_id", active->getJSONObject("home")->getInt("base_team_id"));
   home->put("base_team", newArr()->put(active->getJSONObject("home")));
   ArrP co = sq->optJSONArray("coach");
   ObjP coach;
