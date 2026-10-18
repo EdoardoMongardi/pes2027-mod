@@ -25,9 +25,9 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     std::string msgid = req->optString("msgid", "");
     if (!msgid.empty()) jo->put("msgid", msgid);
   }
-  if (jo && (resumesSave || name == "responses/get_user_eula_info.json")) {
-    if (resumesSave) {
-      patchLocalLivedataUrls(jo);
+  if (jo && (resumesSave || name == "responses/get_user_eula_info.json" || name == "responses/get_myclub_mainmenu_info.json")) {
+    if (resumesSave || name == "responses/get_myclub_mainmenu_info.json") {
+      if (resumesSave) patchLocalLivedataUrls(jo);
       ObjP ci = jo->optJSONObject("coin_info");
       if (!ci) { ci = newObj(); jo->put("coin_info", ci); }
       ci->put("coin", 9999999);

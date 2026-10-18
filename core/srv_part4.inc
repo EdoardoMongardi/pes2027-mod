@@ -283,6 +283,8 @@ Response handleZiruMyLeagueStartGameV71() {
       jo->put("squad_data_home", userSquad ? userSquad : Value::null());
       jo->put("squad_data_away", aiSquad ? aiSquad : Value::null());
     }
+    gZiruHomeTeamId = userHome ? userTeam : aiTeam;
+    gZiruAwayTeamId = userHome ? aiTeam : userTeam;
     logRequest("ZIRU_ML_START", "fixture=" + str(f) + " home=" + str(homeTeam) + " away=" + str(awayTeam) + " userHome=" + str(userHome));
 
     return serveObjectAsEncryptedMsgPack(jo);

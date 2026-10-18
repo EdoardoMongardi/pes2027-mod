@@ -22272,9 +22272,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22283,9 +22283,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],
@@ -22301,9 +22301,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22312,9 +22312,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],
@@ -22330,9 +22330,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22341,9 +22341,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],
@@ -22359,9 +22359,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22370,9 +22370,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],
@@ -22388,9 +22388,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22399,9 +22399,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],
@@ -22417,9 +22417,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22428,9 +22428,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],
@@ -22446,9 +22446,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22457,9 +22457,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],
@@ -22475,9 +22475,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22486,9 +22486,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],
@@ -22504,9 +22504,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22515,9 +22515,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],
@@ -22533,9 +22533,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22544,9 +22544,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],
@@ -22562,9 +22562,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22573,9 +22573,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],
@@ -22591,9 +22591,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 100,
             "coin_price": 100,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 10000,
+            "gp_price": 10000
           }
         },
         {
@@ -22602,9 +22602,9 @@
             "can_use_coin": "YES",
             "coin_price_base": 900,
             "coin_price": 900,
-            "can_use_gp": "NO",
-            "gp_price_base": 0,
-            "gp_price": 0
+            "can_use_gp": "YES",
+            "gp_price_base": 100000,
+            "gp_price": 100000
           }
         }
       ],

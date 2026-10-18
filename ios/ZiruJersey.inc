@@ -134,7 +134,12 @@ static std::string fallbackPlayerName(uint32_t baseId) {
     {44840, "JORGINHO"}, {30210, "PARTEY"}, {137957, "TROSSARD"}, {110815, "HAVERTZ"},
     {107686, "MARTINELLI"}, {124266, "ZINCHENKO"}, {132933, "RAYA"}, {983, "BECKHAM"},
     {33185, "PIRLO"}, {134670, "MALDINI"}, {134701, "NEDVED"}, {34691, "NEDVED"},
-    {45735, "MANE"}, {126343, "RODRYGO"}
+    {45735, "MANE"}, {126343, "RODRYGO"}, {3214, "RONALDINHO"}, {15676, "KAKA"},
+    {3000, "ZIDANE"}, {41066, "R. CARLOS"}, {3279, "CASILLAS"}, {3843, "BUFFON"},
+    {3234, "SHEVCHENKO"}, {3334, "FIGO"}, {15886, "GULLIT"}, {16369, "VAN BASTEN"},
+    {16368, "RIJKAARD"}, {136270, "WIRTZ"}, {133668, "PALMER"}, {143093, "MAINOO"},
+    {137965, "GARNACHO"}, {137889, "A. GULER"}, {145953, "ENDRICK"}, {136368, "VAN DE VEN"},
+    {105809, "CALHANOGLU"}, {42647, "LUKAKU"}
   };
   auto it = sMap.find(baseId);
   return (it != sMap.end()) ? it->second : "";
@@ -172,8 +177,8 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
       uint16_t num = *(uint16_t*)(p + 0x1ec);
       if (num == (uint16_t)uniformNumber) {
         uint32_t baseId = *(uint32_t*)(p + 0x38);
-        std::string name = sanitizeShirtName((const char*)(p + 0x89));
-        if (name.empty()) name = sanitizeShirtName((const char*)(p + 0xc6));
+        std::string name = sanitizeShirtName((const char*)(p + 0xc6));
+        if (name.empty()) name = sanitizeShirtName((const char*)(p + 0x103));
         if (name.empty() && baseId > 0) name = fallbackPlayerName(baseId);
         if (!name.empty()) return name;
       }
@@ -208,8 +213,8 @@ static std::string lookupShirtNameByPlayerId(int64_t playerId) {
       uint8_t* p = teamPlayers + (i * 0x258);
       uint32_t baseId = *(uint32_t*)(p + 0x38);
       if (baseId == targetBaseId) {
-        std::string name = sanitizeShirtName((const char*)(p + 0x89));
-        if (name.empty()) name = sanitizeShirtName((const char*)(p + 0xc6));
+        std::string name = sanitizeShirtName((const char*)(p + 0xc6));
+        if (name.empty()) name = sanitizeShirtName((const char*)(p + 0x103));
         if (!name.empty()) return name;
       }
     }
@@ -224,6 +229,7 @@ static void applyActorShirtName(void* actor, const std::string& name) {
     setShirt(actor, name.c_str());
   }
   *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
+  *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
 
   void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
   if (nameTexActor) {
@@ -283,6 +289,7 @@ static void hookedBackNumberStep(void* actor) {
       }
     } else if (len > 0) {
       *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
+      *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
     }
 
     void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);

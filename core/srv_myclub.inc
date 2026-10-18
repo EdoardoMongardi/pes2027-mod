@@ -64,7 +64,11 @@ void applyZiruDynamicRecruit(const ObjP& jo) {
     std::string s = prefs.getString(key, "");
     ArrP remaining = s.empty() ? Array::parse(ids->toString()) : Array::parse(s);
     int length = remaining->length();
-    if (length <= 0) { zs::logw("OFFLINE_SERVER", "[ZIRU_V10_DRAW] pack exhausted"); return; }
+    if (length <= 0) {
+      remaining = Array::parse(ids->toString());
+      length = remaining->length();
+      zs::logi("OFFLINE_SERVER", "[ZIRU_V10_DRAW] pack auto-reset on exhaustion");
+    }
     if (i > length) i = length;
     ArrP list = jo->optJSONArray("gameplayer_list");
     ObjP o1, o2, o3;
