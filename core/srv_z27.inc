@@ -939,6 +939,7 @@ ObjP z27Player(const ObjP& gid) {
     gid->put("id", pid);
     if (p && p->optJSONObject("gameplayer_id")) p->getJSONObject("gameplayer_id")->put("id", pid);
   }
+  int32_t bid = (int32_t)(pid & 0xFFFFFF);
   ArrP curPs = p->optJSONArray("play_style");
   if (!curPs || curPs->length() == 0 || curPs->optInt(0, 0) <= 0) {
     p->put("play_style", z27ResolvePlayStyle(pid, p));
