@@ -24,7 +24,7 @@ import argparse, hashlib, json, os, plistlib, shutil, struct, sys, time, zipfile
 EXPECTED_EXE_SHA256 = "0cf9bacd9a9f049587f78a5fb8646b4ed5b87abe40a761d1f8f6337cafa9a0de"
 EXPECTED_VERSION = ("11.1.1", "11.1.101")
 DYLIB_INSTALL_NAME = b"@executable_path/Frameworks/ZiruOffline.dylib"
-MOD_VERSION = "1.1.1"
+MOD_VERSION = "1.1.2"
 
 # Unlock 120 FPS frame pacing for ProMotion displays while keeping native quality settings.
 DEFAULT_COMMANDLINE = b"-t.MaxFPS=120\n"
