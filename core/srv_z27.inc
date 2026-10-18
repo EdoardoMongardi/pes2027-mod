@@ -193,22 +193,18 @@ ObjP z27Entry() {
 int32_t z27Main() { return z27Int("main_squad_id", z27Entry()->getInt("main_squad_id")); }
 
 ObjP z27Squad(int32_t id) {
-  ObjP res;
   JStr s = loadSquad(id);
   if (s) {
     ObjP jo = Object::parse(*s);
-    res = jo->optJSONObject("squad_data") ? jo->getJSONObject("squad_data") : jo;
-  } else {
-    ArrP list = z27Entry()->getJSONArray("squad_list");
-    for (int i = 0; i < list->length(); i++) {
-      ObjP sq = list->getJSONObject(i);
-      if (sq->optInt("squad_id", -1) == id) { res = z27Copy(sq->getJSONObject("squad_data")); break; }
-    }
-    if (!res && list->length() > 0) res = z27Copy(list->getJSONObject(0)->getJSONObject("squad_data"));
+    return jo->optJSONObject("squad_data") ? jo->getJSONObject("squad_data") : jo;
   }
-  if (!res) throw IllegalState("Unknown squad " + str(id));
-  z27ActivateCoachLink(res);
-  return res;
+  ArrP list = z27Entry()->getJSONArray("squad_list");
+  for (int i = 0; i < list->length(); i++) {
+    ObjP sq = list->getJSONObject(i);
+    if (sq->optInt("squad_id", -1) == id) return z27Copy(sq->getJSONObject("squad_data"));
+  }
+  if (list->length() > 0) return z27Copy(list->getJSONObject(0)->getJSONObject("squad_data"));
+  throw IllegalState("Unknown squad " + str(id));
 }
 
 ObjP z27Base(int32_t id) {

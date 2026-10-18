@@ -65,12 +65,6 @@ inline void z27ApplyComPlayStyles(const ArrP& p, int pos, int st1) {
 
 void z27ApplyAppearanceAndClub(const ObjP& cur) {
   if (!cur) return;
-  static thread_local bool sInApply = false;
-  if (sInApply) return;
-  struct Guard {
-    Guard() { sInApply = true; }
-    ~Guard() { sInApply = false; }
-  } guard;
   ObjP gid = cur->optJSONObject("gameplayer_id");
   if (!gid) return;
   int64_t pid = gid->optLong("id", 0);
@@ -107,12 +101,8 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     if (params->optInt(49, 0) <= 0) params->put(49, 3);
   }
 
-  // 3. Resolve & synchronize play_style, parameters[61], parameters[62], and COM styles 63..69
+  // 3. Synchronize parameters[61] (Offensive PlayStyle), parameters[62] (Defensive PlayStyle), and COM styles 63..69
   ArrP ps = cur->optJSONArray("play_style");
-  if (!ps || ps->length() == 0 || ps->optInt(0, 0) <= 0) {
-    ps = z27ResolvePlayStyle(pid, cur);
-    if (ps) cur->put("play_style", ps);
-  }
   if (ps && ps->length() > 0) {
     int st1 = ps->optInt(0, 0);
     int pos = params ? params->optInt(0, 0) : 0;
