@@ -229,69 +229,63 @@ void decodeZiruMyclubItemRequest(const Bytes& b) {
   ziruLevelEffect = 0;
   ziruIsAuto = false;
   try {
-    if (b.size() > 16) {
-      Bytes mp;
-      if (!inflateRequest(b, mp)) throw std::runtime_error("decrypt/inflate failed");
-      zc::Unpacker u(mp.data(), mp.size());
-      uint32_t n = u.unpackMapHeader();
-      for (uint32_t i = 0; i < n; i++) {
-        std::string k = u.unpackString();
-        if (k == "is_auto_use_item") {
-          ziruIsAuto = u.unpackString() == "YES";
-        } else if (k == "gameplayer_id_list") {
-          uint32_t a = u.unpackArrayHeader();
-          for (uint32_t i2 = 0; i2 < a; i2++) {
-            uint32_t m = u.unpackMapHeader();
-            for (uint32_t i3 = 0; i3 < m; i3++) {
-              std::string k2 = u.unpackString();
-              if (k2 == "id") ziruTargetPlayerId = u.unpackLong();
-              else if (k2 == "serial") ziruTargetSerial = u.unpackLong();
-              else u.skipValue();
-            }
-          }
-        } else if (k == "training_index") {
-          ziruTrainingIndex = u.unpackInt();
-        } else if (k == "ability_id" || k == "ability_Id" || k == "skill_id" || k == "additional_skill_id") {
-          ziruAbilityId = u.unpackInt();
-        } else if (k == "skill_training_category_type") {
-          auto vt = u.nextType();
-          if (vt == zc::Unpacker::STRING) ziruSkillCategory = u.unpackString();
-          else if (vt == zc::Unpacker::INTEGER) ziruSkillCategoryCode = u.unpackInt();
-          else u.skipValue();
-        } else if (k == "item_list") {
-          uint32_t a = u.unpackArrayHeader();
-          for (uint32_t i4 = 0; i4 < a; i4++) {
-            int32_t i5 = 0, i6 = 0;
-            uint32_t m = u.unpackMapHeader();
-            for (uint32_t i7 = 0; i7 < m; i7++) {
-              std::string k3 = u.unpackString();
-              if (k3 == "item") {
-                uint32_t m4 = u.unpackMapHeader();
-                for (uint32_t i8 = 0; i8 < m4; i8++) {
-                  std::string k4 = u.unpackString();
-                  if (k4 == "item_type") ziruItemType = u.unpackString();
-                  else if (k4 == "effect") { i5 = (int32_t)u.unpackLong(); ziruSkillItemEffect = i5; }
-                  else if (k4 == "grade") ziruSkillItemGrade = u.unpackInt();
-                  else if (k4 == "ability_id" || k4 == "ability_Id" || k4 == "skill_id" || k4 == "additional_skill_id") ziruAbilityId = u.unpackInt();
-                  else u.skipValue();
-                }
-              } else if (k3 == "present_num") {
-                i6 = (int32_t)u.unpackLong();
-              } else if (k3 == "ability_id" || k3 == "ability_Id" || k3 == "skill_id" || k3 == "additional_skill_id") {
-                ziruAbilityId = u.unpackInt();
-              } else {
-                u.skipValue();
-              }
-            }
-            if (ziruItemType && *ziruItemType == "LEVEL_TRAINING") ziruLevelEffect = (int32_t)((uint32_t)ziruLevelEffect + (uint32_t)i5 * (uint32_t)i6);
-          }
-          if (ziruAbilityId == 0 && ziruSkillItemEffect > 0) ziruAbilityId = ziruSkillItemEffect;
-        } else {
-          u.skipValue();
+    ObjP req = decodeZiruRequestObject(&b);
+    if (!req) return;
+
+    if (req->has("is_auto_use_item")) {
+      std::string s = req->optString("is_auto_use_item", "");
+      ziruIsAuto = (s == "YES" || s == "true" || req->optBoolean("is_auto_use_item", false));
+    }
+    ArrP gids = req->optJSONArray("gameplayer_id_list");
+    if (gids && gids->length() > 0) {
+      ObjP gid = gids->optJSONObject(0);
+      if (gid) {
+        ziruTargetPlayerId = gid->optLong("id", 0);
+        ziruTargetSerial = gid->optLong("serial", 0);
+      }
+    }
+    ziruTrainingIndex = req->optInt("training_index", -1);
+    if (req->has("ability_id")) ziruAbilityId = req->optInt("ability_id", 0);
+    else if (req->has("ability_Id")) ziruAbilityId = req->optInt("ability_Id", 0);
+    else if (req->has("skill_id")) ziruAbilityId = req->optInt("skill_id", 0);
+    else if (req->has("additional_skill_id")) ziruAbilityId = req->optInt("additional_skill_id", 0);
+
+    if (req->has("skill_training_category_type")) {
+      ziruSkillCategory = req->optString("skill_training_category_type", "");
+      ziruSkillCategoryCode = req->optInt("skill_training_category_type", -1);
+    }
+
+    ArrP itemList = req->optJSONArray("item_list");
+    if (itemList) {
+      for (int i = 0; i < itemList->length(); i++) {
+        ObjP it = itemList->optJSONObject(i);
+        if (!it) continue;
+        int i5 = 0;
+        ObjP item = it->optJSONObject("item");
+        if (item) {
+          if (item->has("item_type")) ziruItemType = item->optString("item_type", "");
+          if (item->has("effect")) { i5 = item->optInt("effect", 0); ziruSkillItemEffect = i5; }
+          if (item->has("grade")) ziruSkillItemGrade = item->optInt("grade", 0);
+          if (item->has("ability_id")) ziruAbilityId = item->optInt("ability_id", 0);
+          else if (item->has("ability_Id")) ziruAbilityId = item->optInt("ability_Id", 0);
+          else if (item->has("skill_id")) ziruAbilityId = item->optInt("skill_id", 0);
+          else if (item->has("additional_skill_id")) ziruAbilityId = item->optInt("additional_skill_id", 0);
+        }
+        int i6 = it->optInt("present_num", 0);
+        if (it->has("ability_id")) ziruAbilityId = it->optInt("ability_id", 0);
+        else if (it->has("ability_Id")) ziruAbilityId = it->optInt("ability_Id", 0);
+        else if (it->has("skill_id")) ziruAbilityId = it->optInt("skill_id", 0);
+        else if (it->has("additional_skill_id")) ziruAbilityId = it->optInt("additional_skill_id", 0);
+
+        if (ziruItemType && *ziruItemType == "LEVEL_TRAINING") {
+          ziruLevelEffect += (int32_t)((uint32_t)i5 * (uint32_t)i6);
         }
       }
-      zs::logi("OFFLINE_SERVER", "[ZIRU V15.7.2A ITEM] type=" + *ziruItemType + " serial=" + str(ziruTargetSerial) + " training_index=" + str(ziruTrainingIndex));
+      if (ziruAbilityId == 0 && ziruSkillItemEffect > 0) ziruAbilityId = ziruSkillItemEffect;
     }
+    zs::logi("OFFLINE_SERVER", "[ZIRU V15.7.2A ITEM] type=" + (ziruItemType ? *ziruItemType : "none") +
+             " serial=" + str(ziruTargetSerial) + " player_id=" + str(ziruTargetPlayerId) +
+             " training_index=" + str(ziruTrainingIndex) + " ability=" + str(ziruAbilityId));
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU V15.7.2A ITEM] decode failed ") + e.what());
   }

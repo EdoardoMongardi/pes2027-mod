@@ -275,8 +275,10 @@ int main() {
       auto req = newObj()->put("gameplayer_id_list", newArr()->put(owned->getJSONObject("gameplayer_id")))
           ->put("training_index", 0)->put("item_list", newArr()->put(newObj()->put("present_num", 1)
           ->put("item", newObj()->put("item_type", "SKILL_TRAINING"))));
-      auto awarded = call(s, "CMD_USE_MYCLUB_ITEM", req)->getJSONObject("skill_training_result")->getInt("additional_skill_id");
+      auto itemResp = call(s, "CMD_USE_MYCLUB_ITEM", req);
+      auto awarded = itemResp->getJSONObject("skill_training_result")->getInt("additional_skill_id");
       check(awarded == 0, "training excludes all built-in skills; ID zero is a real skill");
+      check(itemResp->getJSONArray("item_list")->length() > 0, "item_list replenished in CMD_USE_MYCLUB_ITEM");
     }
     {
       OfflineServer s(cfg);
@@ -287,9 +289,24 @@ int main() {
         if (p->getJSONObject("gameplayer_id")->getLong("serial") == 303) {
           auto skills = p->getJSONArray("additional_skill_id");
           retainedZero = skills->length() == 1 && skills->getInt(0) == 0;
+          check(p->getJSONArray("parameters")->getInt(kZiruSkillParameters[0]) == 1, "skill zero parameter bit set in roster");
         }
       }
       check(retainedZero, "valid skill zero survives save, process restart and login");
+
+      // Verify skill zero parameter bit and additional skill survive z27Restore via CMD_GET_MYCLUB_ENTRY_INFO
+      auto entryResp = call(s, "CMD_GET_MYCLUB_ENTRY_INFO");
+      auto entryPlayers = entryResp->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+      bool entryHasSkill = false;
+      for (int i = 0; i < entryPlayers->length(); ++i) {
+        auto p = entryPlayers->getJSONObject(i);
+        if (p->getJSONObject("gameplayer_id")->getLong("serial") == 303) {
+          auto skills = p->optJSONArray("additional_skill_id");
+          if (skills && skills->length() == 1 && skills->getInt(0) == 0) entryHasSkill = true;
+          check(p->getJSONArray("parameters")->getInt(kZiruSkillParameters[0]) == 1, "skill zero parameter bit survives post-match entry info");
+        }
+      }
+      check(entryHasSkill, "additional skill survives post-match entry info");
     }
     {
       OfflineServer s(cfg);

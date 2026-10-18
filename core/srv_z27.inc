@@ -511,6 +511,45 @@ void z27Restore(const ObjP& jo) {
                 if (baseParams->optInt(idx, 0) == 1) svParams->put(idx, 1);
               }
             }
+
+            // Reapply and sync additional skills
+            zs::Prefs& statePrefs = sp("almanac_state");
+            std::string prefKey = "ziru_skills_" + str(serial);
+            std::string prefSkills = statePrefs.getString(prefKey, "");
+            std::vector<int32_t> skillList;
+            if (!prefSkills.empty()) {
+              for (auto& part : split(prefSkills, ',')) {
+                try {
+                  int val = parseInt(part);
+                  if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
+                } catch (const NumberFormat&) {}
+              }
+            }
+            ArrP existingSkills = sv->optJSONArray("additional_skill_id");
+            if (existingSkills) {
+              for (int sIdx = 0; sIdx < existingSkills->length(); ++sIdx) {
+                int val = existingSkills->optInt(sIdx);
+                if (val == 25 || val == 68) val = iosSkillId(val, false);
+                if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
+              }
+            }
+            ArrP newSkillArr = newArr();
+            for (int v : skillList) newSkillArr->put(v);
+            sv->put("additional_skill_id", newSkillArr);
+            if (!skillList.empty()) {
+              statePrefs.edit().putString(prefKey, joinInts(skillList)).commit();
+            }
+            if (svParams && svParams->length() >= 142) {
+              for (int v : skillList) {
+                if (isZiruSkillId(v)) {
+                  int pIdx = kZiruSkillParameters[v];
+                  if (pIdx >= 0 && pIdx < svParams->length()) {
+                    svParams->put(pIdx, 1);
+                  }
+                }
+              }
+            }
+
             ArrP svPs = sv->optJSONArray("play_style");
             if (!svPs || svPs->length() == 0 || svPs->optInt(0, 0) <= 0) {
               sv->put("play_style", z27ResolvePlayStyle(sv->getJSONObject("gameplayer_id")->getLong("id"), p));
@@ -521,10 +560,46 @@ void z27Restore(const ObjP& jo) {
           }
         } else {
           z27ApplyAppearanceAndClub(p);
+          zs::Prefs& statePrefs = sp("almanac_state");
+          std::string prefKey = "ziru_skills_" + str(serial);
+          std::string prefSkills = statePrefs.getString(prefKey, "");
+          std::vector<int32_t> skillList;
+          if (!prefSkills.empty()) {
+            for (auto& part : split(prefSkills, ',')) {
+              try {
+                int val = parseInt(part);
+                if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
+              } catch (const NumberFormat&) {}
+            }
+          }
+          ArrP existingSkills = p->optJSONArray("additional_skill_id");
+          if (existingSkills) {
+            for (int sIdx = 0; sIdx < existingSkills->length(); ++sIdx) {
+              int val = existingSkills->optInt(sIdx);
+              if (val == 25 || val == 68) val = iosSkillId(val, false);
+              if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
+            }
+          }
+          ArrP newSkillArr = newArr();
+          for (int v : skillList) newSkillArr->put(v);
+          p->put("additional_skill_id", newSkillArr);
+          if (!skillList.empty()) {
+            statePrefs.edit().putString(prefKey, joinInts(skillList)).commit();
+          }
+          ArrP pParams = p->optJSONArray("parameters");
+          if (pParams && pParams->length() >= 142) {
+            for (int v : skillList) {
+              if (isZiruSkillId(v)) {
+                int pIdx = kZiruSkillParameters[v];
+                if (pIdx >= 0 && pIdx < pParams->length()) pParams->put(pIdx, 1);
+              }
+            }
+          }
           ArrP pPs = p->optJSONArray("play_style");
           if (!pPs || pPs->length() == 0 || pPs->optInt(0, 0) <= 0) {
             p->put("play_style", z27ResolvePlayStyle(p->getJSONObject("gameplayer_id")->getLong("id"), p));
           }
+          ziruDb->savePlayer(serial, p->getJSONObject("gameplayer_id")->getLong("id"), p->toString());
         }
       }
     }
@@ -844,6 +919,15 @@ ObjP z27Home(const ObjP& active) {
     ArrP ib = p->optJSONArray("initial_booster_id_list");
     if (ib) pObj->put("initial_booster_id_list", Array::parse(ib->toString()));
     ArrP sk = p->optJSONArray("additional_skill_id");
+    if (!sk) {
+      std::string prefSkills = sp("almanac_state").getString("ziru_skills_" + str(gid->optLong("serial", 0)), "");
+      if (!prefSkills.empty()) {
+        sk = newArr();
+        for (auto& part : split(prefSkills, ',')) {
+          try { sk->put(parseInt(part)); } catch (const NumberFormat&) {}
+        }
+      }
+    }
     if (sk) pObj->put("additional_skill_id", Array::parse(sk->toString()));
     ArrP ps = p->optJSONArray("play_style");
     if (!ps || ps->length() == 0 || ps->optInt(0, 0) <= 0) {
@@ -852,6 +936,15 @@ ObjP z27Home(const ObjP& active) {
     }
     pObj->put("play_style", ps);
     ArrP params = pObj->getJSONArray("parameters");
+    if (sk && params && params->length() >= 142) {
+      for (int sIdx = 0; sIdx < sk->length(); ++sIdx) {
+        int v = sk->optInt(sIdx);
+        if (isZiruSkillId(v)) {
+          int pIdx = kZiruSkillParameters[v];
+          if (pIdx >= 0 && pIdx < params->length()) params->put(pIdx, 1);
+        }
+      }
+    }
     if (params && params->length() >= 70 && ps && ps->length() > 0) {
       int st1 = ps->optInt(0, 0);
       int pos = params->optInt(0, 0);

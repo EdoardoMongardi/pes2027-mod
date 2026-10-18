@@ -122,6 +122,7 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     applyZiruPositionTrainingResponse(jo);
     applyZiruBoosterTrainingResponse(jo);
     applyZiruSkillTrainingResponse(jo);
+    z27InjectTrainingItems(jo);
   }
   if (jo && resumesSave) filterZiruSoldPlayersFromLogin(jo);
   if (jo && resumesSave) applyZiruSquadStateToLogin(jo);

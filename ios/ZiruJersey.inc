@@ -6,15 +6,17 @@ using ReadyFn = bool (*)(void*);
 using DrawFn = void (*)(void*, void*);
 struct NativeString { char16_t* data; int32_t num; int32_t max; };
 using AssetFn = void (*)(void*, NativeString*, bool);
+using SetUniformNumberFn = void (*)(void* actor, int uniformNumber);
 using SetupFromPlayerIdFn = void (*)(void* actor, int64_t playerId, void* path, int uniformIndex, void* uniName);
-using SetupBackNumberAndNameFn = void (*)(void* actor);
+using BackNumberStepFn = void (*)(void* actor);
 
 static LoadFn originalLoad;
 static ReadyFn originalReady;
 static DrawFn originalDraw;
 static AssetFn originalAsset;
+static SetUniformNumberFn originalSetUniformNumber;
 static SetupFromPlayerIdFn originalSetupFromPlayerId;
-static SetupBackNumberAndNameFn originalSetupBackNumberAndName;
+static BackNumberStepFn originalBackNumberStep;
 
 static std::mutex mutex;
 static std::set<void*> retried, recorded;
@@ -78,36 +80,118 @@ static void draw(void* actor, void* canvas) {
   originalDraw(actor, canvas);
 }
 
-static void setActorShirtName(void* actor, int64_t playerId, intptr_t slide) {
-  if (!actor || playerId <= 0) return;
+static std::string lookupShirtName(void* actor, int uniformNumber) {
+  if (uniformNumber <= 0 || uniformNumber > 99) return "";
 
-  const char* pName = nullptr;
-  auto getMgr = (void* (*)())(0x104bba084 + slide);
-  auto findRec = (void* (*)(void*, int, int64_t))(0x104b9588c + slide);
-  auto getName = (const char* (*)(void*))(0x104bc2460 + slide);
-  auto setShirt = (void (*)(void*, const char*))(0x10090ef34 + slide);
-
+  auto getMgr = (void* (*)())(0x104bba084 + gSlide);
   void* mgr = getMgr ? getMgr() : nullptr;
-  if (mgr) {
-    void* db = *(void**)((uint8_t*)mgr + 0x40);
-    if (db && findRec && getName) {
-      void* rec = findRec(db, 0, playerId);
-      if (rec) pName = getName(rec);
-    }
+  if (!mgr) return "";
+
+  uint8_t* base = *(uint8_t**)((uint8_t*)mgr + 0x48);
+  if (!base) return "";
+
+  uint8_t* match = base + 0x6c4c0;
+  int32_t actorTeamId = actor ? *(int32_t*)((uint8_t*)actor + 0xe10) : -1;
+
+  uint32_t homeTeamId = *(uint32_t*)(match + 0x620);
+  uint32_t awayTeamId = *(uint32_t*)(match + 0x620 + 0x5d8);
+
+  int preferredSide = -1;
+  if (actorTeamId > 0) {
+    if ((uint32_t)actorTeamId == homeTeamId) preferredSide = 0;
+    else if ((uint32_t)actorTeamId == awayTeamId) preferredSide = 1;
   }
 
-  if (pName && pName[0] && setShirt) {
-    std::string upper;
-    for (const char* p = pName; *p; ++p) upper += (char)toupper((unsigned char)*p);
-    setShirt(actor, upper.c_str());
-    *(uint8_t*)((uint8_t*)actor + 0xf10) = 1; // enable uniform name drawing flag
-    ZLog(@"[JERSEY] Set shirt name for player %lld -> '%s'", (long long)playerId, upper.c_str());
-
-    void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
-    if (nameTexActor) {
-      auto setNameFn = (void (*)(void*, void*))(0x100851098 + slide);
-      if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
+  auto checkSide = [&](int side) -> std::string {
+    if (side < 0 || side > 1) return "";
+    uint8_t* teamPlayers = match + 0x14e0 + (side * 0x5dc0);
+    for (int i = 0; i < 40; ++i) {
+      uint8_t* p = teamPlayers + (i * 0x258);
+      uint16_t num = *(uint16_t*)(p + 0x1ec);
+      if (num == (uint16_t)uniformNumber) {
+        const char* name = nullptr;
+        if (*(uint8_t*)(p + 0x19b) & 0x80) {
+          name = (const char*)(p + 0xc6);
+        }
+        if (!name || !name[0]) {
+          name = (const char*)(p + 0x89);
+        }
+        if (name && name[0]) {
+          std::string upper;
+          for (const char* ptr = name; *ptr; ++ptr) {
+            upper += (char)toupper((unsigned char)*ptr);
+          }
+          return upper;
+        }
+      }
     }
+    return "";
+  };
+
+  if (preferredSide >= 0) {
+    std::string res = checkSide(preferredSide);
+    if (!res.empty()) return res;
+  }
+  std::string res = checkSide(0);
+  if (!res.empty()) return res;
+  return checkSide(1);
+}
+
+static std::string lookupShirtNameByPlayerId(int64_t playerId) {
+  if (playerId <= 0) return "";
+  auto getMgr = (void* (*)())(0x104bba084 + gSlide);
+  void* mgr = getMgr ? getMgr() : nullptr;
+  if (!mgr) return "";
+  uint8_t* base = *(uint8_t**)((uint8_t*)mgr + 0x48);
+  if (!base) return "";
+  uint8_t* match = base + 0x6c4c0;
+  uint32_t targetBaseId = (uint32_t)(playerId & 0xFFFFFF);
+
+  for (int side = 0; side <= 1; ++side) {
+    uint8_t* teamPlayers = match + 0x14e0 + (side * 0x5dc0);
+    for (int i = 0; i < 40; ++i) {
+      uint8_t* p = teamPlayers + (i * 0x258);
+      uint32_t baseId = *(uint32_t*)(p + 0x38);
+      if (baseId == targetBaseId) {
+        const char* name = nullptr;
+        if (*(uint8_t*)(p + 0x19b) & 0x80) name = (const char*)(p + 0xc6);
+        if (!name || !name[0]) name = (const char*)(p + 0x89);
+        if (name && name[0]) {
+          std::string upper;
+          for (const char* ptr = name; *ptr; ++ptr) upper += (char)toupper((unsigned char)*ptr);
+          return upper;
+        }
+      }
+    }
+  }
+  return "";
+}
+
+static void applyActorShirtName(void* actor, const std::string& name) {
+  if (!actor || name.empty()) return;
+  auto setShirt = (void (*)(void*, const char*))(0x10090ef34 + gSlide);
+  if (setShirt) {
+    setShirt(actor, name.c_str());
+  }
+  *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
+
+  void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
+  if (nameTexActor) {
+    auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
+    if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
+  }
+}
+
+static void hookedSetUniformNumber(void* actor, int uniformNumber) {
+  if (originalSetUniformNumber) {
+    originalSetUniformNumber(actor, uniformNumber);
+  }
+  if (!actor || uniformNumber <= 0) return;
+  std::string name = lookupShirtName(actor, uniformNumber);
+  if (!name.empty()) {
+    applyActorShirtName(actor, name);
+    ZLog(@"[JERSEY] SetUniformNumber #%d (team %d) -> '%s'", uniformNumber,
+        *(int32_t*)((uint8_t*)actor + 0xe10), name.c_str());
   }
 }
 
@@ -115,23 +199,46 @@ static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, i
   if (originalSetupFromPlayerId) {
     originalSetupFromPlayerId(actor, playerId, path, uniformIndex, uniName);
   }
-  setActorShirtName(actor, playerId, gSlide);
+  if (!actor) return;
+  int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
+  std::string name;
+  if (num > 0) name = lookupShirtName(actor, num);
+  if (name.empty() && playerId > 0) name = lookupShirtNameByPlayerId(playerId);
+  if (!name.empty()) {
+    applyActorShirtName(actor, name);
+    ZLog(@"[JERSEY] SetupFromPlayerId pid=%lld num=%d -> '%s'", (long long)playerId, num, name.c_str());
+  }
 }
 
-static void hookedSetupBackNumberAndName(void* actor) {
-  if (originalSetupBackNumberAndName) {
-    originalSetupBackNumberAndName(actor);
-  }
-  if (!actor) return;
-  const uint8_t* s = (const uint8_t*)actor + 0x1710;
-  bool heap = (int8_t)s[23] < 0;
-  uint64_t length = heap ? ((const uint64_t*)s)[1] : s[23];
-  if (length > 0) {
-    void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
-    if (nameTexActor) {
-      auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
-      if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
+static void hookedBackNumberStep(void* actor) {
+  if (actor) {
+    int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
+    const uint8_t* s = (const uint8_t*)actor + 0x1710;
+    bool heap = (int8_t)s[23] < 0;
+    uint64_t len = heap ? ((const uint64_t*)s)[1] : (s[23] & 0x7f);
+    if (len == 0 && num > 0) {
+      std::string name = lookupShirtName(actor, num);
+      if (!name.empty()) {
+        applyActorShirtName(actor, name);
+      }
+    } else if (len > 0) {
+      *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
     }
+
+    void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
+    if (nameTexActor && len > 0) {
+      const uint8_t* ts = (const uint8_t*)nameTexActor + 0x278;
+      bool theap = (int8_t)ts[23] < 0;
+      uint64_t tlen = theap ? ((const uint64_t*)ts)[1] : (ts[23] & 0x7f);
+      if (tlen == 0) {
+        auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
+        if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
+      }
+    }
+  }
+
+  if (originalBackNumberStep) {
+    originalBackNumberStep(actor);
   }
 }
 
@@ -163,24 +270,39 @@ static void install() {
   vm_protect(mach_task_self(), page, length, false, VM_PROT_READ);
   ZLog(@"[JERSEY] native name atlas fallback and diagnostics installed");
 
-  const uintptr_t actorSlots[] = {0x106f2dd08, 0x106f2dd18};
-  const uintptr_t actorFuncs[] = {0x10089f3ec, 0x1008a02f0};
+  const uintptr_t actorSlots[] = {
+    0x105f286c0, 0x105f287a0, 0x105f28800,
+    0x105f29098, 0x105f29178, 0x105f291d8
+  };
+  const uintptr_t actorFuncs[] = {
+    0x10089f2e8, 0x1008a02f0, 0x10089f3ec,
+    0x10089f2e8, 0x1008a02f0, 0x10089f3ec
+  };
+
   bool actorVtableMatch = true;
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < 6; ++i) {
     if (*(uintptr_t*)(actorSlots[i] + slide) != actorFuncs[i] + slide) {
       actorVtableMatch = false; break;
     }
   }
   if (actorVtableMatch) {
     vm_address_t actorPage = (actorSlots[0] + slide) & ~(vm_address_t)(vm_page_size - 1);
-    vm_size_t actorLength = ((actorSlots[1] + slide + 8 - actorPage + vm_page_size - 1) & ~(vm_page_size - 1));
+    vm_size_t actorLength = ((actorSlots[5] + slide + 8 - actorPage + vm_page_size - 1) & ~(vm_page_size - 1));
     if (vm_protect(mach_task_self(), actorPage, actorLength, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS) {
-      originalSetupBackNumberAndName = (SetupBackNumberAndNameFn)*(uintptr_t*)(actorSlots[0] + slide);
+      originalSetUniformNumber = (SetUniformNumberFn)*(uintptr_t*)(actorSlots[0] + slide);
       originalSetupFromPlayerId = (SetupFromPlayerIdFn)*(uintptr_t*)(actorSlots[1] + slide);
-      *(uintptr_t*)(actorSlots[0] + slide) = (uintptr_t)hookedSetupBackNumberAndName;
+      originalBackNumberStep = (BackNumberStepFn)*(uintptr_t*)(actorSlots[2] + slide);
+
+      *(uintptr_t*)(actorSlots[0] + slide) = (uintptr_t)hookedSetUniformNumber;
       *(uintptr_t*)(actorSlots[1] + slide) = (uintptr_t)hookedSetupFromPlayerId;
+      *(uintptr_t*)(actorSlots[2] + slide) = (uintptr_t)hookedBackNumberStep;
+
+      *(uintptr_t*)(actorSlots[3] + slide) = (uintptr_t)hookedSetUniformNumber;
+      *(uintptr_t*)(actorSlots[4] + slide) = (uintptr_t)hookedSetupFromPlayerId;
+      *(uintptr_t*)(actorSlots[5] + slide) = (uintptr_t)hookedBackNumberStep;
+
       vm_protect(mach_task_self(), actorPage, actorLength, false, VM_PROT_READ);
-      ZLog(@"[JERSEY] player actor shirt name hooks installed successfully");
+      ZLog(@"[JERSEY] player actor shirt name hooks installed successfully for Mobile and MobileHigh");
     } else {
       ZLog(@"[JERSEY] vm_protect failed for player actor vtable");
     }
