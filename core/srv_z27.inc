@@ -38,7 +38,7 @@ ObjP z27Team(int32_t id) {
   if (id == 262143) {
     ObjP syn = newObj()
         ->put("base_team_id", 262143)
-        ->put("base_team_license", "UNKNOWN")
+        ->put("base_team_license", "LICENSED")
         ->put("team_name", "PES Team")
         ->put("team_name_short", "PES");
     ArrP kits = newArr();
@@ -65,7 +65,7 @@ ObjP z27Team(int32_t id) {
   if (!t) {
     ObjP syn = newObj()
         ->put("base_team_id", lookup_id)
-        ->put("base_team_license", "UNKNOWN")
+        ->put("base_team_license", "LICENSED")
         ->put("team_name", "PES Team")
         ->put("team_name_short", "PES");
     ArrP kits = newArr();
@@ -75,15 +75,15 @@ ObjP z27Team(int32_t id) {
     return syn;
   }
   ObjP copy = z27Copy(t);
-  // Keep the ID/license of the actual supported team. Relabelling a fallback
-  // team, or forcing LICENSED, selects kit/emblem assets that may not exist.
   return copy;
 }
 
 ObjP z27Identity(const ObjP& t) {
+  std::string lic = nn(t)->optString("base_team_license", "LICENSED");
+  if (lic.empty() || lic == "UNKNOWN") lic = "LICENSED";
   return newObj()
       ->put("base_team_id", nn(t)->getInt("base_team_id"))
-      ->put("base_team_license", t->optString("base_team_license", "UNKNOWN"))
+      ->put("base_team_license", lic)
       ->put("team_name", t->getString("team_name"))
       ->put("team_name_short", t->getString("team_name_short"));
 }

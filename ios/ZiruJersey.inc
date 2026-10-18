@@ -83,67 +83,91 @@ static void draw(void* actor, void* canvas) {
 extern "C" int32_t gZiruHomeTeamId;
 extern "C" int32_t gZiruAwayTeamId;
 
-static std::string sanitizeShirtName(const char* s) {
-  if (!s || !s[0]) return "";
+static std::string toTitleCase(const std::string& input) {
+  if (input.empty()) return "";
   std::string out;
-  out.reserve(24);
-  for (size_t i = 0; s[i] != '\0' && out.size() < 24; ++i) {
-    unsigned char c = (unsigned char)s[i];
-    if (c >= 'a' && c <= 'z') {
-      out += (char)(c - 'a' + 'A');
-    } else if (c >= 'A' && c <= 'Z') {
+  out.reserve(input.size());
+  bool newWord = true;
+  for (size_t i = 0; i < input.size(); ++i) {
+    unsigned char c = (unsigned char)input[i];
+    if (c == ' ' || c == '.' || c == '-' || c == '\'') {
       out += (char)c;
-    } else if (c == ' ' || c == '.' || c == '-' || c == '\'') {
-      out += (char)c;
-    } else if (c == 0xC3 && s[i + 1] != '\0') {
-      unsigned char c2 = (unsigned char)s[++i];
-      if ((c2 >= 0x80 && c2 <= 0x85) || (c2 >= 0xA0 && c2 <= 0xA5)) out += 'A';
-      else if (c2 == 0x87 || c2 == 0xA7) out += 'C';
-      else if ((c2 >= 0x88 && c2 <= 0x8B) || (c2 >= 0xA8 && c2 <= 0xAB)) out += 'E';
-      else if ((c2 >= 0x8C && c2 <= 0x8F) || (c2 >= 0xAC && c2 <= 0xAF)) out += 'I';
-      else if (c2 == 0x91 || c2 == 0xB1) out += 'N';
-      else if ((c2 >= 0x92 && c2 <= 0x96) || c2 == 0x98 || (c2 >= 0xB2 && c2 <= 0xB6) || c2 == 0xB8) out += 'O';
-      else if ((c2 >= 0x99 && c2 <= 0x9C) || (c2 >= 0xB9 && c2 <= 0xBC)) out += 'U';
+      newWord = true;
+    } else {
+      if (newWord) {
+        if (c >= 'a' && c <= 'z') out += (char)(c - 'a' + 'A');
+        else out += (char)c;
+        newWord = false;
+      } else {
+        if (c >= 'A' && c <= 'Z') out += (char)(c - 'A' + 'a');
+        else out += (char)c;
+      }
     }
   }
-  while (!out.empty() && out.front() == ' ') out.erase(out.begin());
-  while (!out.empty() && out.back() == ' ') out.pop_back();
-  return (out.size() >= 1 && out.size() <= 24) ? out : "";
+  return out;
+}
+
+static std::string sanitizeShirtName(const char* s) {
+  if (!s || !s[0]) return "";
+  std::string raw;
+  raw.reserve(24);
+  for (size_t i = 0; s[i] != '\0' && raw.size() < 24; ++i) {
+    unsigned char c = (unsigned char)s[i];
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == ' ' || c == '.' || c == '-' || c == '\'') {
+      raw += (char)c;
+    } else if (c == 0xC3 && s[i + 1] != '\0') {
+      unsigned char c2 = (unsigned char)s[++i];
+      if ((c2 >= 0x80 && c2 <= 0x85) || (c2 >= 0xA0 && c2 <= 0xA5)) raw += 'A';
+      else if (c2 == 0x87 || c2 == 0xA7) raw += 'C';
+      else if ((c2 >= 0x88 && c2 <= 0x8B) || (c2 >= 0xA8 && c2 <= 0xAB)) raw += 'E';
+      else if ((c2 >= 0x8C && c2 <= 0x8F) || (c2 >= 0xAC && c2 <= 0xAF)) raw += 'I';
+      else if (c2 == 0x91 || c2 == 0xB1) raw += 'N';
+      else if ((c2 >= 0x92 && c2 <= 0x96) || c2 == 0x98 || (c2 >= 0xB2 && c2 <= 0xB6) || c2 == 0xB8) raw += 'O';
+      else if ((c2 >= 0x99 && c2 <= 0x9C) || (c2 >= 0xB9 && c2 <= 0xBC)) raw += 'U';
+    }
+  }
+  while (!raw.empty() && raw.front() == ' ') raw.erase(raw.begin());
+  while (!raw.empty() && raw.back() == ' ') raw.pop_back();
+  if (raw.empty() || raw.size() > 24) return "";
+  return toTitleCase(raw);
 }
 
 static std::string fallbackPlayerName(uint32_t baseId) {
   static const std::unordered_map<uint32_t, const char*> sMap = {
-    {133580, "HAALAND"}, {38555, "MESSI"}, {7511, "C. RONALDO"}, {40352, "NEYMAR JR"},
-    {110718, "MBAPPE"}, {44379, "DE BRUYNE"}, {138036, "BELLINGHAM"}, {117047, "VINI JR."},
-    {109005, "RODRI"}, {45260, "SALAH"}, {40571, "LEWANDOWSKI"}, {47287, "KANE"},
-    {45023, "SON"}, {32664, "MODRIC"}, {36770, "KROOS"}, {33702, "BENZEMA"},
-    {36769, "SUAREZ"}, {42641, "GRIEZMANN"}, {131976, "SAKA"}, {118007, "FODEN"},
-    {141673, "MUSIALA"}, {138384, "PEDRI"}, {145952, "GAVI"}, {167375, "LAMINE YAMAL"},
-    {42668, "COURTOIS"}, {60512, "ALISSON"}, {103380, "EDERSON"}, {33145, "NEUER"},
-    {45843, "VAN DIJK"}, {113351, "RUBEN"}, {126955, "SALIBA"}, {118073, "DAVIES"},
-    {111451, "A. ARNOLD"}, {41103, "WALKER"}, {109265, "KIMMICH"}, {118485, "RICE"},
-    {133465, "CAMAVINGA"}, {113408, "VALVERDE"}, {101057, "BERNARDO"}, {60587, "BRUNO F."},
-    {110638, "RASHFORD"}, {118334, "LAUTARO"}, {117765, "OSIMHEN"}, {126280, "LEAO"},
-    {140321, "KVARATSKHELIA"}, {109867, "BARELLA"}, {118047, "BASTONI"}, {113405, "T. HERNANDEZ"},
-    {103445, "DIMARCO"}, {47000, "DYBALA"}, {44378, "MORATA"}, {120281, "ENZO"},
-    {134907, "MAC ALLISTER"}, {127179, "JULIAN ALVAREZ"}, {108919, "R. DIAS"}, {100780, "CASEMIRO"},
-    {100688, "MARQUINHOS"}, {46845, "GABRIEL JESUS"}, {45129, "DE GEA"}, {41571, "TER STEGEN"},
-    {100236, "ODEGAARD"}, {114878, "GABRIEL"}, {4522, "INIESTA"}, {1082, "XAVI"},
-    {2439, "PUYOL"}, {133543, "ZION SUZUKI"}, {134639, "CANNAVARO"}, {35496, "MERTESACKER"},
-    {134594, "BONUCCI"}, {134632, "SUPHANAN"}, {137955, "JUN"}, {129961, "TOMIYASU"},
-    {44840, "JORGINHO"}, {30210, "PARTEY"}, {137957, "TROSSARD"}, {110815, "HAVERTZ"},
-    {107686, "MARTINELLI"}, {124266, "ZINCHENKO"}, {132933, "RAYA"}, {983, "BECKHAM"},
-    {33185, "PIRLO"}, {134670, "MALDINI"}, {134701, "NEDVED"}, {34691, "NEDVED"},
-    {45735, "MANE"}, {126343, "RODRYGO"}, {3214, "RONALDINHO"}, {15676, "KAKA"},
-    {3000, "ZIDANE"}, {41066, "R. CARLOS"}, {3279, "CASILLAS"}, {3843, "BUFFON"},
-    {3234, "SHEVCHENKO"}, {3334, "FIGO"}, {15886, "GULLIT"}, {16369, "VAN BASTEN"},
-    {16368, "RIJKAARD"}, {136270, "WIRTZ"}, {133668, "PALMER"}, {143093, "MAINOO"},
-    {137965, "GARNACHO"}, {137889, "A. GULER"}, {145953, "ENDRICK"}, {136368, "VAN DE VEN"},
-    {105809, "CALHANOGLU"}, {42647, "LUKAKU"}
+    {133580, "Haaland"}, {38555, "Messi"}, {7511, "C. Ronaldo"}, {40352, "Neymar Jr"},
+    {110718, "Mbappe"}, {44379, "De Bruyne"}, {138036, "Bellingham"}, {117047, "Vini Jr."},
+    {109005, "Rodri"}, {45260, "Salah"}, {40571, "Lewandowski"}, {47287, "Kane"},
+    {45023, "Son"}, {32664, "Modric"}, {36770, "Kroos"}, {33702, "Benzema"},
+    {36769, "Suarez"}, {42641, "Griezmann"}, {131976, "Saka"}, {118007, "Foden"},
+    {141673, "Musiala"}, {138384, "Pedri"}, {145952, "Gavi"}, {167375, "Lamine Yamal"},
+    {42668, "Courtois"}, {60512, "Alisson"}, {103380, "Ederson"}, {33145, "Neuer"},
+    {45843, "Van Dijk"}, {113351, "Ruben"}, {126955, "Saliba"}, {118073, "Davies"},
+    {111451, "A. Arnold"}, {41103, "Walker"}, {109265, "Kimmich"}, {118485, "Rice"},
+    {133465, "Camavinga"}, {113408, "Valverde"}, {101057, "Bernardo"}, {60587, "Bruno F."},
+    {110638, "Rashford"}, {118334, "Lautaro"}, {117765, "Osimhen"}, {126280, "Leao"},
+    {140321, "Kvaratskhelia"}, {109867, "Barella"}, {118047, "Bastoni"}, {113405, "T. Hernandez"},
+    {103445, "Dimarco"}, {47000, "Dybala"}, {44378, "Morata"}, {120281, "Enzo"},
+    {134907, "Mac Allister"}, {127179, "Julian Alvarez"}, {108919, "R. Dias"}, {100780, "Casemiro"},
+    {100688, "Marquinhos"}, {46845, "Gabriel Jesus"}, {45129, "De Gea"}, {41571, "Ter Stegen"},
+    {100236, "Odegaard"}, {114878, "Gabriel"}, {4522, "Iniesta"}, {1082, "Xavi"},
+    {2439, "Puyol"}, {133543, "Zion Suzuki"}, {134639, "Cannavaro"}, {35496, "Mertesacker"},
+    {134594, "Bonucci"}, {134632, "Suphanan"}, {137955, "Jun"}, {129961, "Tomiyasu"},
+    {44840, "Jorginho"}, {30210, "Partey"}, {137957, "Trossard"}, {110815, "Havertz"},
+    {107686, "Martinelli"}, {124266, "Zinchenko"}, {132933, "Raya"}, {983, "Beckham"},
+    {33185, "Pirlo"}, {134670, "Maldini"}, {134701, "Nedved"}, {34691, "Nedved"},
+    {45735, "Mane"}, {126343, "Rodrygo"}, {3214, "Ronaldinho"}, {15676, "Kaka"},
+    {3000, "Zidane"}, {41066, "R. Carlos"}, {3279, "Casillas"}, {3843, "Buffon"},
+    {3234, "Shevchenko"}, {3334, "Figo"}, {15886, "Gullit"}, {16369, "Van Basten"},
+    {16368, "Rijkaard"}, {136270, "Wirtz"}, {133668, "Palmer"}, {143093, "Mainoo"},
+    {137965, "Garnacho"}, {137889, "A. Guler"}, {145953, "Endrick"}, {136368, "Van De Ven"},
+    {105809, "Calhanoglu"}, {42647, "Lukaku"}
   };
   auto it = sMap.find(baseId);
   return (it != sMap.end()) ? it->second : "";
 }
+
+static std::mutex sActorLock;
+static std::unordered_map<void*, int64_t> sActorPlayerId;
 
 static std::string lookupShirtName(void* actor, int uniformNumber) {
   if (uniformNumber <= 0 || uniformNumber > 99) return "";
@@ -165,8 +189,8 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
 
   int preferredSide = -1;
   if (actorTeamId > 0) {
-    if ((uint32_t)actorTeamId == homeTeamId) preferredSide = 0;
-    else if ((uint32_t)actorTeamId == awayTeamId) preferredSide = 1;
+    if ((uint32_t)actorTeamId == homeTeamId) preferredSide = 1;
+    else if ((uint32_t)actorTeamId == awayTeamId) preferredSide = 0;
   }
 
   auto checkSide = [&](int side) -> std::string {
@@ -189,9 +213,9 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   if (preferredSide >= 0) {
     return checkSide(preferredSide);
   }
-  std::string res = checkSide(0);
+  std::string res = checkSide(1);
   if (!res.empty()) return res;
-  return checkSide(1);
+  return checkSide(0);
 }
 
 static std::string lookupShirtNameByPlayerId(int64_t playerId) {
@@ -243,16 +267,22 @@ static void hookedSetUniformNumber(void* actor, int uniformNumber) {
     originalSetUniformNumber(actor, uniformNumber);
   }
   if (!actor || uniformNumber <= 0) return;
-  std::string name = lookupShirtName(actor, uniformNumber);
-  if (name.empty()) {
-    int64_t pid = *(int64_t*)((uint8_t*)actor + 0x1700);
-    if (pid <= 0) pid = *(int32_t*)((uint8_t*)actor + 0x1708);
-    name = lookupShirtNameByPlayerId(pid);
+  int64_t pid = 0;
+  {
+    std::lock_guard<std::mutex> lk(sActorLock);
+    auto it = sActorPlayerId.find(actor);
+    if (it != sActorPlayerId.end()) pid = it->second;
   }
+  if (pid <= 0) {
+    pid = *(int64_t*)((uint8_t*)actor + 0x1700);
+    if (pid <= 0) pid = *(int32_t*)((uint8_t*)actor + 0x1708);
+  }
+  std::string name;
+  if (pid > 0) name = lookupShirtNameByPlayerId(pid);
+  if (name.empty()) name = lookupShirtName(actor, uniformNumber);
   if (!name.empty()) {
     applyActorShirtName(actor, name);
-    ZLog(@"[JERSEY] SetUniformNumber #%d (team %d) -> '%s'", uniformNumber,
-        *(int32_t*)((uint8_t*)actor + 0xe10), name.c_str());
+    ZLog(@"[JERSEY] SetUniformNumber #%d -> '%s'", uniformNumber, name.c_str());
   }
 }
 
@@ -261,13 +291,19 @@ static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, i
     originalSetupFromPlayerId(actor, playerId, path, uniformIndex, uniName);
   }
   if (!actor) return;
-  int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
+  {
+    std::lock_guard<std::mutex> lk(sActorLock);
+    sActorPlayerId[actor] = playerId;
+  }
   std::string name;
-  if (num > 0) name = lookupShirtName(actor, num);
-  if (name.empty() && playerId > 0) name = lookupShirtNameByPlayerId(playerId);
+  if (playerId > 0) name = lookupShirtNameByPlayerId(playerId);
+  if (name.empty()) {
+    int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
+    if (num > 0) name = lookupShirtName(actor, num);
+  }
   if (!name.empty()) {
     applyActorShirtName(actor, name);
-    ZLog(@"[JERSEY] SetupFromPlayerId pid=%lld num=%d -> '%s'", (long long)playerId, num, name.c_str());
+    ZLog(@"[JERSEY] SetupFromPlayerId pid=%lld -> '%s'", (long long)playerId, name.c_str());
   }
 }
 
@@ -278,12 +314,19 @@ static void hookedBackNumberStep(void* actor) {
     bool heap = (int8_t)s[23] < 0;
     uint64_t len = heap ? ((const uint64_t*)s)[1] : (s[23] & 0x7f);
     if (len == 0 && num > 0) {
-      std::string name = lookupShirtName(actor, num);
-      if (name.empty()) {
-        int64_t pid = *(int64_t*)((uint8_t*)actor + 0x1700);
-        if (pid <= 0) pid = *(int32_t*)((uint8_t*)actor + 0x1708);
-        name = lookupShirtNameByPlayerId(pid);
+      int64_t pid = 0;
+      {
+        std::lock_guard<std::mutex> lk(sActorLock);
+        auto it = sActorPlayerId.find(actor);
+        if (it != sActorPlayerId.end()) pid = it->second;
       }
+      if (pid <= 0) {
+        pid = *(int64_t*)((uint8_t*)actor + 0x1700);
+        if (pid <= 0) pid = *(int32_t*)((uint8_t*)actor + 0x1708);
+      }
+      std::string name;
+      if (pid > 0) name = lookupShirtNameByPlayerId(pid);
+      if (name.empty()) name = lookupShirtName(actor, num);
       if (!name.empty()) {
         applyActorShirtName(actor, name);
       }

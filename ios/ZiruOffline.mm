@@ -1100,8 +1100,14 @@ static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
   BOOL isDir = NO;
   if ([fm fileExistsAtPath:linkPath isDirectory:&isDir]) {
     if (!isDir && curDest == nil) {
-      ZLog(@"[DATA_PRESERVE] keeping existing file %@", linkPath.lastPathComponent);
-      return;
+      NSDictionary* attrs = [fm attributesOfItemAtPath:linkPath error:nil];
+      unsigned long long sz = [attrs fileSize];
+      if (sz > 1024) {
+        ZLog(@"[DATA_PRESERVE] keeping existing file %@", linkPath.lastPathComponent);
+        return;
+      }
+      // Remove tiny dummy/stub files (<= 1024 bytes) so real symlinks can take over
+      [fm removeItemAtPath:linkPath error:nil];
     }
     if (isDir && curDest == nil) {
       NSArray* contents = [fm contentsOfDirectoryAtPath:linkPath error:nil];
