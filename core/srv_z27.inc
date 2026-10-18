@@ -832,9 +832,22 @@ ObjP z27Player(const ObjP& gid) {
     while (true) {
       if (i >= list->length()) {
         ObjP w = getZiruPlayerWrapper(Value((long long)gid->getLong("id")), false);
-        if (!w) throw IllegalState("Missing HOME player " + gid->toString());
-        p = z27Copy(w->getJSONObject("gameplayer"));
-        p->put("gameplayer_id", z27Copy(gid));
+        if (!w) w = getZiruPlayerWrapperByBaseId((int32_t)(gid->getLong("id") & 0xFFFFFF));
+        if (w && w->optJSONObject("gameplayer")) {
+          p = z27Copy(w->getJSONObject("gameplayer"));
+          p->put("gameplayer_id", z27Copy(gid));
+          break;
+        }
+        for (int j = 0; j < list->length(); ++j) {
+          ObjP cand = list->getJSONObject(j);
+          if (cand && cand->optJSONObject("gameplayer_id") &&
+              cand->getJSONObject("gameplayer_id")->getLong("id") == gid->getLong("id")) {
+            p = z27Copy(cand);
+            break;
+          }
+        }
+        if (!p && list->length() > 0) p = z27Copy(list->getJSONObject(0));
+        if (p) p->put("gameplayer_id", z27Copy(gid));
         break;
       }
       p = list->getJSONObject(i);
@@ -854,14 +867,22 @@ ObjP z27Player(const ObjP& gid) {
   applyZiruWeakFootFix(p);
   p = ziruSyncActiveBooster(p);
 
-  // Always restore base skills from template catalog
+  // Always restore base skills from template catalog and original_parameters
   ObjP w = getZiruPlayerWrapper(Value((long long)pid), false);
   if (!w) w = getZiruPlayerWrapperByBaseId(bid);
   ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
+  ArrP origParams = p->optJSONArray("original_parameters");
   ArrP params = p->optJSONArray("parameters");
-  if (baseParams && params && baseParams->length() >= 142 && params->length() >= 142) {
-    for (int idx = 70; idx <= 141; idx++) {
-      if (baseParams->optInt(idx, 0) == 1) params->put(idx, 1);
+  if (params && params->length() >= 142) {
+    if (baseParams && baseParams->length() >= 142) {
+      for (int idx = 70; idx <= 141; idx++) {
+        if (baseParams->optInt(idx, 0) == 1) params->put(idx, 1);
+      }
+    }
+    if (origParams && origParams->length() >= 142) {
+      for (int idx = 70; idx <= 141; idx++) {
+        if (origParams->optInt(idx, 0) == 1) params->put(idx, 1);
+      }
     }
   }
 

@@ -660,11 +660,18 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     ObjP w = getZiruPlayerWrapper(Value((long long)pid), false);
     if (!w) w = getZiruPlayerWrapperByBaseId(bid);
     ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
+    ArrP origParams = owned->optJSONArray("original_parameters");
     ArrP params = owned->optJSONArray("parameters");
     if (params && params->length() >= 142) {
-      for (int idx = 70; idx <= 141; ++idx) {
-        int bVal = (baseParams && idx < baseParams->length()) ? baseParams->optInt(idx, 0) : 0;
-        params->put(idx, bVal);
+      if (baseParams && baseParams->length() >= 142) {
+        for (int idx = 70; idx <= 141; ++idx) {
+          if (baseParams->optInt(idx, 0) == 1) params->put(idx, 1);
+        }
+      }
+      if (origParams && origParams->length() >= 142) {
+        for (int idx = 70; idx <= 141; ++idx) {
+          if (origParams->optInt(idx, 0) == 1) params->put(idx, 1);
+        }
       }
       for (int skillId : al) {
         if (isZiruSkillId(skillId)) {

@@ -83,6 +83,69 @@ static void draw(void* actor, void* canvas) {
 extern "C" int32_t gZiruHomeTeamId;
 extern "C" int32_t gZiruAwayTeamId;
 
+static bool isValidShirtName(const char* s) {
+  if (!s || !s[0]) return false;
+  int len = 0;
+  for (const unsigned char* p = (const unsigned char*)s; *p; ++p) {
+    if (*p < 32 || *p > 126) return false;
+    len++;
+  }
+  return len >= 1 && len <= 24;
+}
+
+static std::string sanitizeShirtName(const std::string& input) {
+  std::string out;
+  out.reserve(input.size());
+  for (size_t i = 0; i < input.size(); ++i) {
+    unsigned char c = (unsigned char)input[i];
+    if (c >= 'a' && c <= 'z') {
+      out += (char)(c - 'a' + 'A');
+    } else if (c >= 'A' && c <= 'Z') {
+      out += (char)c;
+    } else if (c == ' ' || c == '.' || c == '-' || c == '\'') {
+      out += (char)c;
+    } else if (c == 0xC3 && i + 1 < input.size()) {
+      unsigned char c2 = (unsigned char)input[++i];
+      if ((c2 >= 0x80 && c2 <= 0x85) || (c2 >= 0xA0 && c2 <= 0xA5)) out += 'A';
+      else if (c2 == 0x87 || c2 == 0xA7) out += 'C';
+      else if ((c2 >= 0x88 && c2 <= 0x8B) || (c2 >= 0xA8 && c2 <= 0xAB)) out += 'E';
+      else if ((c2 >= 0x8C && c2 <= 0x8F) || (c2 >= 0xAC && c2 <= 0xAF)) out += 'I';
+      else if (c2 == 0x91 || c2 == 0xB1) out += 'N';
+      else if ((c2 >= 0x92 && c2 <= 0x96) || c2 == 0x98 || (c2 >= 0xB2 && c2 <= 0xB6) || c2 == 0xB8) out += 'O';
+      else if ((c2 >= 0x99 && c2 <= 0x9C) || (c2 >= 0xB9 && c2 <= 0xBC)) out += 'U';
+    }
+  }
+  return out;
+}
+
+static std::string fallbackPlayerName(uint32_t baseId) {
+  static const std::unordered_map<uint32_t, const char*> sMap = {
+    {133580, "HAALAND"}, {38555, "MESSI"}, {7511, "C. RONALDO"}, {40352, "NEYMAR JR"},
+    {110718, "MBAPPE"}, {44379, "DE BRUYNE"}, {138036, "BELLINGHAM"}, {117047, "VINI JR."},
+    {109005, "RODRI"}, {45260, "SALAH"}, {40571, "LEWANDOWSKI"}, {47287, "KANE"},
+    {45023, "SON"}, {32664, "MODRIC"}, {36770, "KROOS"}, {33702, "BENZEMA"},
+    {36769, "SUAREZ"}, {42641, "GRIEZMANN"}, {131976, "SAKA"}, {118007, "FODEN"},
+    {141673, "MUSIALA"}, {138384, "PEDRI"}, {145952, "GAVI"}, {167375, "LAMINE YAMAL"},
+    {42668, "COURTOIS"}, {60512, "ALISSON"}, {103380, "EDERSON"}, {33145, "NEUER"},
+    {45843, "VAN DIJK"}, {113351, "RUBEN"}, {126955, "SALIBA"}, {118073, "DAVIES"},
+    {111451, "A. ARNOLD"}, {41103, "WALKER"}, {109265, "KIMMICH"}, {118485, "RICE"},
+    {133465, "CAMAVINGA"}, {113408, "VALVERDE"}, {101057, "BERNARDO"}, {60587, "BRUNO F."},
+    {110638, "RASHFORD"}, {118334, "LAUTARO"}, {117765, "OSIMHEN"}, {126280, "LEAO"},
+    {140321, "KVARATSKHELIA"}, {109867, "BARELLA"}, {118047, "BASTONI"}, {113405, "T. HERNANDEZ"},
+    {103445, "DIMARCO"}, {47000, "DYBALA"}, {44378, "MORATA"}, {120281, "ENZO"},
+    {134907, "MAC ALLISTER"}, {127179, "JULIAN ALVAREZ"}, {108919, "R. DIAS"}, {100780, "CASEMIRO"},
+    {100688, "MARQUINHOS"}, {46845, "GABRIEL JESUS"}, {45129, "DE GEA"}, {41571, "TER STEGEN"},
+    {100236, "ODEGAARD"}, {114878, "GABRIEL"}, {4522, "INIESTA"}, {1082, "XAVI"},
+    {2439, "PUYOL"}, {133543, "ZION SUZUKI"}, {134639, "CANNAVARO"}, {35496, "MERTESACKER"},
+    {134594, "BONUCCI"}, {134632, "SUPHANAN"}, {137955, "JUN"}, {129961, "TOMIYASU"},
+    {44840, "JORGINHO"}, {30210, "PARTEY"}, {137957, "TROSSARD"}, {110815, "HAVERTZ"},
+    {107686, "MARTINELLI"}, {124266, "ZINCHENKO"}, {132933, "RAYA"}, {983, "BECKHAM"},
+    {33185, "PIRLO"}, {134670, "MALDINI"}
+  };
+  auto it = sMap.find(baseId);
+  return (it != sMap.end()) ? it->second : "";
+}
+
 static std::string lookupShirtName(void* actor, int uniformNumber) {
   if (uniformNumber <= 0 || uniformNumber > 99) return "";
 
@@ -114,21 +177,22 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
       uint8_t* p = teamPlayers + (i * 0x258);
       uint16_t num = *(uint16_t*)(p + 0x1ec);
       if (num == (uint16_t)uniformNumber) {
+        uint32_t baseId = *(uint32_t*)(p + 0x38);
         const char* name = nullptr;
-        // In Konami GetNamePrint (0x104bc2a20):
-        // if ((*(uint8_t*)(p + 0x19b) & 0x80) == 0) -> +0xc6 is valid name!
-        if ((*(uint8_t*)(p + 0x19b) & 0x80) == 0) {
-          name = (const char*)(p + 0xc6);
-        }
-        if (!name || !name[0]) {
-          name = (const char*)(p + 0x89);
+        // Prioritize +0x89 (standard PES player ASCII shirt name)
+        const char* n89 = (const char*)(p + 0x89);
+        if (isValidShirtName(n89)) {
+          name = n89;
+        } else {
+          const char* nc6 = (const char*)(p + 0xc6);
+          if (isValidShirtName(nc6)) name = nc6;
         }
         if (name && name[0]) {
-          std::string upper;
-          for (const char* ptr = name; *ptr; ++ptr) {
-            upper += (char)toupper((unsigned char)*ptr);
-          }
-          return upper;
+          return sanitizeShirtName(name);
+        }
+        if (baseId > 0) {
+          std::string fb = fallbackPlayerName(baseId);
+          if (!fb.empty()) return fb;
         }
       }
     }
@@ -136,33 +200,11 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   };
 
   if (preferredSide >= 0) {
-    return checkSide(preferredSide); // CRITICAL: NEVER cross over to opposing team!
+    return checkSide(preferredSide);
   }
   std::string res = checkSide(0);
   if (!res.empty()) return res;
   return checkSide(1);
-}
-
-static std::string fallbackPlayerName(uint32_t baseId) {
-  static const std::unordered_map<uint32_t, const char*> sMap = {
-    {133580, "HAALAND"}, {38555, "MESSI"}, {7511, "C. RONALDO"}, {40352, "NEYMAR JR"},
-    {110718, "MBAPPE"}, {44379, "DE BRUYNE"}, {138036, "BELLINGHAM"}, {117047, "VINI JR."},
-    {109005, "RODRI"}, {45260, "SALAH"}, {40571, "LEWANDOWSKI"}, {47287, "KANE"},
-    {45023, "SON"}, {32664, "MODRIC"}, {36770, "KROOS"}, {33702, "BENZEMA"},
-    {36769, "SUAREZ"}, {42641, "GRIEZMANN"}, {131976, "SAKA"}, {118007, "FODEN"},
-    {141673, "MUSIALA"}, {138384, "PEDRI"}, {145952, "GAVI"}, {167375, "LAMINE YAMAL"},
-    {42668, "COURTOIS"}, {60512, "ALISSON"}, {103380, "EDERSON"}, {33145, "NEUER"},
-    {45843, "VAN DIJK"}, {113351, "RUBEN"}, {126955, "SALIBA"}, {118073, "DAVIES"},
-    {111451, "A. ARNOLD"}, {41103, "WALKER"}, {109265, "KIMMICH"}, {118485, "RICE"},
-    {133465, "CAMAVINGA"}, {113408, "VALVERDE"}, {101057, "BERNARDO"}, {60587, "BRUNO F."},
-    {110638, "RASHFORD"}, {118334, "LAUTARO"}, {117765, "OSIMHEN"}, {126280, "LEAO"},
-    {140321, "KVARATSKHELIA"}, {109867, "BARELLA"}, {118047, "BASTONI"}, {113405, "T. HERNANDEZ"},
-    {103445, "DIMARCO"}, {47000, "DYBALA"}, {44378, "MORATA"}, {120281, "ENZO"},
-    {134907, "MAC ALLISTER"}, {127179, "JULIAN ALVAREZ"}, {108919, "R. DIAS"}, {100780, "CASEMIRO"},
-    {100688, "MARQUINHOS"}, {46845, "GABRIEL JESUS"}, {45129, "DE GEA"}, {41571, "TER STEGEN"}
-  };
-  auto it = sMap.find(baseId);
-  return (it != sMap.end()) ? it->second : "";
 }
 
 static std::string lookupShirtNameByPlayerId(int64_t playerId) {
@@ -185,13 +227,14 @@ static std::string lookupShirtNameByPlayerId(int64_t playerId) {
       uint32_t baseId = *(uint32_t*)(p + 0x38);
       if (baseId == targetBaseId) {
         const char* name = nullptr;
-        if (*(uint8_t*)(p + 0x19b) & 0x80) name = (const char*)(p + 0xc6);
-        if (!name || !name[0]) name = (const char*)(p + 0x89);
-        if (name && name[0]) {
-          std::string upper;
-          for (const char* ptr = name; *ptr; ++ptr) upper += (char)toupper((unsigned char)*ptr);
-          return upper;
+        const char* n89 = (const char*)(p + 0x89);
+        if (isValidShirtName(n89)) {
+          name = n89;
+        } else {
+          const char* nc6 = (const char*)(p + 0xc6);
+          if (isValidShirtName(nc6)) name = nc6;
         }
+        if (name && name[0]) return sanitizeShirtName(name);
       }
     }
   }
@@ -205,6 +248,7 @@ static void applyActorShirtName(void* actor, const std::string& name) {
     setShirt(actor, name.c_str());
   }
   *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
+  *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
 
   void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
   if (nameTexActor) {
@@ -254,11 +298,17 @@ static void hookedBackNumberStep(void* actor) {
     uint64_t len = heap ? ((const uint64_t*)s)[1] : (s[23] & 0x7f);
     if (len == 0 && num > 0) {
       std::string name = lookupShirtName(actor, num);
+      if (name.empty()) {
+        int64_t pid = *(int64_t*)((uint8_t*)actor + 0x1700);
+        if (pid <= 0) pid = *(int32_t*)((uint8_t*)actor + 0x1708);
+        name = lookupShirtNameByPlayerId(pid);
+      }
       if (!name.empty()) {
         applyActorShirtName(actor, name);
       }
     } else if (len > 0) {
       *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
+      *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
     }
 
     void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
