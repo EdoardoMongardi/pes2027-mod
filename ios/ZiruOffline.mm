@@ -377,9 +377,6 @@ static int hook_remove(const char *path) {
 // ---------------------------------------------------------------- pak / cpk / Download file redirection
 static void resolveAltName(char* buffer, size_t bufSize) {
   if (access(buffer, F_OK) == 0) return;
-  // Stadium containers contain platform-specific materials/shaders. An Android
-  // container is never a valid fallback for a missing iOS container.
-  if (strstr(buffer, "pc3002_") || strstr(buffer, "pc3012_")) return;
   char alt[1024];
   strncpy(alt, buffer, sizeof(alt) - 1);
   alt[sizeof(alt) - 1] = '\0';
@@ -1085,12 +1082,6 @@ static void startGame();
 
 static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
   NSFileManager* fm = NSFileManager.defaultManager;
-  BOOL stadium = [linkPath.lastPathComponent hasPrefix:@"pc3002_"] || [linkPath.lastPathComponent hasPrefix:@"pc3012_"];
-  if (stadium && [linkPath containsString:@"_mobile_ios"] &&
-      [targetPath.stringByResolvingSymlinksInPath containsString:@"_mobile_and"]) {
-    ZLog(@"[STADIUM] Rejected Android alias for %@", linkPath.lastPathComponent);
-    return;
-  }
   if ([linkPath containsString:@"_mobile_ios"] && [targetPath containsString:@"_mobile_and"] &&
       [fm fileExistsAtPath:linkPath] && [linkPath.stringByResolvingSymlinksInPath containsString:@"_mobile_ios"]) return;
   if ([linkPath.stringByStandardizingPath isEqualToString:targetPath.stringByStandardizingPath]) return;
@@ -1316,18 +1307,6 @@ static BOOL checkDirectFolderData(NSString** why) {
   installBundledTableFixes(@[[gDocs stringByAppendingPathComponent:@"livedata"], cpkDir, dlDir]);
 
   // Old IPA versions created absolute Android aliases. Remove those links only;
-  // never remove a user's stadium container or commentary payload.
-  for (NSString* name in [fm contentsOfDirectoryAtPath:dlDir error:nil]) {
-    if (([name hasPrefix:@"pc3002_"] || [name hasPrefix:@"pc3012_"]) && [name containsString:@"_mobile_ios"]) {
-      NSString* path = [dlDir stringByAppendingPathComponent:name];
-      NSString* dest = [fm destinationOfSymbolicLinkAtPath:path error:nil];
-      if (dest && ([dest containsString:@"_mobile_and"] || ![fm fileExistsAtPath:path])) {
-        unlink(path.fileSystemRepresentation);
-        ZLog(@"[STADIUM] Removed obsolete alias %@", name);
-      }
-    }
-  }
-
   // If livedata is bundled in IPA (PESmobile.app/ziru/livedata), extract/link into Documents/livedata
   NSString* bundleLivedata = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru/livedata"];
   if ([fm fileExistsAtPath:bundleLivedata]) {
@@ -1389,11 +1368,12 @@ static BOOL checkDirectFolderData(NSString** why) {
       }
       // Stadium paks/ucas/utoc and version_stadium.bin must be in Download/ for AddStadiumDlTask
       if ([f containsString:@"pc3002"] || [f containsString:@"pc3012"] || [f containsString:@"stadium"]) {
-        // ONLY link native iOS stadium files! NEVER alias Android stadium files to iOS (breaks Apple Metal spectator shader)
-        if (![f containsString:@"_mobile_and"]) {
-          ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
-          ZLog(@"[STADIUM] Linked native iOS stadium mod file %@ to Download/", f);
+        ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
+        if ([f containsString:@"_mobile_and"]) {
+          NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
+          ensureSymlink([dlDir stringByAppendingPathComponent:iosName], target);
         }
+        ZLog(@"[STADIUM] Linked stadium mod file %@ to Download/", f);
         continue;
       }
       if ([f containsString:@"_mobile_and"]) {
@@ -1427,7 +1407,7 @@ static BOOL checkDirectFolderData(NSString** why) {
       NSString* src = [foundDl stringByAppendingPathComponent:f];
       NSString* dst = [dlDir stringByAppendingPathComponent:f];
       ensureSymlink(dst, src);
-      if ([f containsString:@"_mobile_and"] && ![f hasPrefix:@"pc3002_"] && ![f hasPrefix:@"pc3012_"]) {
+      if ([f containsString:@"_mobile_and"]) {
         NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
         ensureSymlink([dlDir stringByAppendingPathComponent:iosName], src);
       }
@@ -1436,7 +1416,7 @@ static BOOL checkDirectFolderData(NSString** why) {
 
   // Ensure every _mobile_and file in Download has a corresponding _mobile_ios symlink
   for (NSString* f in [fm contentsOfDirectoryAtPath:dlDir error:nil]) {
-    if ([f containsString:@"_mobile_and"] && ![f hasPrefix:@"pc3002_"] && ![f hasPrefix:@"pc3012_"]) {
+    if ([f containsString:@"_mobile_and"]) {
       NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
       NSString* dst = [dlDir stringByAppendingPathComponent:iosName];
       NSString* src = [dlDir stringByAppendingPathComponent:f];

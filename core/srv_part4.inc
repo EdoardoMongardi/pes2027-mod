@@ -161,6 +161,7 @@ Response handleZiruMyLeagueSpecialSquadV71() {
 Response handleZiruMyLeagueStartGameV71() {
   try {
     ObjP jo = loadZiruJsonAssetObject("responses/ZIRU_ML_START_GAME.json");
+    ObjP templateAiSquad = jo->optJSONObject("squad_data_home") ? z27Copy(jo->optJSONObject("squad_data_home")) : nullptr;
     patchZiruMyLeagueCommonState(jo);
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     if (req) {
@@ -261,21 +262,26 @@ Response handleZiruMyLeagueStartGameV71() {
     jo->put("uniform_list_home", hu);
     jo->put("uniform_list_away", au);
 
+    int aiTeam = userHome ? awayTeam : homeTeam;
+    ObjP aiSquad = templateAiSquad ? z27Copy(templateAiSquad) : z27Copy(jo->optJSONObject("squad_data_home"));
+    if (aiSquad) {
+      aiSquad->put("team_id", aiTeam);
+      aiSquad->put("base_team", newArr()->put(z27Team(aiTeam)));
+      ObjP aiCoach = aiSquad->optJSONObject("coach");
+      if (aiCoach) aiCoach->put("initial_base_team_id", aiTeam);
+    }
+    ObjP userSquad = jo->optJSONObject("squad_data_home");
+    if (userSquad) {
+      userSquad->put("team_id", userTeam);
+      userSquad->put("base_team", newArr()->put(z27Team(userTeam)));
+    }
+
     if (!userHome) {
-      ObjP userSquad = jo->optJSONObject("squad_data_home");
-      if (userSquad) {
-        userSquad->put("team_id", userTeam);
-        userSquad->put("base_team", newArr()->put(z27Team(userTeam)));
-        jo->put("squad_data_away", userSquad);
-        jo->put("squad_data_home", Value::null());
-      }
+      jo->put("squad_data_home", aiSquad ? aiSquad : Value::null());
+      jo->put("squad_data_away", userSquad ? userSquad : Value::null());
     } else {
-      ObjP sdh = jo->optJSONObject("squad_data_home");
-      if (sdh) {
-        sdh->put("team_id", userTeam);
-        sdh->put("base_team", newArr()->put(z27Team(userTeam)));
-      }
-      jo->put("squad_data_away", Value::null());
+      jo->put("squad_data_home", userSquad ? userSquad : Value::null());
+      jo->put("squad_data_away", aiSquad ? aiSquad : Value::null());
     }
     logRequest("ZIRU_ML_START", "fixture=" + str(f) + " home=" + str(homeTeam) + " away=" + str(awayTeam) + " userHome=" + str(userHome));
 

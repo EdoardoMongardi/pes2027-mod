@@ -242,7 +242,7 @@ static const char* routeAsset(const std::string& uri) {
       {"MAINMENU", "get_myclub_mainmenu_info.json"}, {"USER_DETAIL", "get_myclub_user_detail.json"}, {"ONLINE_MATCH", "get_online_match_info.json"},
       {"PATHTOGLORY", "get_pathtoglory_info.json"}, {"SEASON_INFO", "get_season_info.json"},
       {"RENTALPLAYER", "get_season_point_rentalplayer_list.json"}, {"STADIUM", "get_stadium_data.json"}, {"TEAM_LIST", "get_useable_team_list.json"},
-      {"EULA", "get_user_eula_info.json"}, {"AUCTIONLIST", "getauctionlist.json"}, {"ACHIEVEMENT", "set_myclubuser_achieveentlist.json"},
+      {"EULA", "get_user_eula_info.json"}, {"AUCTIONLIST", "getauctionlist.json"}, {"SET_MYCLUBUSER_ACHIEVEMENTLIST", "set_myclubuser_achieveentlist.json"},
       {"GET_MYCLUB_CONTRACT_INFO", "get_myclub_contract_info.json"}, {"START_GAME", "start_game.json"},
   };
   for (const R& r : first)
@@ -443,7 +443,27 @@ Response serveInner(Request& r) {
   traceZiruUserCompeV87(uri);
   auto zr = z27Route(uri);
   if (zr) return *zr;
-  if (isCmd("CMD_GET_MAINMENU_MATCH_CREATIVE_INFO")) return handleZiruMyLeagueMainmenuCreativeV78();
+  if (isCmd("CMD_RECV_MYCLUB_ACHIEVEMENT")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_RECV_MYCLUB_ACHIEVEMENT");
+    jo->put("achievement_item_info_list", newArr());
+    jo->put("receive_result_list", newArr());
+    jo->put("fame_receive_result_list", newArr());
+    jo->put("is_expired_item_included", "NO");
+    jo->put("fame_notification_list", newArr());
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
+  if (isCmd("CMD_GET_MYCLUB_ACHIEVEMENTLIST")) return handleZiruLeagueStatic("responses/CmdGetMyclubAchievementlist.json");
+  if (isCmd("CMD_PROGRESS_MYCLUB_ACHIEVEMENT")) return handleZiruProtocolAckV81("CMD_PROGRESS_MYCLUB_ACHIEVEMENT");
+  if (isCmd("CMD_SET_MYCLUB_ACHIEVEMENT")) return handleZiruProtocolAckV81("CMD_SET_MYCLUB_ACHIEVEMENT");
+  if (isCmd("CMD_GET_MAINMENU_MATCH_CREATIVE_INFO")) {
+    ziruMyLeagueSetActive(0);
+    return handleZiruMyLeagueMainmenuCreativeV78();
+  }
   if (isCmd("CMD_SET_SEASON_ENTER")) return handleZiruMyLeagueEnterV71();
   if (isCmd("CMD_GET_SEASON_INFO")) return handleZiruMyLeagueInfoV71();
   if (isCmd("CMD_GET_SEASON_SCHEDULE")) return handleZiruMyLeagueScheduleV74();

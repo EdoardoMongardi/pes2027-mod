@@ -107,6 +107,14 @@ PATCHES = [
 
     # Prevent AddStadiumDlTask crash at 0x1046fe0b4 on null interrupt size by branching directly to return success
     (0x1046FE0B0, 0xB4000060, 0x14000003, "AddStadiumDlTask::Bind: branch over null SetInterruptGameSize"),
+
+    # Enable player name printing on jersey back (APlayerActorMobile / APlayerActor)
+    (0x100895F50, 0x540008C1, 0xD503201F, "APlayerActorMobile::SetUniformName: b.ne -> nop"),
+    (0x10091141C, 0x36001A2A, 0xD503201F, "APlayerActor::SetUniformName: tbz -> nop"),
+    (0x100911450, 0x54001881, 0xD503201F, "APlayerActor::SetUniformName: b.ne -> nop"),
+
+    # Unlock selectable real stadiums in all match modes (Authentic, Exhibition, Tour, etc.)
+    (0x104892B08, 0x540003A1, 0xD503201F, "GetSelectableStadium: b.ne -> nop"),
 ]
 
 

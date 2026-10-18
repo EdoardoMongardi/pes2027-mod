@@ -919,7 +919,10 @@ Response z27Start() {
         ->put("squad_data_home", z27Copy(act->getJSONObject("home_squad")))
         ->put("uniform_list_home", z27Copy(act->getJSONObject("home_uniform")))
         ->put("uniform_list_away", z27Copy(act->getJSONObject("away_uniform")));
-    out->put("squad_data_away", Value::null());
+    ObjP opp = z27Opponent(act);
+    ObjP oppSquad = opp ? opp->optJSONObject("squad_data") : nullptr;
+    if (oppSquad) out->put("squad_data_away", z27Copy(oppSquad));
+    else out->put("squad_data_away", Value::null());
     ObjP ci = out->optJSONObject("commentary_info");
     if (ci) ci->put("pre_division", act->getInt("division"));
     logRequest("ZIRU_MATCH_START", "game=" + str(gid) + " squad=" + str(mainId) + " coach=" +

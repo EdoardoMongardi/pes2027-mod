@@ -83,11 +83,14 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
   auto restoreAppearance = [&](const ArrP& values) {
     if (!values || values->length() < 61) return;
     bool missing = true;
+    bool corrupt = false;
+    for (int i = 49; i <= 60; ++i) if (values->optInt(i, 0) == 99) corrupt = true;
     for (int i = 50; i <= 60; ++i) if (values->optInt(i, 0) != 0) missing = false;
+    if (corrupt) missing = true;
     auto preset = kAppearancePresets.find(base_id);
     bool presetValid = false;
     if (preset != kAppearancePresets.end()) {
-      for (int i = 0; i < 12; ++i) if (preset->second.v[i] != 0) presetValid = true;
+      for (int i = 0; i < 12; ++i) if (preset->second.v[i] != 0 && preset->second.v[i] != 99) presetValid = true;
     }
     if (missing && presetValid) {
       for (int i = 0; i < 12; ++i) values->put(49 + i, preset->second.v[i]);
