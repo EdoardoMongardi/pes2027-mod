@@ -63,9 +63,10 @@ ObjP z27Team(int32_t id) {
     }
   }
   if (!t) {
+    std::string lic = (lookup_id == 262143) ? "UNKNOWN" : "LICENSED";
     ObjP syn = newObj()
         ->put("base_team_id", lookup_id)
-        ->put("base_team_license", "UNKNOWN")
+        ->put("base_team_license", lic)
         ->put("team_name", "PES Team")
         ->put("team_name_short", "PES");
     ArrP kits = newArr();
@@ -79,9 +80,11 @@ ObjP z27Team(int32_t id) {
 }
 
 ObjP z27Identity(const ObjP& t) {
+  int32_t tid = nn(t)->getInt("base_team_id");
+  std::string lic = (tid == 262143) ? "UNKNOWN" : "LICENSED";
   return newObj()
-      ->put("base_team_id", nn(t)->getInt("base_team_id"))
-      ->put("base_team_license", t->optString("base_team_license", "UNKNOWN"))
+      ->put("base_team_id", tid)
+      ->put("base_team_license", lic)
       ->put("team_name", t->getString("team_name"))
       ->put("team_name_short", t->getString("team_name_short"));
 }
@@ -190,6 +193,32 @@ ObjP z27Entry() {
 
 int32_t z27Main() { return z27Int("main_squad_id", z27Entry()->getInt("main_squad_id")); }
 
+inline int64_t z27UpgradeIosCardPid(int64_t pid, int32_t teamId = 0) {
+  int32_t bid = (int32_t)(pid & 0xFFFFFF);
+  if (bid == 40352 && pid <= 0xFFFFFF) {
+    return (teamId == 1254) ? 88029918174624LL : 89133993205152LL;
+  }
+  if (bid == 44379 && pid <= 0xFFFFFF) {
+    return 106788187843931LL;
+  }
+  if ((bid == 42669 || bid == 100780) && (pid == 89131308852909LL || pid <= 0xFFFFFF)) {
+    return 89132651030189LL;
+  }
+  if ((bid == 40871 || bid == 42659) && (pid == 89131308851111LL || pid <= 0xFFFFFF)) {
+    return 89132651028391LL;
+  }
+  if ((bid == 39936 || bid == 43026) && (pid == 89131308850176LL || pid <= 0xFFFFFF)) {
+    return 89132382592000LL;
+  }
+  if ((bid == 101097 || bid == 105809) && (pid == 89131308911337LL || pid <= 0xFFFFFF)) {
+    return 89132382653161LL;
+  }
+  if ((bid == 133215 || bid == 135760) && (pid == 89129966766175LL || pid <= 0xFFFFFF)) {
+    return 105628546762847LL;
+  }
+  return pid;
+}
+
 ObjP z27Squad(int32_t id) {
   JStr s = loadSquad(id);
   ObjP res = nullptr;
@@ -213,14 +242,10 @@ ObjP z27Squad(int32_t id) {
       ObjP gid = item ? item->optJSONObject("gameplayer_id") : nullptr;
       if (gid) {
         int64_t pid = gid->optLong("id", 0);
-        int32_t bid = (int32_t)(pid & 0xFFFFFF);
-        if (bid == 40352 && pid <= 0xFFFFFF) {
-          int team = item ? item->optInt("initial_base_team_id", 0) : 0;
-          int64_t upgradedPid = (team == 1254) ? 88029918174624LL : 89133993205152LL;
-          gid->put("id", upgradedPid);
-          mod = true;
-        } else if (bid == 44379 && pid <= 0xFFFFFF) {
-          gid->put("id", 106788187843931LL);
+        int team = item ? item->optInt("initial_base_team_id", 0) : 0;
+        int64_t upPid = z27UpgradeIosCardPid(pid, team);
+        if (upPid != pid) {
+          gid->put("id", upPid);
           mod = true;
         }
       }
@@ -494,27 +519,22 @@ void z27Restore(const ObjP& jo) {
         ObjP p = gl->getJSONObject(i);
         int64_t serial = p->getJSONObject("gameplayer_id")->optLong("serial", 0);
         int64_t pPid = p->getJSONObject("gameplayer_id")->getLong("id");
-        int32_t bid = (int32_t)(pPid & 0xFFFFFF);
-        if (bid == 40352 && pPid <= 0xFFFFFF) {
-          int team = p->optInt("initial_base_team_id", 0);
-          pPid = (team == 1254) ? 88029918174624LL : 89133993205152LL;
-          p->getJSONObject("gameplayer_id")->put("id", pPid);
-        } else if (bid == 44379 && pPid <= 0xFFFFFF) {
-          pPid = 106788187843931LL;
+        int team = p->optInt("initial_base_team_id", 0);
+        int64_t upPid = z27UpgradeIosCardPid(pPid, team);
+        if (upPid != pPid) {
+          pPid = upPid;
           p->getJSONObject("gameplayer_id")->put("id", pPid);
         }
+        int32_t bid = (int32_t)(pPid & 0xFFFFFF);
         JStr lp = loadPlayer(serial);
         if (lp) {
           ObjP sv = Object::parse(*lp);
           if (sv->optJSONObject("gameplayer")) sv = sv->getJSONObject("gameplayer");
           int64_t svPid = sv->getJSONObject("gameplayer_id")->getLong("id");
-          if ((svPid & 0xFFFFFF) == 40352 && svPid <= 0xFFFFFF) {
-            int team = sv->optInt("initial_base_team_id", 0);
-            svPid = (team == 1254) ? 88029918174624LL : 89133993205152LL;
-            sv->getJSONObject("gameplayer_id")->put("id", svPid);
-            ziruDb->savePlayer(serial, svPid, sv->toString());
-          } else if ((svPid & 0xFFFFFF) == 44379 && svPid <= 0xFFFFFF) {
-            svPid = 106788187843931LL;
+          int svTeam = sv->optInt("initial_base_team_id", 0);
+          int64_t upSvPid = z27UpgradeIosCardPid(svPid, svTeam);
+          if (upSvPid != svPid) {
+            svPid = upSvPid;
             sv->getJSONObject("gameplayer_id")->put("id", svPid);
             ziruDb->savePlayer(serial, svPid, sv->toString());
           }
@@ -528,6 +548,40 @@ void z27Restore(const ObjP& jo) {
               while (svParams->length() < 145) svParams->put(0);
               for (int idx = 70; idx <= 141; idx++) {
                 if (baseParams->optInt(idx, 0) == 1) svParams->put(idx, 1);
+              }
+            }
+            // Restore authentic booster if missing
+            ObjP baseGp = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer") : nullptr;
+            if (baseGp) {
+              ArrP baseBooster = baseGp->optJSONArray("initial_booster_id_list");
+              ArrP svBooster = sv->optJSONArray("initial_booster_id_list");
+              if (!svBooster) {
+                svBooster = newArr()->put(0)->put(0)->put(0);
+                sv->put("initial_booster_id_list", svBooster);
+              }
+              while (svBooster->length() < 3) svBooster->put(0);
+              if (baseBooster) {
+                for (int b = 0; b < baseBooster->length() && b < 3; ++b) {
+                  int bVal = baseBooster->optInt(b, 0);
+                  if (bVal > 0 && svBooster->optInt(b, 0) == 0) {
+                    svBooster->put(b, bVal);
+                  }
+                }
+              }
+              if (svParams) {
+                while (svParams->length() < 145) svParams->put(0);
+                for (int b = 0; b < 3; ++b) {
+                  int bVal = svBooster->optInt(b, 0);
+                  if (bVal > 0 && svParams->optInt(142 + b, 0) == 0) {
+                    svParams->put(142 + b, bVal);
+                  } else if (baseParams && baseParams->length() >= 145 && svParams->optInt(142 + b, 0) == 0) {
+                    int bpVal = baseParams->optInt(142 + b, 0);
+                    if (bpVal > 0) {
+                      svParams->put(142 + b, bpVal);
+                      if (svBooster->optInt(b, 0) == 0) svBooster->put(b, bpVal);
+                    }
+                  }
+                }
               }
             }
 
@@ -878,14 +932,10 @@ ObjP z27Player(const ObjP& gid) {
     }
   }
   int64_t pid = gid->getLong("id");
-  int32_t bid = (int32_t)(pid & 0xFFFFFF);
-  if (bid == 40352 && pid <= 0xFFFFFF) {
-    int team = p ? p->optInt("initial_base_team_id", 0) : 0;
-    pid = (team == 1254) ? 88029918174624LL : 89133993205152LL;
-    gid->put("id", pid);
-    if (p && p->optJSONObject("gameplayer_id")) p->getJSONObject("gameplayer_id")->put("id", pid);
-  } else if (bid == 44379 && pid <= 0xFFFFFF) {
-    pid = 106788187843931LL;
+  int team = p ? p->optInt("initial_base_team_id", 0) : 0;
+  int64_t upPid = z27UpgradeIosCardPid(pid, team);
+  if (upPid != pid) {
+    pid = upPid;
     gid->put("id", pid);
     if (p && p->optJSONObject("gameplayer_id")) p->getJSONObject("gameplayer_id")->put("id", pid);
   }

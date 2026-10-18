@@ -159,8 +159,10 @@ static std::string fallbackPlayerName(uint32_t baseId) {
     {3000, "Zidane"}, {41066, "R. Carlos"}, {3279, "Casillas"}, {3843, "Buffon"},
     {3234, "Shevchenko"}, {3334, "Figo"}, {15886, "Gullit"}, {16369, "Van Basten"},
     {16368, "Rijkaard"}, {136270, "Wirtz"}, {133668, "Palmer"}, {143093, "Mainoo"},
-    {137965, "Garnacho"}, {137889, "A. Guler"}, {145953, "Endrick"}, {136368, "Van De Ven"},
-    {105809, "Calhanoglu"}, {42647, "Lukaku"}
+    {105809, "Calhanoglu"}, {101097, "Calhanoglu"}, {42647, "Lukaku"},
+    {42669, "Casemiro"}, {40871, "Eriksen"}, {42659, "Eriksen"},
+    {39936, "Mkhitaryan"}, {43026, "Mkhitaryan"},
+    {133215, "Ansu Fati"}, {135760, "Ansu Fati"}
   };
   auto it = sMap.find(baseId);
   return (it != sMap.end()) ? it->second : "";
@@ -189,8 +191,8 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
 
   int preferredSide = -1;
   if (actorTeamId > 0) {
-    if ((uint32_t)actorTeamId == homeTeamId) preferredSide = 1;
-    else if ((uint32_t)actorTeamId == awayTeamId) preferredSide = 0;
+    if ((uint32_t)actorTeamId == homeTeamId) preferredSide = 0;
+    else if ((uint32_t)actorTeamId == awayTeamId) preferredSide = 1;
   }
 
   auto checkSide = [&](int side) -> std::string {
@@ -211,14 +213,15 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   };
 
   if (preferredSide >= 0) {
-    return checkSide(preferredSide);
+    std::string res = checkSide(preferredSide);
+    if (!res.empty()) return res;
   }
-  std::string res = checkSide(1);
+  std::string res = checkSide(0);
   if (!res.empty()) return res;
-  return checkSide(0);
+  return checkSide(1);
 }
 
-static std::string lookupShirtNameByPlayerId(int64_t playerId) {
+static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
   if (playerId <= 0) return "";
   uint32_t targetBaseId = (uint32_t)(playerId & 0xFFFFFF);
 
@@ -230,8 +233,20 @@ static std::string lookupShirtNameByPlayerId(int64_t playerId) {
   if (!base) return fallbackPlayerName(targetBaseId);
 
   uint8_t* match = base + 0x6c4c0;
+  int32_t actorTeamId = actor ? *(int32_t*)((uint8_t*)actor + 0xe10) : -1;
+  uint32_t homeTeamId = *(uint32_t*)(match + 0x11d0 + 0x10);
+  uint32_t awayTeamId = *(uint32_t*)(match + 0x11d0 + 0x188 + 0x10);
+  if (homeTeamId == 0 && gZiruHomeTeamId > 0) homeTeamId = (uint32_t)gZiruHomeTeamId;
+  if (awayTeamId == 0 && gZiruAwayTeamId > 0) awayTeamId = (uint32_t)gZiruAwayTeamId;
 
-  for (int side = 0; side <= 1; ++side) {
+  int preferredSide = -1;
+  if (actorTeamId > 0) {
+    if ((uint32_t)actorTeamId == homeTeamId) preferredSide = 0;
+    else if ((uint32_t)actorTeamId == awayTeamId) preferredSide = 1;
+  }
+
+  auto checkSide = [&](int side) -> std::string {
+    if (side < 0 || side > 1) return "";
     uint8_t* teamPlayers = match + 0x14e0 + (side * 0x5dc0);
     for (int i = 0; i < 40; ++i) {
       uint8_t* p = teamPlayers + (i * 0x258);
@@ -242,7 +257,17 @@ static std::string lookupShirtNameByPlayerId(int64_t playerId) {
         if (!name.empty()) return name;
       }
     }
+    return "";
+  };
+
+  if (preferredSide >= 0) {
+    std::string res = checkSide(preferredSide);
+    if (!res.empty()) return res;
   }
+  std::string res = checkSide(0);
+  if (!res.empty()) return res;
+  res = checkSide(1);
+  if (!res.empty()) return res;
   return fallbackPlayerName(targetBaseId);
 }
 
@@ -275,10 +300,9 @@ static void hookedSetUniformNumber(void* actor, int uniformNumber) {
   }
   if (pid <= 0) {
     pid = *(int64_t*)((uint8_t*)actor + 0x1700);
-    if (pid <= 0) pid = *(int32_t*)((uint8_t*)actor + 0x1708);
   }
   std::string name;
-  if (pid > 0) name = lookupShirtNameByPlayerId(pid);
+  if (pid > 0) name = lookupShirtNameByPlayerId(actor, pid);
   if (name.empty()) name = lookupShirtName(actor, uniformNumber);
   if (!name.empty()) {
     applyActorShirtName(actor, name);
@@ -296,7 +320,7 @@ static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, i
     sActorPlayerId[actor] = playerId;
   }
   std::string name;
-  if (playerId > 0) name = lookupShirtNameByPlayerId(playerId);
+  if (playerId > 0) name = lookupShirtNameByPlayerId(actor, playerId);
   if (name.empty()) {
     int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
     if (num > 0) name = lookupShirtName(actor, num);
@@ -313,6 +337,8 @@ static void hookedBackNumberStep(void* actor) {
     const uint8_t* s = (const uint8_t*)actor + 0x1710;
     bool heap = (int8_t)s[23] < 0;
     uint64_t len = heap ? ((const uint64_t*)s)[1] : (s[23] & 0x7f);
+    const char* curStr = heap ? *(const char**)s : (const char*)s;
+
     if (len == 0 && num > 0) {
       int64_t pid = 0;
       {
@@ -322,15 +348,22 @@ static void hookedBackNumberStep(void* actor) {
       }
       if (pid <= 0) {
         pid = *(int64_t*)((uint8_t*)actor + 0x1700);
-        if (pid <= 0) pid = *(int32_t*)((uint8_t*)actor + 0x1708);
       }
       std::string name;
-      if (pid > 0) name = lookupShirtNameByPlayerId(pid);
+      if (pid > 0) name = lookupShirtNameByPlayerId(actor, pid);
       if (name.empty()) name = lookupShirtName(actor, num);
       if (!name.empty()) {
         applyActorShirtName(actor, name);
       }
     } else if (len > 0) {
+      // Ensure existing name is formatted in Title Case ("Viết hoa chữ đầu thôi")
+      if (curStr) {
+        std::string raw(curStr, len);
+        std::string tc = sanitizeShirtName(raw.c_str());
+        if (!tc.empty() && tc != raw) {
+          applyActorShirtName(actor, tc);
+        }
+      }
       *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
       *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
     }

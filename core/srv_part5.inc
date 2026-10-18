@@ -251,27 +251,55 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
         }
         ObjP base;
         if (w && (base = w->optJSONObject("gameplayer"))) {
-          ArrP ib;
-          if (!cur->optJSONArray("initial_booster_id_list") && (ib = base->optJSONArray("initial_booster_id_list"))) cur->put("initial_booster_id_list", ib);
+          ArrP ib = base->optJSONArray("initial_booster_id_list");
+          ArrP curIb = cur->optJSONArray("initial_booster_id_list");
+          if (!curIb) {
+            curIb = newArr()->put(0)->put(0)->put(0);
+            cur->put("initial_booster_id_list", curIb);
+          }
+          while (curIb->length() < 3) curIb->put(0);
+          if (ib) {
+            for (int b = 0; b < ib->length() && b < 3; ++b) {
+              int bidVal = ib->optInt(b, 0);
+              if (bidVal > 0 && curIb->optInt(b, 0) == 0) curIb->put(b, bidVal);
+            }
+          }
           ArrP ps = base->optJSONArray("play_style");
           if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) cur->put("play_style", ps);
           ArrP baseParams = base->optJSONArray("parameters");
           ArrP curParams = cur->optJSONArray("parameters");
           if (baseParams && curParams) {
+            while (curParams->length() < 145) curParams->put(0);
             for (int idx = 70; idx <= 141; ++idx) {
               int baseSkill = baseParams->optInt(idx, 0);
               if (baseSkill != 0) {
                 curParams->put(idx, baseSkill);
               }
             }
+            for (int b = 0; b < 3; ++b) {
+              int bVal = curIb->optInt(b, 0);
+              if (bVal > 0 && curParams->optInt(142 + b, 0) == 0) curParams->put(142 + b, bVal);
+              else if (baseParams->length() >= 145 && curParams->optInt(142 + b, 0) == 0) {
+                int bpVal = baseParams->optInt(142 + b, 0);
+                if (bpVal > 0) {
+                  curParams->put(142 + b, bpVal);
+                  if (curIb->optInt(b, 0) == 0) curIb->put(b, bpVal);
+                }
+              }
+            }
           }
           ArrP origParams = cur->optJSONArray("original_parameters");
           if (baseParams && origParams) {
+            while (origParams->length() < 145) origParams->put(0);
             for (int idx = 70; idx <= 141; ++idx) {
               int baseSkill = baseParams->optInt(idx, 0);
               if (baseSkill != 0) {
                 origParams->put(idx, baseSkill);
               }
+            }
+            for (int b = 0; b < 3; ++b) {
+              int bVal = curIb->optInt(b, 0);
+              if (bVal > 0 && origParams->optInt(142 + b, 0) == 0) origParams->put(142 + b, bVal);
             }
           }
           ObjP bl = base->optJSONObject("level_info");
