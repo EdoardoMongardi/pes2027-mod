@@ -272,16 +272,20 @@ void decodeZiruMyclubItemRequest(const Bytes& b) {
                   if (k4 == "item_type") ziruItemType = u.unpackString();
                   else if (k4 == "effect") { i5 = (int32_t)u.unpackLong(); ziruSkillItemEffect = i5; }
                   else if (k4 == "grade") ziruSkillItemGrade = u.unpackInt();
+                  else if (k4 == "ability_id" || k4 == "ability_Id" || k4 == "skill_id" || k4 == "additional_skill_id") ziruAbilityId = u.unpackInt();
                   else u.skipValue();
                 }
               } else if (k3 == "present_num") {
                 i6 = (int32_t)u.unpackLong();
+              } else if (k3 == "ability_id" || k3 == "ability_Id" || k3 == "skill_id" || k3 == "additional_skill_id") {
+                ziruAbilityId = u.unpackInt();
               } else {
                 u.skipValue();
               }
             }
             if (ziruItemType && *ziruItemType == "LEVEL_TRAINING") ziruLevelEffect = (int32_t)((uint32_t)ziruLevelEffect + (uint32_t)i5 * (uint32_t)i6);
           }
+          if (ziruAbilityId == 0 && ziruSkillItemEffect > 0) ziruAbilityId = ziruSkillItemEffect;
         } else {
           u.skipValue();
         }

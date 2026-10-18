@@ -10,11 +10,17 @@ Tất cả các thay đổi và cập nhật quan trọng của dự án `pes202
 ### Sửa lỗi
 - **Xung đột Skill chính & Kỹ năng bổ sung đặc biệt (Showtime)**:
   - Khôi phục 100% skill chính gốc Konami (`parameters[70..141]`) từ catalog template khi nạp cầu thủ từ SQLite, không bị mất skill chính sau khi thoát game.
-  - Sửa cơ chế unshift ID kỹ năng bổ sung (`iosSkillId`), ngăn chặn hiện tượng ID bị dịch chuyển lũy tiến làm kỹ năng đặc biệt Showtime biến thành kỹ năng thường.
+  - Sửa cơ chế unshift ID kỹ năng bổ sung (`iosSkillId`), thiết lập ánh xạ 1-1 cho toàn bộ 74 kỹ năng iOS (bao gồm 2 kỹ năng đặc biệt Showtime tại index 25 và 68 sang internal 72/73), ngăn chặn hiện tượng ID bị dịch chuyển lũy tiến làm kỹ năng đặc biệt Showtime biến thành kỹ năng thường.
+  - Loại bỏ lỗi ghi đè SQLite trùng lặp khi huấn luyện kỹ năng: lưu đồng bộ mảng `additional_skill_id` và các bit kỹ năng trong `parameters` trong một thao tác duy nhất.
+- **Nhận vật phẩm khi hoàn thành nhiệm vụ**:
+  - Triển khai handler đầy đủ cho `CMD_RECV_MYCLUB_ACHIEVEMENT`, trả về chi tiết danh sách vật phẩm nhận thưởng (`achievement_item_info_list`) gồm vé chọn kỹ năng đặc biệt, thẻ kinh nghiệm, GP và eFootball Coin.
+  - Khôi phục danh sách nhiệm vụ hoàn chỉnh trong `set_myclubuser_achieveentlist.json`, `CmdGetMyclubAchievementlist.json` và menu chính.
+- **Sửa lỗi liên kết HLV phụ & số áo cầu thủ khi vào trận**:
+  - Khắc phục `ability_id[3]` bị dịch quá tầm cho Conte (12) và Mourinho (14) trong `core/ios_compat.hpp`.
+  - Bổ sung `uniform_number` cho toàn bộ danh sách cầu thủ đội hình sân nhà trong `z27Home`, ngăn chặn lỗi UE4 engine không tải được trận đấu AI.
 - **Khắc phục lỗi CMF 40 & Silhouette trắng của Çalhanoğlu & Mkhitaryan**:
   - Gán độ thành thạo vị trí (DMF, CMF, LMF, RMF, AMF, SS) lên mức tối đa `2` (Full Green), khôi phục chỉ số CMF về `84+`.
   - Chuẩn hóa ID cầu thủ card thường về 24-bit base ID (`44379`, `40352`) để engine Unreal nạp trực tiếp texture khuôn mặt thật từ file `pc7000_mobile_ios.utoc`.
-- **Sửa lỗi crash khi nhận nhiệm vụ**: Ghi đè payload lỗi từ APK cho API `set_myclubuser_achieveentlist`.
 
 ## [v1.1.1] - 2026-10-17
 ### Tính năng mới & Cải tiến

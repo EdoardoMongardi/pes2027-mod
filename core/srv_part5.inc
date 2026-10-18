@@ -313,7 +313,6 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           for (auto& part : split(s, ',')) {
             try {
               int v = parseInt(part);
-              if (v >= 72) v = iosSkillId(v, false);
               if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
             } catch (...) {}
           }
@@ -323,7 +322,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           if (addSkills) {
             for (int i = 0; i < addSkills->length(); i++) {
               int v = addSkills->optInt(i, -1);
-              if (v >= 72) v = iosSkillId(v, false);
+              if (v == 25 || v == 68) v = iosSkillId(v, false);
               if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
             }
           }
@@ -332,10 +331,11 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
         for (int v : al) ja->put(v);
         cur->put("additional_skill_id", ja);
         ArrP params = cur->optJSONArray("parameters");
-        if (params && params->length() >= 142) {
+        if (params && params->length() >= 70) {
           for (int v : al) {
             if (isZiruSkillId(v)) {
-              params->put(kZiruSkillParameters[v], 1);
+              int pIdx = kZiruSkillParameters[v];
+              if (pIdx >= 0 && pIdx < params->length()) params->put(pIdx, 1);
             }
           }
         }

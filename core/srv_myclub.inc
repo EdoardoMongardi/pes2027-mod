@@ -508,7 +508,6 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
         for (auto& part : split(s, ',')) {
           try {
             int v = parseInt(part);
-            if (v >= 72) v = iosSkillId(v, false);
             if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
           } catch (const NumberFormat&) {
           }
@@ -519,7 +518,7 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
         if (sk) {
           for (int i2 = 0; i2 < sk->length(); i2++) {
             int v = sk->optInt(i2);
-            if (v >= 72) v = iosSkillId(v, false);
+            if (v == 25 || v == 68) v = iosSkillId(v, false);
             if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
           }
         }
@@ -529,11 +528,11 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
       p->put("additional_skill_id", ja);
 
       ArrP params = p->optJSONArray("parameters");
-      if (params && params->length() >= 142) {
+      if (params && params->length() >= 70) {
         ObjP w = getZiruPlayerWrapper(Value((long long)pid), false);
         if (!w) w = getZiruPlayerWrapperByBaseId((int32_t)(pid & 0xFFFFFF));
         ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
-        if (baseParams && baseParams->length() >= 142) {
+        if (baseParams && baseParams->length() >= 70) {
           for (int idx = 70; idx <= 141; idx++) {
             if (baseParams->optInt(idx, 0) == 1) {
               params->put(idx, 1);
@@ -542,7 +541,10 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
         }
         for (int v : al) {
           if (isZiruSkillId(v)) {
-            params->put(kZiruSkillParameters[v], 1);
+            int pIdx = kZiruSkillParameters[v];
+            if (pIdx >= 0 && pIdx < params->length()) {
+              params->put(pIdx, 1);
+            }
           }
         }
       }
@@ -569,15 +571,22 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     if (!ziruItemType || (*ziruItemType != "SKILL_TRAINING" && *ziruItemType != "SKILL_TRAINING_CATEGORY" && *ziruItemType != "SKILL_TRAINING_SELECT")) return;
     int64_t j = ziruTargetSerial;
     if (j == 0) return;
+    ObjP owned = z27OwnedPlayer(j);
+    if (!owned) return;
+
     zs::Prefs& prefs = sp("almanac_state");
     std::string key = "ziru_skills_" + str(j);
     std::string s = prefs.getString(key, "");
     std::vector<int32_t> al;
-    JStr lp = loadPlayer(j);
-    ArrP sk;
-    if (lp && !lp->empty() && (sk = Object::parse(*lp)->optJSONArray("additional_skill_id"))) {
+    ArrP sk = owned->optJSONArray("additional_skill_id");
+    if (!sk) {
+      JStr lp = loadPlayer(j);
+      if (lp && !lp->empty()) sk = Object::parse(*lp)->optJSONArray("additional_skill_id");
+    }
+    if (sk) {
       for (int i = 0; i < sk->length(); i++) {
         int v = sk->optInt(i);
+        if (v == 25 || v == 68) v = iosSkillId(v, false);
         if (isZiruSkillId(v)) {
           if (vcontains(al, v)) continue;
           if (al.size() >= 5) break;
@@ -597,7 +606,7 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     if (al.size() >= 5) {
       int i2 = ziruTrainingIndex;
       if (i2 > 0) i2--;
-      if (i2 < 0 || i2 >= 5) i2 = 0;
+      if (i2 < 0 || i2 >= (int)al.size()) i2 = 0;
       int old = al[i2];
       al.erase(al.begin() + i2);
       logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_V18_REPLACE] slot=" + str(i2) + " old=" + str(old));
@@ -614,8 +623,7 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     }
     std::vector<std::string> sp_ = split(pool, ',');
     std::vector<int> candidates;
-    ObjP owned = z27OwnedPlayer(j);
-    ArrP baseSkills = owned ? owned->optJSONArray("parameters") : nullptr;
+    ArrP baseSkills = owned->optJSONArray("parameters");
     for (const auto& s_item : sp_) {
       int val = parseInt(s_item);
       bool builtIn = isZiruSkillId(val) && baseSkills && baseSkills->optInt(kZiruSkillParameters[val]) != 0;
@@ -623,7 +631,9 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     }
     int v = 70;
     if (*ziruItemType == "SKILL_TRAINING_SELECT") {
-      int chosen = cfg.iosPlayerLayout ? iosSkillId(ziruAbilityId, false) : ziruAbilityId;
+      int chosen = ziruAbilityId;
+      if (chosen == 0 && ziruSkillItemEffect > 0) chosen = ziruSkillItemEffect;
+      if (chosen == 25 || chosen == 68) chosen = iosSkillId(chosen, false);
       if (!isZiruSkillId(chosen)) chosen = ziruAbilityId;
       if (isZiruSkillId(chosen)) {
         v = chosen;
@@ -638,13 +648,35 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     auto itDup = std::find(al.begin(), al.end(), v);
     if (itDup != al.end()) al.erase(itDup);
     al.push_back(v);
-    prefs.edit().putString(key, joinInts(al)).commit();
-    saveZiruSkillsToDb(j, al);
-    ArrP params = owned ? owned->optJSONArray("parameters") : nullptr;
-    if (params && params->length() >= 142 && isZiruSkillId(v)) {
-      params->put(kZiruSkillParameters[v], 1);
-      saveZiruPlayerToDb(owned);
+
+    ArrP ja = newArr();
+    for (int skillId : al) ja->put(skillId);
+    owned->put("additional_skill_id", ja);
+
+    int64_t pid = owned->optJSONObject("gameplayer_id") ? owned->getJSONObject("gameplayer_id")->optLong("id", 0) : 0;
+    int32_t bid = (int32_t)(pid & 0xFFFFFF);
+    ObjP w = getZiruPlayerWrapper(Value((long long)pid), false);
+    if (!w) w = getZiruPlayerWrapperByBaseId(bid);
+    ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
+    ArrP params = owned->optJSONArray("parameters");
+    if (baseParams && params && baseParams->length() >= 70 && params->length() >= 70) {
+      for (int idx = 70; idx <= 141; ++idx) {
+        if (baseParams->optInt(idx, 0) == 1) params->put(idx, 1);
+      }
     }
+    if (params && params->length() >= 142) {
+      for (int skillId : al) {
+        if (isZiruSkillId(skillId)) {
+          int pIdx = kZiruSkillParameters[skillId];
+          if (pIdx >= 0 && pIdx < params->length()) {
+            params->put(pIdx, 1);
+          }
+        }
+      }
+    }
+    prefs.edit().putString(key, joinInts(al)).commit();
+    saveZiruPlayerToDb(owned);
+
     logRequest("ZIRU_SKILL_V22", "[ZIRU_SKILL_V22] skill awarded: " + str(v));
     ObjP res = jo->optJSONObject("skill_training_result");
     if (!res) { res = newObj(); jo->put("skill_training_result", res); }

@@ -441,11 +441,92 @@ Response serveInner(Request& r) {
     jo->put("result", "NOERR");
     jo->put("rqid", rq);
     jo->put("msgid", "CMD_RECV_MYCLUB_ACHIEVEMENT");
-    jo->put("achievement_item_info_list", newArr());
-    jo->put("receive_result_list", newArr());
+
+    ArrP achList = newArr();
+    ArrP resList = newArr();
+
+    std::vector<int> claimedIds;
+    if (req) {
+      if (req->has("achievement_id")) {
+        claimedIds.push_back(req->optInt("achievement_id", 0));
+      }
+      ArrP idArr = req->optJSONArray("achievement_id_list");
+      if (idArr) {
+        for (int i = 0; i < idArr->length(); i++) {
+          int cid = idArr->optInt(i, 0);
+          if (cid > 0 && !vcontains(claimedIds, cid)) claimedIds.push_back(cid);
+        }
+      }
+    }
+    if (claimedIds.empty()) {
+      for (int i = 101; i <= 108; i++) claimedIds.push_back(i);
+    }
+
+    ObjP achConfig = loadZiruJsonAssetObject("responses/set_myclubuser_achieveentlist.json");
+    ArrP cfgList = achConfig ? achConfig->optJSONArray("achievement_list") : nullptr;
+
+    for (int cid : claimedIds) {
+      if (cid <= 0) continue;
+      ObjP rRes = newObj();
+      rRes->put("achievement_id", cid);
+      rRes->put("is_success", "YES");
+      resList->put(rRes);
+
+      ObjP itemInfo = newObj();
+      itemInfo->put("achievement_id", cid);
+
+      ObjP matchedPres;
+      if (cfgList) {
+        for (int k = 0; k < cfgList->length(); k++) {
+          ObjP entry = cfgList->optJSONObject(k);
+          if (entry && entry->optInt("achievement_id") == cid) {
+            matchedPres = entry->optJSONObject("present");
+            break;
+          }
+        }
+      }
+      if (matchedPres) {
+        itemInfo->put("present", z27Copy(matchedPres));
+        ObjP ii = matchedPres->optJSONObject("item_info");
+        if (ii) {
+          ObjP it = newObj();
+          it->put("item_type", ii->optString("item_type", "SKILL_TRAINING_SELECT"));
+          it->put("grade", ii->optInt("item_grade", 0));
+          it->put("effect", ii->optInt("item_effect", 0));
+          itemInfo->put("item", it);
+          itemInfo->put("present_num", matchedPres->optInt("count", 50));
+          itemInfo->put("inventory_num", 999999);
+        }
+      } else {
+        ObjP pres = newObj();
+        pres->put("present_id", 2000 + cid);
+        pres->put("present_type", "item");
+        pres->put("count", 50);
+        pres->put("name", "Reward");
+        ObjP it = newObj()->put("item_type", "SKILL_TRAINING_SELECT")->put("grade", 0)->put("effect", 0);
+        pres->put("item_info", it);
+        itemInfo->put("present", pres);
+        itemInfo->put("item", it);
+        itemInfo->put("present_num", 50);
+        itemInfo->put("inventory_num", 999999);
+      }
+      achList->put(itemInfo);
+    }
+
+    jo->put("achievement_item_info_list", achList);
+    jo->put("receive_result_list", resList);
     jo->put("fame_receive_result_list", newArr());
     jo->put("is_expired_item_included", "NO");
     jo->put("fame_notification_list", newArr());
+
+    ArrP items = newArr();
+    ObjP eiWrap = newObj();
+    eiWrap->put("item_list", items);
+    z27InjectTrainingItems(eiWrap);
+    jo->put("item_list", items);
+    jo->put("gp", 999999999);
+    jo->put("coin_info", newObj()->put("coin", 999999)->put("details", newArr()));
+
     return serveObjectAsEncryptedMsgPack(jo);
   }
   if (isCmd("CMD_GET_MYCLUB_ACHIEVEMENTLIST")) return handleZiruLeagueStatic("responses/CmdGetMyclubAchievementlist.json");

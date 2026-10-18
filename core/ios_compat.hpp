@@ -4,23 +4,26 @@
 namespace zsv {
 // Android 11.0.1 Player::GetDataLabel(SkillCard) table, verified in libUE4.so
 // at file offset 0xcc12ec. Match by parameter label, not by enum ordinal.
-inline constexpr int kZiruSkillParameters[72] = {
+inline constexpr int kZiruSkillParameters[74] = {
   70,107,71,72,73,108,74,75,135,136,102,116,124,130,140,76,121,77,
   120,101,78,103,104,109,127,134,79,80,81,114,128,82,110,83,84,119,
   85,86,98,117,118,122,141,87,88,105,89,90,99,100,138,139,126,129,
-  91,92,93,106,111,112,113,125,137,115,94,123,132,95,131,96,97,133
+  91,92,93,106,111,112,113,125,137,115,94,123,132,95,131,96,97,133,
+  143,142
 };
-inline bool isZiruSkillId(int id) { return id >= 0 && id < 72; }
+inline bool isZiruSkillId(int id) { return id >= 0 && id < 74; }
 inline int iosSkillId(int id, bool outgoing) {
   if (outgoing) {
-    if (!isZiruSkillId(id)) return std::max(0, std::min(71, id));
+    if (id == 72) return 25;
+    if (id == 73) return 68;
+    if (!isZiruSkillId(id)) return std::max(0, std::min(73, id));
     return id + (id >= 25) + (id >= 67);
   }
-  // iOS adds two skills at enum positions 25 and 68, not at the end.
+  // iOS wire format -> internal format
   if (id < 0) return 0;
+  if (id == 25) return 72;
+  if (id == 68) return 73;
   if (id >= 74) return 71;
-  if (id == 25) return 24;
-  if (id == 68) return 67;
   return id - (id > 25) - (id > 68);
 }
 // iOS 11.1.1 PlayerBase::SetData accepts 147 parameters. Its indices 142/143
@@ -51,7 +54,7 @@ inline bool adaptIosPlayerData(zj::Value& value, bool outgoing) {
         for (int i = 0; i < item.a->length(); ++i) skills->put(iosSkillId(item.a->getInt(i), outgoing));
         value.o->put(key, skills);
         changed = true;
-      } else if (key == "additional_skill_id" && (item.t == zj::Value::INT || item.t == zj::Value::LONG)) {
+      } else if ((key == "additional_skill_id" || key == "ability_id" || key == "ability_Id" || key == "skill_id") && (item.t == zj::Value::INT || item.t == zj::Value::LONG)) {
         value.o->put(key, iosSkillId((int)item.n, outgoing));
         changed = true;
       } else if ((key == "parameters" || key == "original_parameters") && item.t == zj::Value::ARR) {
@@ -60,7 +63,20 @@ inline bool adaptIosPlayerData(zj::Value& value, bool outgoing) {
         if ((outgoing && (n == 145 || n == 149)) || (!outgoing && n == 147)) {
           auto dst = zj::Array::make();
           for (int i = 0; i < 142; ++i) dst->put(src->get(i));
-          if (outgoing) dst->put(0)->put(0);
+          if (outgoing) {
+            int b142 = 0, b143 = 0;
+            auto ask = value.o->optJSONArray("additional_skill_id");
+            if (ask) {
+              for (int si = 0; si < ask->length(); ++si) {
+                int sv = ask->optInt(si, -1);
+                if (sv == 73 || sv == 68) b142 = 1;
+                if (sv == 72 || sv == 25) b143 = 1;
+              }
+            }
+            if (!b142 && n > 142 && src->optInt(142, 0) == 1 && n != 145) b142 = 1;
+            if (!b143 && n > 143 && src->optInt(143, 0) == 1 && n != 145) b143 = 1;
+            dst->put(b142)->put(b143);
+          }
           for (int i = 0; i < 3; ++i) dst->put(src->get((outgoing ? 142 : 144) + i));
           value.o->put(key, dst);
           changed = true;

@@ -800,7 +800,6 @@ ObjP z27Player(const ObjP& gid) {
       for (auto& part : split(s, ',')) {
         try {
           int v = parseInt(part);
-          if (v >= 72) v = iosSkillId(v, false);
           if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
         } catch (...) {}
       }
@@ -811,7 +810,7 @@ ObjP z27Player(const ObjP& gid) {
     if (addSkills) {
       for (int i = 0; i < addSkills->length(); i++) {
         int v = addSkills->optInt(i, -1);
-        if (v >= 72) v = iosSkillId(v, false);
+        if (v == 25 || v == 68) v = iosSkillId(v, false);
         if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
       }
     }
@@ -819,10 +818,11 @@ ObjP z27Player(const ObjP& gid) {
   ArrP ja = newArr();
   for (int v : al) ja->put(v);
   p->put("additional_skill_id", ja);
-  if (params && params->length() >= 142) {
+  if (params && params->length() >= 70) {
     for (int v : al) {
       if (isZiruSkillId(v)) {
-        params->put(kZiruSkillParameters[v], 1);
+        int pIdx = kZiruSkillParameters[v];
+        if (pIdx >= 0 && pIdx < params->length()) params->put(pIdx, 1);
       }
     }
   }
@@ -839,7 +839,8 @@ ObjP z27Home(const ObjP& active) {
     ObjP p = z27Player(gid);
     ObjP pObj = newObj()->put("gameplayer_id", z27Copy(gid))
                        ->put("parameters", Array::parse(p->getJSONArray("parameters")->toString()))
-                       ->put("averaged_overall", 0);
+                       ->put("averaged_overall", 0)
+                       ->put("uniform_number", p->optInt("uniform_number", pl->getJSONObject(i)->optInt("uniform_number", i + 1)));
     ArrP ib = p->optJSONArray("initial_booster_id_list");
     if (ib) pObj->put("initial_booster_id_list", Array::parse(ib->toString()));
     ArrP sk = p->optJSONArray("additional_skill_id");
