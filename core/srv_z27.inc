@@ -38,7 +38,7 @@ ObjP z27Team(int32_t id) {
   if (id == 262143) {
     ObjP syn = newObj()
         ->put("base_team_id", 262143)
-        ->put("base_team_license", "LICENSED")
+        ->put("base_team_license", "UNKNOWN")
         ->put("team_name", "PES Team")
         ->put("team_name_short", "PES");
     ArrP kits = newArr();
@@ -65,7 +65,7 @@ ObjP z27Team(int32_t id) {
   if (!t) {
     ObjP syn = newObj()
         ->put("base_team_id", lookup_id)
-        ->put("base_team_license", "LICENSED")
+        ->put("base_team_license", "UNKNOWN")
         ->put("team_name", "PES Team")
         ->put("team_name_short", "PES");
     ArrP kits = newArr();
@@ -79,11 +79,9 @@ ObjP z27Team(int32_t id) {
 }
 
 ObjP z27Identity(const ObjP& t) {
-  std::string lic = nn(t)->optString("base_team_license", "LICENSED");
-  if (lic.empty() || lic == "UNKNOWN") lic = "LICENSED";
   return newObj()
       ->put("base_team_id", nn(t)->getInt("base_team_id"))
-      ->put("base_team_license", lic)
+      ->put("base_team_license", t->optString("base_team_license", "UNKNOWN"))
       ->put("team_name", t->getString("team_name"))
       ->put("team_name_short", t->getString("team_name_short"));
 }
