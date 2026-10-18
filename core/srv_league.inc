@@ -476,18 +476,32 @@ ArrP z27ResolvePlayStyle(int64_t id, const ObjP& existing = nullptr) {
     ArrP ps = ensureTwoStyles(existing->optJSONArray("play_style"));
     if (ps) return ps;
   }
-  // 1. Try getZiruPlayerWrapper by exact ID
-  ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
-  if (w && w->optJSONObject("gameplayer")) {
-    ArrP ps = ensureTwoStyles(w->getJSONObject("gameplayer")->optJSONArray("play_style"));
-    if (ps) return ps;
+  // 1. Try raw record from ZIRU_PLAYER_RECORDS.json directly (avoid recursive getZiruPlayerWrapper -> z27ApplyAppearanceAndClub loop)
+  ObjP recs = ziruPlayerRecordsCache;
+  if (!recs) {
+    try {
+      recs = Object::parse(readAsset("responses/ZIRU_PLAYER_RECORDS.json"));
+      ziruPlayerRecordsCache = recs;
+    } catch (...) {}
   }
-  // 2. Try getZiruPlayerWrapper by base ID (lower 24 bits)
-  int32_t bid = (int32_t)(id & 0xFFFFFF);
-  ObjP wBase = getZiruPlayerWrapperByBaseId(bid);
-  if (wBase && wBase->optJSONObject("gameplayer")) {
-    ArrP ps = ensureTwoStyles(wBase->getJSONObject("gameplayer")->optJSONArray("play_style"));
-    if (ps) return ps;
+  if (recs) {
+    ObjP rec = recs->optJSONObject(str(id));
+    if (rec && rec->optJSONObject("gameplayer")) {
+      ArrP ps = ensureTwoStyles(rec->getJSONObject("gameplayer")->optJSONArray("play_style"));
+      if (ps) return ps;
+    }
+    int32_t bid = (int32_t)(id & 0xFFFFFF);
+    for (const auto& k : recs->keys()) {
+      try {
+        if ((parseInt(k) & 0xFFFFFF) == bid) {
+          ObjP r = recs->optJSONObject(k);
+          if (r && r->optJSONObject("gameplayer")) {
+            ArrP ps = ensureTwoStyles(r->getJSONObject("gameplayer")->optJSONArray("play_style"));
+            if (ps) return ps;
+          }
+        }
+      } catch (...) {}
+    }
   }
   // 3. Try CmdLogin.json
   try {

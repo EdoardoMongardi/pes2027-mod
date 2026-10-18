@@ -65,6 +65,12 @@ inline void z27ApplyComPlayStyles(const ArrP& p, int pos, int st1) {
 
 void z27ApplyAppearanceAndClub(const ObjP& cur) {
   if (!cur) return;
+  static thread_local bool sInApply = false;
+  if (sInApply) return;
+  struct Guard {
+    Guard() { sInApply = true; }
+    ~Guard() { sInApply = false; }
+  } guard;
   ObjP gid = cur->optJSONObject("gameplayer_id");
   if (!gid) return;
   int64_t pid = gid->optLong("id", 0);
