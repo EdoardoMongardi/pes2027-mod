@@ -1177,31 +1177,63 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
       NSArray* aliases = cpk ? @[name, [name stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"]] : @[name];
       for (NSString* alias in aliases) {
         NSString* path = [directory stringByAppendingPathComponent:alias];
-        BOOL exists = [fm fileExistsAtPath:path];
+        BOOL isDownload = [directory.lastPathComponent isEqualToString:@"Download"];
         NSString* link = [fm destinationOfSymbolicLinkAtPath:path error:nil];
-        if (exists) {
-          NSDictionary* attrs = [fm attributesOfItemAtPath:path.stringByResolvingSymlinksInPath error:nil];
-          if ([attrs[NSFileSize] unsignedLongLongValue] > 20000000) continue;
-          NSData* data = [NSData dataWithContentsOfFile:path];
-          if (!data) continue;
-          unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-          CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
-          NSMutableString* hash = [NSMutableString string];
-          for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
-          if ([hash isEqualToString:manifest[name][@"sha256"]]) continue;
-          if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
-            ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
-            continue;
+
+        if (isDownload) {
+          if (link) {
+            unlink(path.fileSystemRepresentation);
+            link = nil;
           }
-          if (!link) {
-            NSString* backupDir = [gDocs stringByAppendingPathComponent:@"PES2027-repair-backups"];
-            [fm createDirectoryAtPath:backupDir withIntermediateDirectories:YES attributes:nil error:nil];
-            NSString* backup = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@-%@", directory.lastPathComponent, NSUUID.UUID.UUIDString, alias]];
-            if (![fm moveItemAtPath:path toPath:backup error:nil]) continue;
-            ZLog(@"[IOS_TABLE_FIX] Backed up %@ to %@", alias, backup);
+          BOOL exists = [fm fileExistsAtPath:path];
+          if (exists) {
+            NSDictionary* attrs = [fm attributesOfItemAtPath:path error:nil];
+            if ([attrs[NSFileSize] unsignedLongLongValue] <= 20000000) {
+              NSData* data = [NSData dataWithContentsOfFile:path];
+              if (data) {
+                unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+                CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+                NSMutableString* hash = [NSMutableString string];
+                for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
+                if ([hash isEqualToString:manifest[name][@"sha256"]]) {
+                  continue;
+                }
+                if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
+                  ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
+                  continue;
+                }
+              }
+            }
+            [fm removeItemAtPath:path error:nil];
           }
+          [fm copyItemAtPath:source toPath:path error:nil];
+          ZLog(@"[IOS_TABLE_FIX] Copied real file %@ to Download/", alias);
+        } else {
+          BOOL exists = [fm fileExistsAtPath:path];
+          if (exists) {
+            NSDictionary* attrs = [fm attributesOfItemAtPath:path.stringByResolvingSymlinksInPath error:nil];
+            if ([attrs[NSFileSize] unsignedLongLongValue] > 20000000) continue;
+            NSData* data = [NSData dataWithContentsOfFile:path];
+            if (!data) continue;
+            unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+            CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+            NSMutableString* hash = [NSMutableString string];
+            for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
+            if ([hash isEqualToString:manifest[name][@"sha256"]]) continue;
+            if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
+              ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
+              continue;
+            }
+            if (!link) {
+              NSString* backupDir = [gDocs stringByAppendingPathComponent:@"PES2027-repair-backups"];
+              [fm createDirectoryAtPath:backupDir withIntermediateDirectories:YES attributes:nil error:nil];
+              NSString* backup = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@-%@", directory.lastPathComponent, NSUUID.UUID.UUIDString, alias]];
+              if (![fm moveItemAtPath:path toPath:backup error:nil]) continue;
+              ZLog(@"[IOS_TABLE_FIX] Backed up %@ to %@", alias, backup);
+            }
+          }
+          ensureSymlink(path, source);
         }
-        ensureSymlink(path, source);
       }
     }
   }
