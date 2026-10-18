@@ -965,6 +965,22 @@ ObjP z27Home(const ObjP& active) {
         }
       }
     }
+    if (params && params->length() >= 70) {
+      ArrP baseSkills = newArr();
+      std::set<int> addSkillSet;
+      if (sk) {
+        for (int si = 0; si < sk->length(); ++si) addSkillSet.insert(sk->optInt(si, -1));
+      }
+      for (int s = 0; s < 74; ++s) {
+        int pIdx = kZiruSkillParameters[s];
+        if (pIdx >= 0 && pIdx < params->length() && params->optInt(pIdx, 0) == 1) {
+          if (addSkillSet.find(s) == addSkillSet.end()) {
+            baseSkills->put(s);
+          }
+        }
+      }
+      pObj->put("skillcard_id_list", baseSkills);
+    }
     if (params && params->length() >= 70 && ps && ps->length() > 0) {
       int st1 = ps->optInt(0, 0);
       int pos = params->optInt(0, 0);
@@ -1095,6 +1111,25 @@ ObjP z27AwaySquad(const ObjP& active) {
                          ->put("uniform_number", p->optInt("uniform_number", i + 1));
       ArrP ps = p->optJSONArray("play_style");
       if (ps) pObj->put("play_style", Array::parse(ps->toString()));
+      ArrP sk = p->optJSONArray("additional_skill_id");
+      if (sk) pObj->put("additional_skill_id", Array::parse(sk->toString()));
+      ArrP params = pObj->getJSONArray("parameters");
+      if (params && params->length() >= 70) {
+        ArrP baseSkills = newArr();
+        std::set<int> addSkillSet;
+        if (sk) {
+          for (int si = 0; si < sk->length(); ++si) addSkillSet.insert(sk->optInt(si, -1));
+        }
+        for (int s = 0; s < 74; ++s) {
+          int pIdx = kZiruSkillParameters[s];
+          if (pIdx >= 0 && pIdx < params->length() && params->optInt(pIdx, 0) == 1) {
+            if (addSkillSet.find(s) == addSkillSet.end()) {
+              baseSkills->put(s);
+            }
+          }
+        }
+        pObj->put("skillcard_id_list", baseSkills);
+      }
       playerList->put(pObj);
     }
   }

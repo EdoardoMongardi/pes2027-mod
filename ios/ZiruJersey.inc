@@ -83,29 +83,20 @@ static void draw(void* actor, void* canvas) {
 extern "C" int32_t gZiruHomeTeamId;
 extern "C" int32_t gZiruAwayTeamId;
 
-static bool isValidShirtName(const char* s) {
-  if (!s || !s[0]) return false;
-  int len = 0;
-  for (const unsigned char* p = (const unsigned char*)s; *p; ++p) {
-    if (*p < 32 || *p > 126) return false;
-    len++;
-  }
-  return len >= 1 && len <= 24;
-}
-
-static std::string sanitizeShirtName(const std::string& input) {
+static std::string sanitizeShirtName(const char* s) {
+  if (!s || !s[0]) return "";
   std::string out;
-  out.reserve(input.size());
-  for (size_t i = 0; i < input.size(); ++i) {
-    unsigned char c = (unsigned char)input[i];
+  out.reserve(24);
+  for (size_t i = 0; s[i] != '\0' && out.size() < 24; ++i) {
+    unsigned char c = (unsigned char)s[i];
     if (c >= 'a' && c <= 'z') {
       out += (char)(c - 'a' + 'A');
     } else if (c >= 'A' && c <= 'Z') {
       out += (char)c;
     } else if (c == ' ' || c == '.' || c == '-' || c == '\'') {
       out += (char)c;
-    } else if (c == 0xC3 && i + 1 < input.size()) {
-      unsigned char c2 = (unsigned char)input[++i];
+    } else if (c == 0xC3 && s[i + 1] != '\0') {
+      unsigned char c2 = (unsigned char)s[++i];
       if ((c2 >= 0x80 && c2 <= 0x85) || (c2 >= 0xA0 && c2 <= 0xA5)) out += 'A';
       else if (c2 == 0x87 || c2 == 0xA7) out += 'C';
       else if ((c2 >= 0x88 && c2 <= 0x8B) || (c2 >= 0xA8 && c2 <= 0xAB)) out += 'E';
@@ -115,7 +106,9 @@ static std::string sanitizeShirtName(const std::string& input) {
       else if ((c2 >= 0x99 && c2 <= 0x9C) || (c2 >= 0xB9 && c2 <= 0xBC)) out += 'U';
     }
   }
-  return out;
+  while (!out.empty() && out.front() == ' ') out.erase(out.begin());
+  while (!out.empty() && out.back() == ' ') out.pop_back();
+  return (out.size() >= 1 && out.size() <= 24) ? out : "";
 }
 
 static std::string fallbackPlayerName(uint32_t baseId) {
@@ -140,7 +133,8 @@ static std::string fallbackPlayerName(uint32_t baseId) {
     {134594, "BONUCCI"}, {134632, "SUPHANAN"}, {137955, "JUN"}, {129961, "TOMIYASU"},
     {44840, "JORGINHO"}, {30210, "PARTEY"}, {137957, "TROSSARD"}, {110815, "HAVERTZ"},
     {107686, "MARTINELLI"}, {124266, "ZINCHENKO"}, {132933, "RAYA"}, {983, "BECKHAM"},
-    {33185, "PIRLO"}, {134670, "MALDINI"}
+    {33185, "PIRLO"}, {134670, "MALDINI"}, {134701, "NEDVED"}, {34691, "NEDVED"},
+    {45735, "MANE"}, {126343, "RODRYGO"}
   };
   auto it = sMap.find(baseId);
   return (it != sMap.end()) ? it->second : "";
@@ -178,22 +172,10 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
       uint16_t num = *(uint16_t*)(p + 0x1ec);
       if (num == (uint16_t)uniformNumber) {
         uint32_t baseId = *(uint32_t*)(p + 0x38);
-        const char* name = nullptr;
-        // Prioritize +0x89 (standard PES player ASCII shirt name)
-        const char* n89 = (const char*)(p + 0x89);
-        if (isValidShirtName(n89)) {
-          name = n89;
-        } else {
-          const char* nc6 = (const char*)(p + 0xc6);
-          if (isValidShirtName(nc6)) name = nc6;
-        }
-        if (name && name[0]) {
-          return sanitizeShirtName(name);
-        }
-        if (baseId > 0) {
-          std::string fb = fallbackPlayerName(baseId);
-          if (!fb.empty()) return fb;
-        }
+        std::string name = sanitizeShirtName((const char*)(p + 0x89));
+        if (name.empty()) name = sanitizeShirtName((const char*)(p + 0xc6));
+        if (name.empty() && baseId > 0) name = fallbackPlayerName(baseId);
+        if (!name.empty()) return name;
       }
     }
     return "";
@@ -226,15 +208,9 @@ static std::string lookupShirtNameByPlayerId(int64_t playerId) {
       uint8_t* p = teamPlayers + (i * 0x258);
       uint32_t baseId = *(uint32_t*)(p + 0x38);
       if (baseId == targetBaseId) {
-        const char* name = nullptr;
-        const char* n89 = (const char*)(p + 0x89);
-        if (isValidShirtName(n89)) {
-          name = n89;
-        } else {
-          const char* nc6 = (const char*)(p + 0xc6);
-          if (isValidShirtName(nc6)) name = nc6;
-        }
-        if (name && name[0]) return sanitizeShirtName(name);
+        std::string name = sanitizeShirtName((const char*)(p + 0x89));
+        if (name.empty()) name = sanitizeShirtName((const char*)(p + 0xc6));
+        if (!name.empty()) return name;
       }
     }
   }
@@ -248,7 +224,6 @@ static void applyActorShirtName(void* actor, const std::string& name) {
     setShirt(actor, name.c_str());
   }
   *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
-  *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
 
   void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
   if (nameTexActor) {
@@ -308,7 +283,6 @@ static void hookedBackNumberStep(void* actor) {
       }
     } else if (len > 0) {
       *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
-      *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
     }
 
     void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
