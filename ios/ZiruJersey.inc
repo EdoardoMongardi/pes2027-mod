@@ -143,15 +143,40 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   return checkSide(1);
 }
 
+static std::string fallbackPlayerName(uint32_t baseId) {
+  static const std::unordered_map<uint32_t, const char*> sMap = {
+    {133580, "HAALAND"}, {38555, "MESSI"}, {7511, "C. RONALDO"}, {40352, "NEYMAR JR"},
+    {110718, "MBAPPE"}, {44379, "DE BRUYNE"}, {138036, "BELLINGHAM"}, {117047, "VINI JR."},
+    {109005, "RODRI"}, {45260, "SALAH"}, {40571, "LEWANDOWSKI"}, {47287, "KANE"},
+    {45023, "SON"}, {32664, "MODRIC"}, {36770, "KROOS"}, {33702, "BENZEMA"},
+    {36769, "SUAREZ"}, {42641, "GRIEZMANN"}, {131976, "SAKA"}, {118007, "FODEN"},
+    {141673, "MUSIALA"}, {138384, "PEDRI"}, {145952, "GAVI"}, {167375, "LAMINE YAMAL"},
+    {42668, "COURTOIS"}, {60512, "ALISSON"}, {103380, "EDERSON"}, {33145, "NEUER"},
+    {45843, "VAN DIJK"}, {113351, "RUBEN"}, {126955, "SALIBA"}, {118073, "DAVIES"},
+    {111451, "A. ARNOLD"}, {41103, "WALKER"}, {109265, "KIMMICH"}, {118485, "RICE"},
+    {133465, "CAMAVINGA"}, {113408, "VALVERDE"}, {101057, "BERNARDO"}, {60587, "BRUNO F."},
+    {110638, "RASHFORD"}, {118334, "LAUTARO"}, {117765, "OSIMHEN"}, {126280, "LEAO"},
+    {140321, "KVARATSKHELIA"}, {109867, "BARELLA"}, {118047, "BASTONI"}, {113405, "T. HERNANDEZ"},
+    {103445, "DIMARCO"}, {47000, "DYBALA"}, {44378, "MORATA"}, {120281, "ENZO"},
+    {134907, "MAC ALLISTER"}, {127179, "JULIAN ALVAREZ"}, {108919, "R. DIAS"}, {100780, "CASEMIRO"},
+    {100688, "MARQUINHOS"}, {46845, "GABRIEL JESUS"}, {45129, "DE GEA"}, {41571, "TER STEGEN"}
+  };
+  auto it = sMap.find(baseId);
+  return (it != sMap.end()) ? it->second : "";
+}
+
 static std::string lookupShirtNameByPlayerId(int64_t playerId) {
   if (playerId <= 0) return "";
+  uint32_t targetBaseId = (uint32_t)(playerId & 0xFFFFFF);
+
   auto getMgr = (void* (*)())(0x104bba084 + gSlide);
   void* mgr = getMgr ? getMgr() : nullptr;
-  if (!mgr) return "";
+  if (!mgr) return fallbackPlayerName(targetBaseId);
+
   uint8_t* base = *(uint8_t**)((uint8_t*)mgr + 0x48);
-  if (!base) return "";
+  if (!base) return fallbackPlayerName(targetBaseId);
+
   uint8_t* match = base + 0x6c4c0;
-  uint32_t targetBaseId = (uint32_t)(playerId & 0xFFFFFF);
 
   for (int side = 0; side <= 1; ++side) {
     uint8_t* teamPlayers = match + 0x14e0 + (side * 0x5dc0);
@@ -170,7 +195,7 @@ static std::string lookupShirtNameByPlayerId(int64_t playerId) {
       }
     }
   }
-  return "";
+  return fallbackPlayerName(targetBaseId);
 }
 
 static void applyActorShirtName(void* actor, const std::string& name) {
@@ -194,6 +219,11 @@ static void hookedSetUniformNumber(void* actor, int uniformNumber) {
   }
   if (!actor || uniformNumber <= 0) return;
   std::string name = lookupShirtName(actor, uniformNumber);
+  if (name.empty()) {
+    int64_t pid = *(int64_t*)((uint8_t*)actor + 0x1700);
+    if (pid <= 0) pid = *(int32_t*)((uint8_t*)actor + 0x1708);
+    name = lookupShirtNameByPlayerId(pid);
+  }
   if (!name.empty()) {
     applyActorShirtName(actor, name);
     ZLog(@"[JERSEY] SetUniformNumber #%d (team %d) -> '%s'", uniformNumber,
@@ -285,15 +315,16 @@ static void install() {
     0x10089f2e8, 0x1008a02f0, 0x10089f3ec
   };
 
-  bool actorVtableMatch = true;
-  for (int i = 0; i < 6; ++i) {
+  // Hook Mobile vtable (slots 0, 1, 2)
+  bool mobMatch = true;
+  for (int i = 0; i < 3; ++i) {
     if (*(uintptr_t*)(actorSlots[i] + slide) != actorFuncs[i] + slide) {
-      actorVtableMatch = false; break;
+      mobMatch = false; break;
     }
   }
-  if (actorVtableMatch) {
+  if (mobMatch) {
     vm_address_t actorPage = (actorSlots[0] + slide) & ~(vm_address_t)(vm_page_size - 1);
-    vm_size_t actorLength = ((actorSlots[5] + slide + 8 - actorPage + vm_page_size - 1) & ~(vm_page_size - 1));
+    vm_size_t actorLength = ((actorSlots[2] + slide + 8 - actorPage + vm_page_size - 1) & ~(vm_page_size - 1));
     if (vm_protect(mach_task_self(), actorPage, actorLength, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS) {
       originalSetUniformNumber = (SetUniformNumberFn)*(uintptr_t*)(actorSlots[0] + slide);
       originalSetupFromPlayerId = (SetupFromPlayerIdFn)*(uintptr_t*)(actorSlots[1] + slide);
@@ -302,18 +333,36 @@ static void install() {
       *(uintptr_t*)(actorSlots[0] + slide) = (uintptr_t)hookedSetUniformNumber;
       *(uintptr_t*)(actorSlots[1] + slide) = (uintptr_t)hookedSetupFromPlayerId;
       *(uintptr_t*)(actorSlots[2] + slide) = (uintptr_t)hookedBackNumberStep;
+      vm_protect(mach_task_self(), actorPage, actorLength, false, VM_PROT_READ);
+      ZLog(@"[JERSEY] player actor shirt name hooks installed for Mobile");
+    } else {
+      ZLog(@"[JERSEY] vm_protect failed for Mobile vtable");
+    }
+  } else {
+    ZLog(@"[JERSEY] Mobile vtable mismatch; skipped");
+  }
 
+  // Hook MobileHigh vtable (slots 3, 4, 5)
+  bool highMatch = true;
+  for (int i = 3; i < 6; ++i) {
+    if (*(uintptr_t*)(actorSlots[i] + slide) != actorFuncs[i] + slide) {
+      highMatch = false; break;
+    }
+  }
+  if (highMatch) {
+    vm_address_t actorPage = (actorSlots[3] + slide) & ~(vm_address_t)(vm_page_size - 1);
+    vm_size_t actorLength = ((actorSlots[5] + slide + 8 - actorPage + vm_page_size - 1) & ~(vm_page_size - 1));
+    if (vm_protect(mach_task_self(), actorPage, actorLength, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS) {
       *(uintptr_t*)(actorSlots[3] + slide) = (uintptr_t)hookedSetUniformNumber;
       *(uintptr_t*)(actorSlots[4] + slide) = (uintptr_t)hookedSetupFromPlayerId;
       *(uintptr_t*)(actorSlots[5] + slide) = (uintptr_t)hookedBackNumberStep;
-
       vm_protect(mach_task_self(), actorPage, actorLength, false, VM_PROT_READ);
-      ZLog(@"[JERSEY] player actor shirt name hooks installed successfully for Mobile and MobileHigh");
+      ZLog(@"[JERSEY] player actor shirt name hooks installed for MobileHigh");
     } else {
-      ZLog(@"[JERSEY] vm_protect failed for player actor vtable");
+      ZLog(@"[JERSEY] vm_protect failed for MobileHigh vtable");
     }
   } else {
-    ZLog(@"[JERSEY] player actor vtable mismatch; name injection skipped");
+    ZLog(@"[JERSEY] MobileHigh vtable mismatch; skipped");
   }
 }
 }

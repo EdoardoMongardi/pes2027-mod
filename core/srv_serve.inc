@@ -26,7 +26,16 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     if (!msgid.empty()) jo->put("msgid", msgid);
   }
   if (jo && (resumesSave || name == "responses/get_user_eula_info.json")) {
-    if (resumesSave) patchLocalLivedataUrls(jo);
+    if (resumesSave) {
+      patchLocalLivedataUrls(jo);
+      ObjP ci = jo->optJSONObject("coin_info");
+      if (!ci) { ci = newObj(); jo->put("coin_info", ci); }
+      ci->put("coin", 9999999);
+      ArrP dt = newArr();
+      dt->put(newObj()->put("before_paid_coin", 9999999)->put("before_free_coin", 0)->put("after_paid_coin", 9999999)->put("after_free_coin", 0));
+      ci->put("details", dt);
+      jo->put("gp", 999999999);
+    }
     ObjP eula = jo->optJSONObject("user_eula_info");
     if (eula) {
       eula->put("eula_privacy_action", "NONE");
@@ -59,7 +68,12 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
         zs::loge("OFFLINE_SERVER", std::string("[IOS_AGENT] agent_list refresh failed ") + e.what());
       }
       ObjP ci = jo->optJSONObject("coin_info");
-      if (ci) ci->put("coin", 9999999);
+      if (!ci) { ci = newObj(); jo->put("coin_info", ci); }
+      ci->put("coin", 9999999);
+      ArrP dt = newArr();
+      dt->put(newObj()->put("before_paid_coin", 9999999)->put("before_free_coin", 0)->put("after_paid_coin", 9999999)->put("after_free_coin", 0));
+      ci->put("details", dt);
+      jo->put("gp", 999999999);
     }
     ArrP gl;
     if (name == "responses/CmdUseMyclubAgent.json" && (gl = jo->optJSONArray("gameplayer_list"))) {
@@ -558,7 +572,9 @@ Response serveInner(Request& r) {
     z27InjectTrainingItems(eiWrap);
     jo->put("item_list", items);
     jo->put("gp", 999999999);
-    jo->put("coin_info", newObj()->put("coin", 999999)->put("details", newArr()));
+    ArrP dt = newArr();
+    dt->put(newObj()->put("before_paid_coin", 999999)->put("before_free_coin", 0)->put("after_paid_coin", 999999)->put("after_free_coin", 0));
+    jo->put("coin_info", newObj()->put("coin", 999999)->put("details", dt));
 
     return serveObjectAsEncryptedMsgPack(jo);
   }
@@ -594,11 +610,30 @@ Response serveInner(Request& r) {
     ziruMyLeagueSetActive(0);
     return handleZiruLeagueStatic("responses/ZIRU_IS_FIRST_LEAGUE.json");
   }
-  if (isCmd("CMD_GET_LEAGUE_COM_INFO")) {
-    // Entering the AI league after MyLeague must switch the following opponent
+  if (isCmd("CMD_GET_LEAGUE_COM_INFO") || isCmd("CMD_GET_LEAGUE_INFO")) {
+    // Entering the AI/PVP league after MyLeague must switch the following opponent
     // and START_GAME requests back to the division handlers.
     ziruMyLeagueSetActive(0);
-    return handleZiruLeagueInfo();
+    std::string msg = isCmd("CMD_GET_LEAGUE_INFO") ? "CMD_GET_LEAGUE_INFO" : "CMD_GET_LEAGUE_COM_INFO";
+    return handleZiruLeagueInfo(msg);
+  }
+  if (isCmd("CMD_GET_MANNER_WARN")) {
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    jo->put("rqid", (long long)(req ? req->optLong("rqid", 1) : 1));
+    jo->put("msgid", "CMD_GET_MANNER_WARN");
+    jo->put("manner_grade", "A");
+    jo->put("manner_point", 100);
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
+  if (isCmd("CMD_SET_LEAGUE_PERFORMANCE_DISPED")) {
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    jo->put("rqid", (long long)(req ? req->optLong("rqid", 1) : 1));
+    jo->put("msgid", "CMD_SET_LEAGUE_PERFORMANCE_DISPED");
+    return serveObjectAsEncryptedMsgPack(jo);
   }
   if (isCmd("CMD_GET_GAMERESULT_LIST")) return handleZiruLeagueHistoryDynamic();
   if (isCmd("CMD_CHECK_MATCH_ENABLE"))

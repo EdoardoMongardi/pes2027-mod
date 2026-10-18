@@ -82,12 +82,20 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
 Response handleZiruGiveupResultEarly() { return z27Result(); }
 Response handleZiruLeagueHistoryDynamic() { return z27HistoryResponse(); }
 
-Response handleZiruLeagueInfo() {
+Response handleZiruLeagueInfo(const std::string& msgid = "CMD_GET_LEAGUE_COM_INFO") {
   try {
     ObjP jo = loadZiruJsonAssetObject("responses/cmd_get_league_com_info.json");
     patchZiruLeagueInfo(jo);
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     if (req) nn(jo)->put("rqid", (long long)req->optLong("rqid", 1));
+    jo->put("msgid", msgid);
+    if (msgid == "CMD_GET_LEAGUE_INFO") {
+      ObjP li = jo->optJSONObject("league_info");
+      if (li) {
+        li->put("is_com_match", "NO");
+        li->put("type", "PVP");
+      }
+    }
     return serveObjectAsEncryptedMsgPack(jo);
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V46_INFO_ERR] ") + e.what());
