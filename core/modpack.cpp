@@ -160,8 +160,13 @@ bool activatePending(const std::string& pending, const std::string& docs, std::s
       if (recovered) unlink((stage + "/applying").c_str());
       err = "Khong kich hoat duoc mod " + batch + (recovered ? "; da khoi phuc cac tep cu" : "; se thu khoi phuc khi mo lai game"); return false;
     }
-    std::ifstream in(stage + "/manifest.json"); std::ofstream out(backup + "/manifest.json"); out << in.rdbuf();
-    installed += (int)done.size(); zd::removeTree(stage);
+    std::ifstream in(stage + "/manifest.json"); std::ofstream out(backup + "/manifest.json"); out << in.rdbuf(); out.close();
+    // Commit by hiding the entire batch atomically. A crash during cleanup
+    // must not leave a visible batch with a half-deleted recovery journal.
+    if (rename(stage.c_str(), (pending + "/.done-" + batch).c_str()) != 0) {
+      err = "Chua ghi xong trang thai mod; se khoi phuc va thu lai khi mo game"; return false;
+    }
+    installed += (int)done.size(); zd::removeTree(pending + "/.done-" + batch);
   }
   summary = std::to_string(installed) + " tep mod da kich hoat";
   return true;

@@ -66,8 +66,11 @@ static NSString* modInventory() {
   uint64_t available = freeBytes();
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
     std::string summary, error;
-    bool ok = zm::stageZip(u.path.fileSystemRepresentation,
-        [gSupport stringByAppendingPathComponent:@"PendingMods"].fileSystemRepresentation, available, summary, error);
+    bool ok = false;
+    try {
+      ok = zm::stageZip(u.path.fileSystemRepresentation,
+          [gSupport stringByAppendingPathComponent:@"PendingMods"].fileSystemRepresentation, available, summary, error);
+    } catch (const std::exception& e) { error = e.what(); }
     if (scoped) [u stopAccessingSecurityScopedResource];
     ZLog(@"[MOD] stage %s: %s", ok ? "OK" : "FAILED", ok ? summary.c_str() : error.c_str());
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -90,7 +93,7 @@ static NSString* modInventory() {
 - (void)openMods:(UIButton*)button {
   UIViewController* vc = button.window.rootViewController;
   while (vc.presentedViewController) vc = vc.presentedViewController;
-  if (!vc || [vc isKindOfClass:UINavigationController.class] && [((UINavigationController*)vc).topViewController isKindOfClass:ZiruModVC.class]) return;
+  if (!vc || ([vc isKindOfClass:UINavigationController.class] && [((UINavigationController*)vc).topViewController isKindOfClass:ZiruModVC.class])) return;
   UINavigationController* nav = [[UINavigationController alloc] initWithRootViewController:[ZiruModVC new]];
   nav.modalPresentationStyle = UIModalPresentationPageSheet; [vc presentViewController:nav animated:YES completion:nil];
 }
