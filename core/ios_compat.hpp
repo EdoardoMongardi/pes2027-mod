@@ -32,6 +32,18 @@ inline bool adaptIosPlayerData(zj::Value& value, bool outgoing) {
   if (value.t == zj::Value::ARR) {
     for (auto& item : value.a->v) changed |= adaptIosPlayerData(item, outgoing);
   } else if (value.t == zj::Value::OBJ) {
+    // Verified against dt870 Coach.bin (176-byte records) and native
+    // CoachBase::SetWorkFromPesdb at 0x104b93814: ability_id[3] is the
+    // 10-bit field at bit 10 of the qword at record+16. Two injected coach
+    // templates had this field shifted once too far (12->24, 14->28).
+    // Repair on the wire too, because older squad saves retain the templates.
+    auto cid = value.o->optJSONObject("coach_id");
+    auto abilities = value.o->optJSONArray("ability_id");
+    if (outgoing && cid && abilities && abilities->length() == 4) {
+      int64_t id = cid->optLong("id", 0);
+      if (id == 17609097478250LL && abilities->optInt(3, 0) == 24) { abilities->put(3, 12); changed = true; }
+      if (id == 17608560707469LL && abilities->optInt(3, 0) == 28) { abilities->put(3, 14); changed = true; }
+    }
     for (const auto& key : value.o->keys()) {
       auto item = value.o->get(key);
       if ((key == "additional_skill_id" || key == "skillcard_id_list") && item.t == zj::Value::ARR) {

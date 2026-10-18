@@ -14,3 +14,7 @@ build/zipcheck: core/zipread.cpp test/zipcheck.cpp
 build/packtest: core/datapack.cpp core/zipread.cpp core/jvalue.cpp test/packtest.cpp
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ core/datapack.cpp core/zipread.cpp core/jvalue.cpp test/packtest.cpp -lz
+
+build/modtest: core/modpack.cpp core/datapack.cpp core/zipread.cpp core/jvalue.cpp test/modtest.cpp
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -o $@ core/modpack.cpp core/datapack.cpp core/zipread.cpp core/jvalue.cpp test/modtest.cpp -lz

@@ -41,6 +41,7 @@ static FILE* (*orig_fopen)(const char *filename, const char *mode);
 static DIR* (*orig_opendir)(const char *name);
 
 #include "../core/datapack.hpp"
+#include "../core/modpack.hpp"
 #include "../core/server.hpp"
 #include "ZiruFontPak.h"
 #include "ZiruWebView.h"
@@ -1293,7 +1294,7 @@ static BOOL checkDirectFolderData(NSString** why) {
 
   // Auto-import stadium files if user placed them directly in Documents root
   for (NSString* f in [fm contentsOfDirectoryAtPath:gDocs error:nil]) {
-    if ([f hasPrefix:@"pc3002_"] || [f hasPrefix:@"pc3012_"] || [f containsString:@"stadium"]) {
+    if (zm::stadiumName(f.UTF8String) || [f containsString:@"stadium"]) {
       NSString* src = [gDocs stringByAppendingPathComponent:f];
       NSString* dst = [dlDir stringByAppendingPathComponent:f];
       if (![fm fileExistsAtPath:dst]) {
@@ -1336,11 +1337,9 @@ static BOOL checkDirectFolderData(NSString** why) {
   // returns Documents/Download/ where LiveDataVersionLoader, LiveDataHashChecker, and LiveDataBinder look for dt870 and pc9242..pc9259!
   // Stadium files belong exclusively in Documents/Download/ where AddStadiumDlTask expects them.
   // Never mount stadium paks in Documents/pak/ (Unreal Engine boot mount causes stream deadlock / black screen).
-  NSArray* staleEnginePaks = @[@"pc3002_mobile_ios.pak", @"pc3002_mobile_ios.ucas", @"pc3002_mobile_ios.utoc",
-                               @"pc3012_mobile_ios.pak", @"pc3012_mobile_ios.ucas", @"pc3012_mobile_ios.utoc",
-                               @"pc3002_mobile_and.pak", @"pc3002_mobile_and.ucas", @"pc3002_mobile_and.utoc",
-                               @"pc3012_mobile_and.pak", @"pc3012_mobile_and.ucas", @"pc3012_mobile_and.utoc"];
+  NSArray* staleEnginePaks = [fm contentsOfDirectoryAtPath:pakDir error:nil];
   for (NSString* stale in staleEnginePaks) {
+    if (!zm::stadiumName(stale.UTF8String)) continue;
     NSString* sp = [pakDir stringByAppendingPathComponent:stale];
     if ([fm destinationOfSymbolicLinkAtPath:sp error:nil]) {
       unlink(sp.fileSystemRepresentation);
@@ -1367,7 +1366,7 @@ static BOOL checkDirectFolderData(NSString** why) {
         }
       }
       // Stadium paks/ucas/utoc and version_stadium.bin must be in Download/ for AddStadiumDlTask
-      if ([f containsString:@"pc3002"] || [f containsString:@"pc3012"] || [f containsString:@"stadium"]) {
+      if (zm::stadiumName(f.UTF8String) || [f containsString:@"stadium"]) {
         ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
         if ([f containsString:@"_mobile_and"]) {
           NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
@@ -2098,13 +2097,25 @@ static void startGame() {
   });
 }
 
+#include "ZiruMods.inc"
+
 static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* opts) {
   gDelegate = self;
   gLaunchApp = app;
   gLaunchOptions = opts;
 
+  // Complete mod batches are activated before Unreal opens any containers.
+  std::string modSummary, modError;
+  bool modsOK = zm::activatePending([gSupport stringByAppendingPathComponent:@"PendingMods"].fileSystemRepresentation,
+      gDocs.fileSystemRepresentation, modSummary, modError);
+  ZLog(@"[MOD] %s %s", modSummary.c_str(), modError.c_str());
+
   // Let UE4 initialize its window and Metal graphics first!
   BOOL res = ((BOOL(*)(id, SEL, id, id))gOrigDidFinish)(self, _cmd, app, opts);
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    installModButton(getAppWindow(self));
+    if (!modsOK) showModError(getAppWindow(self), [NSString stringWithUTF8String:modError.c_str()]);
+  });
 
   // Check if direct data exists
   NSString* why = nil;

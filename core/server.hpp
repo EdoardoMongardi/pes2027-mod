@@ -4,6 +4,7 @@
 #include <fstream>
 #include "zipread.hpp"
 #include <sys/stat.h>
+#include <dirent.h>
 
 #include <algorithm>
 #include <cstring>

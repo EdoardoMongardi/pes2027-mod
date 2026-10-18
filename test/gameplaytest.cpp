@@ -37,6 +37,20 @@ static ObjP result(OfflineServer& s, int64_t id, int a, int b, bool giveup = fal
 int main() {
   try {
     zs::setVerbose(false);
+    {
+      Value coaches(newArr()->put(newObj()->put("coach_id", newObj()->put("id", 17609097478250LL))
+          ->put("ability_id", newArr()->put(11)->put(14)->put(7)->put(24)))
+          ->put(newObj()->put("coach_id", newObj()->put("id", 17608560707469LL))
+          ->put("ability_id", newArr()->put(7)->put(13)->put(17)->put(28)))
+          ->put(newObj()->put("coach_id", newObj()->put("id", 123))
+          ->put("ability_id", newArr()->put(7)->put(13)->put(17)->put(28))));
+      adaptIosPlayerData(coaches, true);
+      check(coaches.a->getJSONObject(0)->getJSONArray("ability_id")->getInt(3) == 12, "Conte second link matches native Coach.bin");
+      check(coaches.a->getJSONObject(1)->getJSONArray("ability_id")->getInt(3) == 14, "Mourinho second link matches native Coach.bin");
+      check(coaches.a->getJSONObject(2)->getJSONArray("ability_id")->getInt(3) == 28, "other coaches retain their link ID");
+      adaptIosPlayerData(coaches, true);
+      check(coaches.a->getJSONObject(0)->getJSONArray("ability_id")->getInt(3) == 12, "coach repair is idempotent");
+    }
     // Independent table extracted from iOS Player::GetDataLabel(SkillCard),
     // VA 0x10578bc00. Compare semantic parameter labels for every source skill.
     const int iosSkillLabels[74] = {
@@ -62,6 +76,22 @@ int main() {
     std::string root(temp);
     std::filesystem::create_directories(root + "/responses");
     Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
+    {
+      Config stadiumCfg = cfg; stadiumCfg.downloadDir = root + "/stadiums";
+      std::filesystem::create_directories(stadiumCfg.downloadDir);
+      for (const char* ext : {"pak", "ucas", "utoc"})
+        std::ofstream(stadiumCfg.downloadDir + "/pc3099_mobile_ios." + ext) << "custom";
+      std::ofstream(stadiumCfg.downloadDir + "/pc3002_mobile_ios.pak") << "incomplete";
+      OfflineServer server(stadiumCfg);
+      auto list = call(server, "CMD_GET_STADIUM_DATA")->getJSONArray("data_list");
+      check(list->length() == 3, "advertise complete installed stadiums only, including new IDs");
+      check(list->getJSONObject(0)->getString("name") == "pc3099_mobile_ios.pak", "custom stadium ID discovered");
+      check(list->getJSONObject(1)->getInt("size") == 6, "stadium metadata uses installed size");
+      auto hash = list->getJSONObject(1)->getString("hash");
+      std::ofstream(stadiumCfg.downloadDir + "/pc3099_mobile_ios.ucas") << "edited";
+      list = call(server, "CMD_GET_STADIUM_DATA")->getJSONArray("data_list");
+      check(list->getJSONObject(1)->getString("hash") != hash, "same-size replacement invalidates stadium hash");
+    }
     {
       std::filesystem::create_directories(root + "/livedata");
       std::ofstream(root + "/livedata/pc9999_mobile_ios.ucas") << "native";

@@ -270,16 +270,7 @@ Response serveInner(Request& r) {
     jo->put("result", "NOERR");
     jo->put("rqid", rq);
     jo->put("msgid", "CMD_GET_STADIUM_DATA");
-    ArrP dl = newArr();
-    // pc3002 (San Siro) iOS Metal
-    dl->put(newObj()->put("name", "pc3002_mobile_ios.pak")->put("size", 365)->put("hash", "b372aca3413c2d69234f5824db8af78cb367ca0fdee4df624fa32978bf1ace43")->put("version", 2026081300)->put("changelist_number", 0));
-    dl->put(newObj()->put("name", "pc3002_mobile_ios.ucas")->put("size", 265236240LL)->put("hash", "17692d16a12593ece3f1731b108b5b6ff6724e548dac4a8bb2a69c662fcd394d")->put("version", 2026081300)->put("changelist_number", 0));
-    dl->put(newObj()->put("name", "pc3002_mobile_ios.utoc")->put("size", 433519)->put("hash", "18a8e47bedce4432caabe605d76f0daea58174dbd6f65330236ad3869fab7976")->put("version", 2026081300)->put("changelist_number", 0));
-    // pc3012 (Olimpico) iOS Metal
-    dl->put(newObj()->put("name", "pc3012_mobile_ios.pak")->put("size", 365)->put("hash", "70b014d170e45373acf526c1ca411ad57586ed9de54d961751cac1b286961c75")->put("version", 2026081300)->put("changelist_number", 0));
-    dl->put(newObj()->put("name", "pc3012_mobile_ios.ucas")->put("size", 337073200LL)->put("hash", "ee0d8036003bcafef1cc33d62d94b40cd25a6792695f1c8f418119f05ed1bb55")->put("version", 2026081300)->put("changelist_number", 0));
-    dl->put(newObj()->put("name", "pc3012_mobile_ios.utoc")->put("size", 358860)->put("hash", "abfe6d236970e7bfdeebc52d05d27cf1252726b6131d1da25e927b2a9b3fb09b")->put("version", 2026081300)->put("changelist_number", 0));
-    jo->put("data_list", dl);
+    jo->put("data_list", installedStadiumData());
     return serveObjectAsEncryptedMsgPack(jo);
   }
   if (isCmd("CMD_CHECK_STRING")) {
