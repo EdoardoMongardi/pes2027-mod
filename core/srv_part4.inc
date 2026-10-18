@@ -423,10 +423,18 @@ bool isZiruLocalCommentaryInstalled() {
 // SHA-256 of a commentary file, cached by size+mtime (hashing 1.2 GB takes a few seconds on a phone).
 std::string commentaryHash(const std::string& path, const struct stat& st) {
   std::string cache = cfg.dataDir + "/commentary_hash_" + path.substr(path.rfind('/') + 1) + ".txt";
-  std::string key = std::to_string((long long)st.st_size) + " " + std::to_string((long long)st.st_mtime);
+  // A user may replace a mod with another file of the same size and timestamp.
+  // Include filesystem identity and change time so its old hash is not reused.
+  std::string key = std::to_string((long long)st.st_size) + ":" + std::to_string((long long)st.st_mtime)
+      + ":" + std::to_string((long long)st.st_ctime) + ":" + std::to_string((long long)st.st_ino);
+#if defined(__APPLE__)
+  key += ":" + std::to_string(st.st_mtimespec.tv_nsec) + ":" + std::to_string(st.st_ctimespec.tv_nsec);
+#elif defined(__linux__)
+  key += ":" + std::to_string(st.st_mtim.tv_nsec) + ":" + std::to_string(st.st_ctim.tv_nsec);
+#endif
   std::ifstream in(cache);
-  std::string k1, k2, h;
-  if (in >> k1 >> k2 >> h && k1 + " " + k2 == key && h.size() == 64) return h;
+  std::string savedKey, h;
+  if (in >> savedKey >> h && savedKey == key && h.size() == 64) return h;
   std::string hex;
   if (!zz::sha256File(path, hex)) return "";
   std::string tmp = cache + ".tmp" + std::to_string((long long)(uintptr_t)&hex);  // per-call name: prewarm thread vs request
@@ -434,6 +442,45 @@ std::string commentaryHash(const std::string& path, const struct stat& st) {
   std::rename(tmp.c_str(), cache.c_str());
   zs::logi("OFFLINE_SERVER", "[IOS_COMMENTARY] hashed " + path + " -> " + hex);
   return hex;
+}
+
+ArrP installedStadiumData() {
+  ArrP list = newArr();
+  const std::string dir = cfg.downloadDir.empty() ? cfg.dataDir + "/Download" : cfg.downloadDir;
+  DIR* d = opendir(dir.c_str());
+  if (!d) return list;
+  std::set<std::string> stems;
+  while (dirent* e = readdir(d)) {
+    std::string n = e->d_name;
+    // Stadium containers use pc3xxx. Discover all IDs, not just 3002/3012.
+    if (n.size() == 21 && n.compare(0, 3, "pc3") == 0 &&
+        n.find_first_not_of("0123456789", 3) == 6 && n.substr(6) == "_mobile_ios.pak")
+      stems.insert(n.substr(0, n.size() - 4));
+  }
+  closedir(d);
+  for (const auto& stem : stems) {
+    struct stat st[3];
+    const char* exts[] = {"pak", "ucas", "utoc"};
+    bool complete = true;
+    for (int i = 0; i < 3; ++i) {
+      std::string p = dir + "/" + stem + "." + exts[i];
+      if (stat(p.c_str(), &st[i]) != 0 || !S_ISREG(st[i].st_mode) || st[i].st_size <= 0) complete = false;
+    }
+    if (!complete) {
+      zs::logi("OFFLINE_SERVER", "[STADIUM] incomplete container, waiting for all three files: " + stem);
+      continue;
+    }
+    ArrP group = newArr();
+    for (int i = 0; i < 3; ++i) {
+      std::string name = stem + "." + exts[i];
+      std::string hash = commentaryHash(dir + "/" + name, st[i]);
+      if (hash.empty()) { complete = false; break; }
+      group->put(newObj()->put("name", name)->put("size", (long long)st[i].st_size)
+          ->put("hash", hash)->put("version", 2026081300)->put("changelist_number", 0));
+    }
+    if (complete) for (int i = 0; i < group->length(); ++i) list->put(group->get(i));
+  }
+  return list;
 }
 
 // iOS: the commentary list describes the file that is really installed. Ziru sends the metadata of Konami's English
