@@ -80,6 +80,16 @@ int main() {
           "repaired database hash is also updated in the version file");
       check(version->getJSONArray("dt880")->getJSONObject(0)->getInt("ucasFileSize") == 6,
           "native texture container size is also updated in the version file");
+      auto agueroParams = newArr();
+      for (int i = 0; i < 149; ++i) agueroParams->put(0);
+      auto aguero = newObj()->put("gameplayer_id", newObj()->put("id", 88044682118054LL))
+          ->put("parameters", agueroParams)->put("play_style", newArr()->put(1)->put(0));
+      server.z27ApplyAppearanceAndClub(aguero);
+      check(agueroParams->getInt(49) == 7 && agueroParams->getInt(50) == 1 && agueroParams->getInt(56) == 14,
+          "Aguero's missing appearance comes from his known base preset");
+      agueroParams->put(50, 9);
+      server.z27ApplyAppearanceAndClub(aguero);
+      check(agueroParams->getInt(50) == 9, "existing appearance customization is preserved");
     }
     auto p = obj(R"({"gameplayer_id":{"id":1,"serial":101},"level_info":{"level":5,"level_limit":5,"customize_point":0}})");
     auto parameters = newArr(); for (int i = 0; i < 145; ++i) parameters->put(i == 14 ? 70 : 0);

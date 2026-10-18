@@ -17,6 +17,18 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
 
   // 2. Fix skin tone parameter 49 if 0 (chalk-white albino bug)
   ArrP params = cur->optJSONArray("parameters");
+  auto restoreAppearance = [&](const ArrP& values) {
+    if (!values || values->length() < 61) return;
+    bool missing = true;
+    for (int i = 50; i <= 60; ++i) if (values->optInt(i, 0) != 0) missing = false;
+    auto preset = kAppearancePresets.find(base_id);
+    if (missing && preset != kAppearancePresets.end()) {
+      // Ziru's special-card records zero these appearance fields. Restore the
+      // known base-player values instead of assigning every player skin 1.
+      for (int i = 0; i < 12; ++i) values->put(49 + i, preset->second.v[i]);
+    }
+  };
+  restoreAppearance(params);
   if (params && params->length() >= 65) {
     if (params->optInt(49, 0) == 0) params->put(49, 1);
   }
@@ -32,6 +44,7 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     if (params->optInt(64, 0) == 0) params->put(64, 1);
   }
   ArrP origParams = cur->optJSONArray("original_parameters");
+  restoreAppearance(origParams);
   if (origParams && origParams->length() >= 65 && ps && ps->length() > 0) {
     if (origParams->optInt(49, 0) == 0) origParams->put(49, 1);
     int st1 = ps->optInt(0, 0);
