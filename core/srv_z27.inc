@@ -1,8 +1,5 @@
 // ---- z27: division league / squads / kits (OfflineServer.java ~3801-4682) ----
 
-extern "C" int32_t gZiruHomeTeamId = 0;
-extern "C" int32_t gZiruAwayTeamId = 0;
-
 ObjP z27Meta(const std::string& k) {
   JStr m = loadMeta(k);
   if (!m || m->empty()) return nullptr;

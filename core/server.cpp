@@ -5,6 +5,11 @@
 #include <cctype>
 #include <fstream>
 
+extern "C" {
+  int32_t gZiruHomeTeamId = 0;
+  int32_t gZiruAwayTeamId = 0;
+}
+
 namespace zsv {
 
 int32_t parseInt(const std::string& s) {

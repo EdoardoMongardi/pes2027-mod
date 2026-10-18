@@ -24,6 +24,11 @@
 #include "store.hpp"
 #include "ios_compat.hpp"
 
+extern "C" {
+  extern int32_t gZiruHomeTeamId;
+  extern int32_t gZiruAwayTeamId;
+}
+
 namespace zsv {
 using namespace zj;
 using Bytes = zc::Bytes;
