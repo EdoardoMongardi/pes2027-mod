@@ -26,7 +26,10 @@ static bool safePath(const std::string& p) {
   return true;
 }
 bool stadiumName(const std::string& n) {
-  return n.size() > 6 && n.compare(0, 3, "pc3") == 0 &&
+  // pc3001/3011 are boot stadium/common assets; pc36xx are player faces.
+  // They must stay mounted in pak/, not be moved to the download directory.
+  return n.size() > 6 && n.compare(0, 4, "pc30") == 0 &&
+      n.compare(0, 6, "pc3001") != 0 && n.compare(0, 6, "pc3011") != 0 &&
       n.find_first_not_of("0123456789", 3) == 6 && n[6] == '_';
 }
 static std::string destination(const std::string& source) {

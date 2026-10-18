@@ -13,6 +13,8 @@ int main(int argc, char** argv) {
     fs::create_directories(root / "docs/Download");
     std::ofstream(root / "docs/Download/pc3099_mobile_ios.pak") << "old";
     check(zm::stadiumName("pc3099_mobile_ios.pak") && !zm::stadiumName("pc7999_mobile_ios.pak"), "stadium classification");
+    for (const char* name : {"pc3001_mobile_ios.pak", "pc3011_mobile_ios.pak", "pc3600_mobile_ios.pak", "pc3611_mobile_ios.pak"})
+      check(!zm::stadiumName(name), "core stadium/face packages must remain boot-mounted");
     for (const char* name : {"traversal", "duplicate", "partial", "empty", "corrupt"}) {
       check(!zm::stageZip((root / (std::string(name) + ".zip")).string(), pending, 1000000000, s, e), name);
       check(read(root / "docs/Download/pc3099_mobile_ios.pak") == "old", "invalid ZIP leaves installed mods intact");

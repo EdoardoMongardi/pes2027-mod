@@ -452,8 +452,10 @@ ArrP installedStadiumData() {
   std::set<std::string> stems;
   while (dirent* e = readdir(d)) {
     std::string n = e->d_name;
-    // Stadium containers use pc3xxx. Discover all IDs, not just 3002/3012.
-    if (n.size() == 21 && n.compare(0, 3, "pc3") == 0 &&
+    // Downloaded stadiums use pc30xx. Core pc3001/3011 and face pc36xx
+    // are boot assets; never advertise them as stadium downloads.
+    if (n.size() == 21 && n.compare(0, 4, "pc30") == 0 &&
+        n.compare(0, 6, "pc3001") != 0 && n.compare(0, 6, "pc3011") != 0 &&
         n.find_first_not_of("0123456789", 3) == 6 && n.substr(6) == "_mobile_ios.pak")
       stems.insert(n.substr(0, n.size() - 4));
   }

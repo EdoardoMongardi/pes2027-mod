@@ -57,6 +57,10 @@ class Toc:
         if s.flags & 2:
             di = aes_ecb_dec(di)
         s.metas = [d[p + 33 * i:p + 33 * i + 33] for i in range(ec)]
+        if not dis:
+            # global.utoc has script-object chunks but no directory index.
+            s.mount, s.files = "", {}
+            return
         q = 0; mp, q = rstr(di, q); s.mount = mp
         n, = struct.unpack_from("<I", di, q); q += 4
         dirs = [struct.unpack_from("<IIII", di, q + 16 * i) for i in range(n)]; q += 16 * n
