@@ -291,6 +291,14 @@ int main() {
       }
       check(retainedZero, "valid skill zero survives save, process restart and login");
     }
+    {
+      OfflineServer s(cfg);
+      auto req = newObj()->put("achievement_item_info_list", newArr()->put(newObj()->put("achievement_id", 101)->put("sheet_id", 1)->put("level", 1)));
+      auto resp = call(s, "CMD_RECV_MYCLUB_ACHIEVEMENT", req);
+      check(resp->getJSONArray("achievement_list")->length() > 0, "achievement_list returned");
+      check(resp->getJSONArray("receive_result_list")->length() > 0, "receive_result_list returned");
+      check(resp->getJSONArray("receive_result_list")->getJSONObject(0)->getString("is_success") == "YES", "reward claimed successfully");
+    }
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
     check(child >= 0, "spawn abrupt-exit save test");

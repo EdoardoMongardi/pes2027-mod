@@ -99,22 +99,8 @@ static NSString* modInventory() {
 }
 @end
 static void installModButton(UIWindow* win) {
-  if (!win) return;
-  static ZiruModButtonTarget* target; static UIButton* button;
-  if (!target) target = [ZiruModButtonTarget new];
-  if (!button) {
-    button = [UIButton buttonWithType:UIButtonTypeSystem];
-    [button setTitle:@"MOD" forState:UIControlStateNormal]; button.titleLabel.font = [UIFont boldSystemFontOfSize:11];
-    button.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.6]; button.tintColor = PESLime(); button.layer.cornerRadius = 7;
-    [button addTarget:target action:@selector(openMods:) forControlEvents:UIControlEventTouchUpInside];
-    button.translatesAutoresizingMaskIntoConstraints = NO;
-  }
-  if (button.superview == win) return;
-  [button removeFromSuperview]; [win addSubview:button];
-  [NSLayoutConstraint activateConstraints:@[
-    [button.topAnchor constraintEqualToAnchor:win.safeAreaLayoutGuide.topAnchor constant:4],
-    [button.trailingAnchor constraintEqualToAnchor:win.safeAreaLayoutGuide.trailingAnchor constant:-4],
-    [button.widthAnchor constraintEqualToConstant:44], [button.heightAnchor constraintEqualToConstant:30]]];
+  (void)win;
+  // MOD button hidden per user request: mod files are added directly to the game directory
 }
 static void showModError(UIWindow* win, NSString* error) {
   UIViewController* vc = win.rootViewController; while (vc.presentedViewController) vc = vc.presentedViewController;

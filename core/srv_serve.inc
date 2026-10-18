@@ -457,6 +457,16 @@ Response serveInner(Request& r) {
           if (cid > 0 && !vcontains(claimedIds, cid)) claimedIds.push_back(cid);
         }
       }
+      ArrP infoArr = req->optJSONArray("achievement_item_info_list");
+      if (infoArr) {
+        for (int i = 0; i < infoArr->length(); i++) {
+          ObjP entry = infoArr->optJSONObject(i);
+          if (entry) {
+            int cid = entry->optInt("achievement_id", 0);
+            if (cid > 0 && !vcontains(claimedIds, cid)) claimedIds.push_back(cid);
+          }
+        }
+      }
     }
     if (claimedIds.empty()) {
       for (int i = 101; i <= 108; i++) claimedIds.push_back(i);
@@ -465,15 +475,10 @@ Response serveInner(Request& r) {
     ObjP achConfig = loadZiruJsonAssetObject("responses/set_myclubuser_achieveentlist.json");
     ArrP cfgList = achConfig ? achConfig->optJSONArray("achievement_list") : nullptr;
 
+    ArrP fullAchList = newArr();
+
     for (int cid : claimedIds) {
       if (cid <= 0) continue;
-      ObjP rRes = newObj();
-      rRes->put("achievement_id", cid);
-      rRes->put("is_success", "YES");
-      resList->put(rRes);
-
-      ObjP itemInfo = newObj();
-      itemInfo->put("achievement_id", cid);
 
       ObjP matchedPres;
       if (cfgList) {
@@ -485,6 +490,31 @@ Response serveInner(Request& r) {
           }
         }
       }
+
+      ObjP aEntry = newObj();
+      aEntry->put("achievement_id", cid);
+      aEntry->put("is_clear", "true");
+      aEntry->put("is_received", "true");
+      aEntry->put("level", 1);
+      aEntry->put("complete_level", 1);
+      aEntry->put("achievement_num", 10);
+      aEntry->put("achievement_need_num", 10);
+      aEntry->put("present_type", "achievement_reward");
+      aEntry->put("present_count", matchedPres ? matchedPres->optInt("count", 50) : 50);
+      if (matchedPres) {
+        aEntry->put("present", z27Copy(matchedPres));
+      }
+      fullAchList->put(aEntry);
+
+      ObjP rRes = newObj();
+      rRes->put("achievement_id", cid);
+      rRes->put("is_success", "YES");
+      rRes->put("rev_result", "NONE");
+      resList->put(rRes);
+
+      ObjP itemInfo = newObj();
+      itemInfo->put("achievement_id", cid);
+
       if (matchedPres) {
         itemInfo->put("present", z27Copy(matchedPres));
         ObjP ii = matchedPres->optJSONObject("item_info");
@@ -513,11 +543,13 @@ Response serveInner(Request& r) {
       achList->put(itemInfo);
     }
 
+    jo->put("achievement_list", fullAchList);
     jo->put("achievement_item_info_list", achList);
     jo->put("receive_result_list", resList);
     jo->put("fame_receive_result_list", newArr());
     jo->put("is_expired_item_included", "NO");
     jo->put("fame_notification_list", newArr());
+    jo->put("achievement_notification", newArr());
 
     ArrP items = newArr();
     ObjP eiWrap = newObj();
