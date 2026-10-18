@@ -613,6 +613,38 @@ void patchLocalLivedataUrls(const ObjP& jo) {
       std::string name = o->optString("name", "");
       if (name.empty()) continue;
       if (assets.exists("livedata/" + name)) o->put("url", livedataBaseUrl + name);
+      if (cfg.iosPlayerLayout) {
+        std::string path = assets.path("livedata/" + name);
+        struct stat st;
+        if (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+          std::string hash = commentaryHash(path, st);
+          o->put("size", (long long)st.st_size);
+          if (!hash.empty()) o->put("hash", hash);
+        }
+      }
+    }
+    // The version file is a second integrity manifest. Updating only the URL
+    // or data_list leaves Android hashes in it, which rejects native iOS packs
+    // and the repaired dt870 table on the next Live Update bind.
+    if (cfg.iosPlayerLayout) {
+      ObjP version = Object::parse(li->optString("version_file", "{}"));
+      for (int i = 0; i < list->length(); ++i) {
+        ObjP item = list->optJSONObject(i);
+        if (!item || !item->has("hash")) continue;
+        std::string name = item->optString("name", "");
+        if (startsWith(name, "dt870")) {
+          version->put("dt870Hash", item->getString("hash"))->put("dt870FileSize", item->getLong("size"));
+        }
+        ArrP packs = version->optJSONArray("dt880");
+        for (int j = 0; packs && j < packs->length(); ++j) {
+          ObjP pack = packs->optJSONObject(j);
+          if (!pack || !startsWith(name, pack->optString("name", "") + "_")) continue;
+          const char* hashKey = endsWith(name, ".pak") ? "hash" : endsWith(name, ".ucas") ? "ucas" : "utoc";
+          const char* sizeKey = endsWith(name, ".pak") ? "hashFileSize" : endsWith(name, ".ucas") ? "ucasFileSize" : "utocFileSize";
+          pack->put(hashKey, item->getString("hash"))->put(sizeKey, item->getLong("size"));
+        }
+      }
+      li->put("version_file", version->toString());
     }
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ALMANAC_V8] LiveData URL patch failed ") + e.what());

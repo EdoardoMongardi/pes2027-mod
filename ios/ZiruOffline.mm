@@ -1091,6 +1091,8 @@ static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
     ZLog(@"[STADIUM] Rejected Android alias for %@", linkPath.lastPathComponent);
     return;
   }
+  if ([linkPath containsString:@"_mobile_ios"] && [targetPath containsString:@"_mobile_and"] &&
+      [fm fileExistsAtPath:linkPath] && [linkPath.stringByResolvingSymlinksInPath containsString:@"_mobile_ios"]) return;
   if ([linkPath.stringByStandardizingPath isEqualToString:targetPath.stringByStandardizingPath]) return;
   if (![fm fileExistsAtPath:targetPath]) return;
   // Download/download can be the same directory on iOS. Never delete a file
@@ -1156,13 +1158,24 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
   NSFileManager* fm = NSFileManager.defaultManager;
   NSString* bundle = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru"];
   NSData* manifestData = [NSData dataWithContentsOfFile:[bundle stringByAppendingPathComponent:@"table-fixes.json"]];
-  NSDictionary* manifest = manifestData ? [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:nil] : nil;
+  NSMutableDictionary* manifest = manifestData ? [[NSJSONSerialization JSONObjectWithData:manifestData options:0 error:nil] mutableCopy] : [NSMutableDictionary dictionary];
   if (![manifest isKindOfClass:NSDictionary.class]) return;
+  NSData* nativeData = [NSData dataWithContentsOfFile:[bundle stringByAppendingPathComponent:@"native-livedata.json"]];
+  NSArray* native = nativeData ? [NSJSONSerialization JSONObjectWithData:nativeData options:0 error:nil] : nil;
+  if ([native isKindOfClass:NSArray.class]) for (NSDictionary* entry in native) {
+    NSString* name = entry[@"name"];
+    if ([name hasPrefix:@"pc92"] && [name isEqualToString:name.lastPathComponent] && entry[@"android_sha256"]) {
+      manifest[name] = @{@"original_sha256": entry[@"android_sha256"], @"sha256": entry[@"sha256"]};
+    }
+  }
   for (NSString* name in manifest) {
-    if (![name isEqualToString:@"dt870_mobile_and.cpk"]) continue;
+    BOOL cpk = [name isEqualToString:@"dt870_mobile_and.cpk"];
+    if (!cpk && ![name hasPrefix:@"pc92"]) continue;
     NSString* source = [[bundle stringByAppendingPathComponent:@"livedata"] stringByAppendingPathComponent:name];
     for (NSString* directory in directories) {
-      for (NSString* alias in @[name, [name stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"]]) {
+      if (!cpk && [directory.lastPathComponent isEqualToString:@"cpk"]) continue;
+      NSArray* aliases = cpk ? @[name, [name stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"]] : @[name];
+      for (NSString* alias in aliases) {
         NSString* path = [directory stringByAppendingPathComponent:alias];
         BOOL exists = [fm fileExistsAtPath:path];
         NSString* link = [fm destinationOfSymbolicLinkAtPath:path error:nil];
@@ -1317,6 +1330,17 @@ static BOOL checkDirectFolderData(NSString** why) {
     for (NSString* f in [fm contentsOfDirectoryAtPath:liveDir error:nil]) {
       NSString* target = [liveDir stringByAppendingPathComponent:f];
       NSString* ext = f.pathExtension.lowercaseString;
+      if ([f containsString:@"_mobile_and"] && ![ext isEqualToString:@"cpk"]) {
+        NSString* nativeName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
+        NSString* nativePath = [liveDir stringByAppendingPathComponent:nativeName];
+        if ([fm fileExistsAtPath:nativePath] && [nativePath.stringByResolvingSymlinksInPath containsString:@"_mobile_ios"]) {
+          for (NSString* dir in @[pakDir, dlDir]) {
+            NSString* old = [dir stringByAppendingPathComponent:f];
+            if ([fm destinationOfSymbolicLinkAtPath:old error:nil]) unlink(old.fileSystemRepresentation);
+          }
+          continue; // retain the Android original in livedata; mount the native iOS package below
+        }
+      }
       // Stadium paks/ucas/utoc and version_stadium.bin must be in Download/ for AddStadiumDlTask
       if ([f containsString:@"pc3002"] || [f containsString:@"pc3012"] || [f containsString:@"stadium"]) {
         // ONLY link native iOS stadium files! NEVER alias Android stadium files to iOS (breaks Apple Metal spectator shader)

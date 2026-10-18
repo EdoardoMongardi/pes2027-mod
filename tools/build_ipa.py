@@ -186,7 +186,7 @@ def patch_executable(data: bytearray, report):
 
 
 # ------------------------------------------------------------------ IPA
-def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=None, online_server="", online_config=None):
+def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=None, online_server="", online_config=None, native_livedata=None):
     exe = os.path.join(app, "PESmobile")
     info_path = os.path.join(app, "Info.plist")
     with open(info_path, "rb") as f:
@@ -360,6 +360,20 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=N
                     n += 1
         if table_fixes:
             z.writestr(root + "ziru/table-fixes.json", json.dumps(table_fixes))
+            n += 1
+        if native_livedata:
+            entries = json.load(open(os.path.join(native_livedata, "native-manifest.json"), encoding="utf-8"))
+            for entry in entries:
+                name = entry["name"]
+                if os.path.basename(name) != name or "_mobile_ios." not in name:
+                    raise SystemExit("invalid native livedata name")
+                src = os.path.join(native_livedata, name)
+                if os.path.getsize(src) != entry["size"] or sha256_file(src) != entry["sha256"]:
+                    raise SystemExit("native livedata integrity failed: " + name)
+                z.write(src, root + "ziru/livedata/" + name, compress_type=zipfile.ZIP_DEFLATED)
+                n += 1
+            report["native_livedata"] = entries
+            z.writestr(root + "ziru/native-livedata.json", json.dumps(entries))
             n += 1
         # Extra UI container (tools/make_extra_pak.py): card photos, emblems and kit thumbnails that Ziru's Android
         # data has and the iOS data lacks. The dylib links ziru/pak_extra/* into Documents/pak at launch.
@@ -652,6 +666,7 @@ def main():
     ap.add_argument("--online-server", default="", help="default online server URL for Friend Match (mod 1.1), e.g. https://1.2.3.4:8443")
     ap.add_argument("--online-config", default="", help="local JSON with server/token/cert_sha256; keep this file outside Git")
     ap.add_argument("--extra-pak", default="", help="folder with pc7999_mobile_ios.{pak,utoc,ucas} from tools/make_extra_pak.py, bundled as ziru/pak_extra")
+    ap.add_argument("--native-livedata", default="", help="verified native iOS livedata folder with native-manifest.json")
     ap.add_argument("--ziru-cpk", default="dt500", help="comma list of CPK stems taken from the Ziru APK instead of the IPA (default dt500; '' = none)")
     ap.add_argument("--commentary", default="", help="commentary CPK to install into the game's Download folder, e.g. D:\\Telegram\\dt510_eng_mobile_all.cpk (Vietnamese)")
     a = ap.parse_args()
@@ -666,7 +681,7 @@ def main():
               "patches": [], "outputs": {}}
     report_path = os.path.join(a.out, "build-report.json")
     if not a.skip_ipa:
-        build_ipa(a.app, a.dylib, a.apk, a.out, report, a.bundle_id, a.display_name, extra_pak=a.extra_pak or None, online_server=a.online_server, online_config=online_config)
+        build_ipa(a.app, a.dylib, a.apk, a.out, report, a.bundle_id, a.display_name, extra_pak=a.extra_pak or None, online_server=a.online_server, online_config=online_config, native_livedata=a.native_livedata or None)
         with open(report_path, "w") as f:
             json.dump(report, f, indent=1)
     else:

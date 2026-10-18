@@ -62,6 +62,25 @@ int main() {
     std::string root(temp);
     std::filesystem::create_directories(root + "/responses");
     Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
+    {
+      std::filesystem::create_directories(root + "/livedata");
+      std::ofstream(root + "/livedata/pc9999_mobile_ios.ucas") << "native";
+      std::ofstream(root + "/livedata/pc9999_mobile_and.ucas") << "old";
+      std::ofstream(root + "/livedata/dt870_mobile_and.cpk") << "fixed";
+      Config ios = cfg; ios.iosPlayerLayout = true; ios.dropAndroidLivedata = false; ios.livedataDir = root + "/livedata";
+      OfflineServer server(ios);
+      auto data = obj(R"({"livedata_info":{"livedata_list":[{"name":"pc9999_mobile_and.ucas","size":3},{"name":"dt870_mobile_and.cpk","size":99}],"version_file":"{\"dt880\":[{\"name\":\"pc9999\"}]}"}})");
+      server.patchLocalLivedataUrls(data);
+      auto info = data->getJSONObject("livedata_info");
+      auto list = info->getJSONArray("livedata_list");
+      auto version = Object::parse(info->getString("version_file"));
+      check(list->getJSONObject(0)->getInt("size") == 6 && list->getJSONObject(0)->getString("hash").size() == 64,
+          "livedata list uses actual native bytes, not Android metadata");
+      check(version->getInt("dt870FileSize") == 5 && version->getString("dt870Hash") == list->getJSONObject(1)->getString("hash"),
+          "repaired database hash is also updated in the version file");
+      check(version->getJSONArray("dt880")->getJSONObject(0)->getInt("ucasFileSize") == 6,
+          "native texture container size is also updated in the version file");
+    }
     auto p = obj(R"({"gameplayer_id":{"id":1,"serial":101},"level_info":{"level":5,"level_limit":5,"customize_point":0}})");
     auto parameters = newArr(); for (int i = 0; i < 145; ++i) parameters->put(i == 14 ? 70 : 0);
     p->put("parameters", parameters);
