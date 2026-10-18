@@ -16,6 +16,8 @@ jobs:
         run: make -j2 build/runcpp build/packtest build/gameplaytest
       - name: offline gameplay regression tests
         run: ./build/gameplaytest
+      - name: native iOS database table conversion
+        run: python3 -m unittest discover -s test -p 'ios_tables_test.py' -v
       - name: online encrypted two-client integration tests
         run: |
           python3 -m pip install -r online/requirements.txt

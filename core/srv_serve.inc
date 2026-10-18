@@ -275,13 +275,6 @@ Response serveInner(Request& r) {
     dl->put(newObj()->put("name", "pc3012_mobile_ios.pak")->put("size", 365)->put("hash", "70b014d170e45373acf526c1ca411ad57586ed9de54d961751cac1b286961c75")->put("version", 2026081300)->put("changelist_number", 0));
     dl->put(newObj()->put("name", "pc3012_mobile_ios.ucas")->put("size", 337073200LL)->put("hash", "ee0d8036003bcafef1cc33d62d94b40cd25a6792695f1c8f418119f05ed1bb55")->put("version", 2026081300)->put("changelist_number", 0));
     dl->put(newObj()->put("name", "pc3012_mobile_ios.utoc")->put("size", 358860)->put("hash", "abfe6d236970e7bfdeebc52d05d27cf1252726b6131d1da25e927b2a9b3fb09b")->put("version", 2026081300)->put("changelist_number", 0));
-    // Fallback Android entries
-    dl->put(newObj()->put("name", "pc3002_mobile_and.pak")->put("size", 365)->put("hash", "309b85b66d43ffacc84a089f2d126df9d562235ace135f93f71788cbee5c0435")->put("version", 2026081300)->put("changelist_number", 0));
-    dl->put(newObj()->put("name", "pc3002_mobile_and.ucas")->put("size", 256385664LL)->put("hash", "c49cc0d71a5742e9115ab3fbaa0ecca7bb84b97a18880e1ce666f95ba9613f2d")->put("version", 2026081300)->put("changelist_number", 0));
-    dl->put(newObj()->put("name", "pc3002_mobile_and.utoc")->put("size", 452371)->put("hash", "f0e8075357b615df925a000fab6d31742bab30a69c3cf882277035229a6009c4")->put("version", 2026081300)->put("changelist_number", 0));
-    dl->put(newObj()->put("name", "pc3012_mobile_and.pak")->put("size", 365)->put("hash", "69ad7ceeb380b8d7ec8e8a37d0b4dedbf97a2850c91fdaa25a0931d7c59f7d79")->put("version", 2026081300)->put("changelist_number", 0));
-    dl->put(newObj()->put("name", "pc3012_mobile_and.ucas")->put("size", 315269552LL)->put("hash", "a072d59554961e25567de8c0bccc2e07faa9eea798db3deae92155846fe39b32")->put("version", 2026081300)->put("changelist_number", 0));
-    dl->put(newObj()->put("name", "pc3012_mobile_and.utoc")->put("size", 372972)->put("hash", "33f29247895757fd711998c804629104b0ca10b176b77f21047cdb4b094ca4fb")->put("version", 2026081300)->put("changelist_number", 0));
     jo->put("data_list", dl);
     return serveObjectAsEncryptedMsgPack(jo);
   }
@@ -311,17 +304,23 @@ Response serveInner(Request& r) {
   if (contains(uri, "CMD_CREATE_MYCLUB_SQUAD")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;
-    std::string name = req ? req->optString("squad_name", "TACTIC") : "TACTIC";
+    std::string name = req ? req->optString("name", req->optString("squad_name", "TACTIC")) : "TACTIC";
     int32_t mainId = z27Main();
     ObjP baseSquad = z27Squad(mainId);
-    int32_t nextId = 2;
+    std::set<int> used;
+    ArrP existing = z27Entry()->getJSONArray("squad_list");
+    for (int i = 0; i < existing->length(); ++i) used.insert(existing->getJSONObject(i)->getInt("squad_id"));
+    int32_t nextId = 0;
     for (int id = 1; id <= 20; id++) {
-      try {
-        z27Squad(id);
-      } catch (...) {
+      // z27Squad falls back to the main squad for unknown IDs; it cannot
+      // determine whether an ID is free.
+      if (!used.count(id) && !loadSquad(id)) {
         nextId = id;
         break;
       }
+    }
+    if (!nextId) {
+      return serveObjectAsEncryptedMsgPack(z27Ack("CMD_CREATE_MYCLUB_SQUAD", req)->put("result", "ERROR"));
     }
     ObjP newSquad = z27Copy(baseSquad);
     newSquad->put("squad_id", nextId);
@@ -333,6 +332,12 @@ Response serveInner(Request& r) {
     jo->put("msgid", "CMD_CREATE_MYCLUB_SQUAD");
     jo->put("squad_id", nextId);
     jo->put("squad_data", newSquad);
+    // CmdCreateMyclubSquadResult::UnPackJson reads this MyclubSquad wrapper,
+    // not a top-level squad_data field (iOS 11.1.1 VA 0x103b204bc).
+    jo->put("new_squad_data", newObj()->put("squad_id", nextId)->put("name", name)
+        ->put("squad_data", newSquad)->put("base_team", newArr()->put(z27Base(mainId))));
+    z27PutMeta("z27_base_" + str(nextId), z27Base(mainId)->toString());
+    logRequest("ZIRU_SQUAD_CREATE", "squad=" + str(nextId));
     return serveObjectAsEncryptedMsgPack(jo);
   }
   if (contains(uri, "CMD_GET_EVENT_LIST_AND_LOG")) {
@@ -406,6 +411,9 @@ Response serveInner(Request& r) {
     return handleZiruLeagueStatic("responses/ZIRU_IS_FIRST_LEAGUE.json");
   }
   if (contains(uri, "CMD_GET_LEAGUE_COM_INFO")) {
+    // Entering the AI league after MyLeague must switch the following opponent
+    // and START_GAME requests back to the division handlers.
+    ziruMyLeagueSetActive(0);
     return handleZiruLeagueInfo();
   }
   if (contains(uri, "CMD_GET_GAMERESULT_LIST")) return handleZiruLeagueHistoryDynamic();

@@ -343,7 +343,8 @@ static int z_rebind_symbols(struct z_rebinding rebindings[], size_t nel) {
 // ---------------------------------------------------------------- Commentary (BLV) protection
 static BOOL isCommentaryPath(const char* path) {
   if (!path) return NO;
-  return (strstr(path, "dt510") != nullptr || strstr(path, "dt510_eng_mobile_all.cpk") != nullptr);
+  const char* name = strrchr(path, '/');
+  return strcmp(name ? name + 1 : path, "dt510_eng_mobile_all.cpk") == 0;
 }
 
 static int hook_unlink(const char *path) {
@@ -376,6 +377,9 @@ static int hook_remove(const char *path) {
 // ---------------------------------------------------------------- pak / cpk / Download file redirection
 static void resolveAltName(char* buffer, size_t bufSize) {
   if (access(buffer, F_OK) == 0) return;
+  // Stadium containers contain platform-specific materials/shaders. An Android
+  // container is never a valid fallback for a missing iOS container.
+  if (strstr(buffer, "pc3002_") || strstr(buffer, "pc3012_")) return;
   char alt[1024];
   strncpy(alt, buffer, sizeof(alt) - 1);
   alt[sizeof(alt) - 1] = '\0';
@@ -1081,6 +1085,12 @@ static void startGame();
 
 static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
   NSFileManager* fm = NSFileManager.defaultManager;
+  BOOL stadium = [linkPath.lastPathComponent hasPrefix:@"pc3002_"] || [linkPath.lastPathComponent hasPrefix:@"pc3012_"];
+  if (stadium && [linkPath containsString:@"_mobile_ios"] &&
+      [targetPath.stringByResolvingSymlinksInPath containsString:@"_mobile_and"]) {
+    ZLog(@"[STADIUM] Rejected Android alias for %@", linkPath.lastPathComponent);
+    return;
+  }
   if ([linkPath.stringByStandardizingPath isEqualToString:targetPath.stringByStandardizingPath]) return;
   if (![fm fileExistsAtPath:targetPath]) return;
   // Download/download can be the same directory on iOS. Never delete a file
@@ -1106,9 +1116,15 @@ static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
         return;
       }
     }
-    [fm removeItemAtPath:linkPath error:nil];
+    // Our NSFileManager deletion guard protects commentary. Link maintenance
+    // must bypass it, but only after confirming this is a symlink/empty folder.
+    if (curDest) {
+      if (unlink(linkPath.fileSystemRepresentation) != 0) return;
+    } else {
+      [fm removeItemAtPath:linkPath error:nil];
+    }
   } else if (curDest != nil) {
-    [fm removeItemAtPath:linkPath error:nil];
+    if (unlink(linkPath.fileSystemRepresentation) != 0) return;
   }
 
   NSError* err = nil;
@@ -1134,6 +1150,48 @@ static NSString* findFolderNamed(NSString* root, NSString* targetName, int maxDe
     }
   }
   return nil;
+}
+
+static void installBundledTableFixes(NSArray<NSString*>* directories) {
+  NSFileManager* fm = NSFileManager.defaultManager;
+  NSString* bundle = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru"];
+  NSData* manifestData = [NSData dataWithContentsOfFile:[bundle stringByAppendingPathComponent:@"table-fixes.json"]];
+  NSDictionary* manifest = manifestData ? [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:nil] : nil;
+  if (![manifest isKindOfClass:NSDictionary.class]) return;
+  for (NSString* name in manifest) {
+    if (![name isEqualToString:@"dt870_mobile_and.cpk"]) continue;
+    NSString* source = [[bundle stringByAppendingPathComponent:@"livedata"] stringByAppendingPathComponent:name];
+    for (NSString* directory in directories) {
+      for (NSString* alias in @[name, [name stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"]]) {
+        NSString* path = [directory stringByAppendingPathComponent:alias];
+        BOOL exists = [fm fileExistsAtPath:path];
+        NSString* link = [fm destinationOfSymbolicLinkAtPath:path error:nil];
+        if (exists) {
+          NSDictionary* attrs = [fm attributesOfItemAtPath:path.stringByResolvingSymlinksInPath error:nil];
+          if ([attrs[NSFileSize] unsignedLongLongValue] > 20000000) continue;
+          NSData* data = [NSData dataWithContentsOfFile:path];
+          if (!data) continue;
+          unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+          CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+          NSMutableString* hash = [NSMutableString string];
+          for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
+          if ([hash isEqualToString:manifest[name][@"sha256"]]) continue;
+          if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
+            ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
+            continue;
+          }
+          if (!link) {
+            NSString* backupDir = [gDocs stringByAppendingPathComponent:@"PES2027-repair-backups"];
+            [fm createDirectoryAtPath:backupDir withIntermediateDirectories:YES attributes:nil error:nil];
+            NSString* backup = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@-%@", directory.lastPathComponent, NSUUID.UUID.UUIDString, alias]];
+            if (![fm moveItemAtPath:path toPath:backup error:nil]) continue;
+            ZLog(@"[IOS_TABLE_FIX] Backed up %@ to %@", alias, backup);
+          }
+        }
+        ensureSymlink(path, source);
+      }
+    }
+  }
 }
 
 static BOOL checkDirectFolderData(NSString** why) {
@@ -1196,6 +1254,20 @@ static BOOL checkDirectFolderData(NSString** why) {
   NSString* cpkDir = [gDocs stringByAppendingPathComponent:@"cpk"];
   NSString* dlDir = [gDocs stringByAppendingPathComponent:@"Download"];
   [fm createDirectoryAtPath:dlDir withIntermediateDirectories:YES attributes:nil error:nil];
+  installBundledTableFixes(@[[gDocs stringByAppendingPathComponent:@"livedata"], cpkDir, dlDir]);
+
+  // Old IPA versions created absolute Android aliases. Remove those links only;
+  // never remove a user's stadium container or commentary payload.
+  for (NSString* name in [fm contentsOfDirectoryAtPath:dlDir error:nil]) {
+    if (([name hasPrefix:@"pc3002_"] || [name hasPrefix:@"pc3012_"]) && [name containsString:@"_mobile_ios"]) {
+      NSString* path = [dlDir stringByAppendingPathComponent:name];
+      NSString* dest = [fm destinationOfSymbolicLinkAtPath:path error:nil];
+      if (dest && ([dest containsString:@"_mobile_and"] || ![fm fileExistsAtPath:path])) {
+        unlink(path.fileSystemRepresentation);
+        ZLog(@"[STADIUM] Removed obsolete alias %@", name);
+      }
+    }
+  }
 
   // If livedata is bundled in IPA (PESmobile.app/ziru/livedata), extract/link into Documents/livedata
   NSString* bundleLivedata = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru/livedata"];
@@ -1232,7 +1304,12 @@ static BOOL checkDirectFolderData(NSString** why) {
                                @"pc3012_mobile_and.pak", @"pc3012_mobile_and.ucas", @"pc3012_mobile_and.utoc"];
   for (NSString* stale in staleEnginePaks) {
     NSString* sp = [pakDir stringByAppendingPathComponent:stale];
-    if ([fm fileExistsAtPath:sp]) [fm removeItemAtPath:sp error:nil];
+    if ([fm destinationOfSymbolicLinkAtPath:sp error:nil]) {
+      unlink(sp.fileSystemRepresentation);
+    } else if ([fm fileExistsAtPath:sp]) {
+      NSString* dst = [dlDir stringByAppendingPathComponent:stale];
+      if (![fm fileExistsAtPath:dst]) [fm moveItemAtPath:sp toPath:dst error:nil];
+    }
   }
 
   NSString* liveDir = [gDocs stringByAppendingPathComponent:@"livedata"];
@@ -1280,7 +1357,7 @@ static BOOL checkDirectFolderData(NSString** why) {
       NSString* src = [foundDl stringByAppendingPathComponent:f];
       NSString* dst = [dlDir stringByAppendingPathComponent:f];
       ensureSymlink(dst, src);
-      if ([f containsString:@"_mobile_and"]) {
+      if ([f containsString:@"_mobile_and"] && ![f hasPrefix:@"pc3002_"] && ![f hasPrefix:@"pc3012_"]) {
         NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
         ensureSymlink([dlDir stringByAppendingPathComponent:iosName], src);
       }
@@ -1289,7 +1366,7 @@ static BOOL checkDirectFolderData(NSString** why) {
 
   // Ensure every _mobile_and file in Download has a corresponding _mobile_ios symlink
   for (NSString* f in [fm contentsOfDirectoryAtPath:dlDir error:nil]) {
-    if ([f containsString:@"_mobile_and"]) {
+    if ([f containsString:@"_mobile_and"] && ![f hasPrefix:@"pc3002_"] && ![f hasPrefix:@"pc3012_"]) {
       NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
       NSString* dst = [dlDir stringByAppendingPathComponent:iosName];
       NSString* src = [dlDir stringByAppendingPathComponent:f];
@@ -1297,10 +1374,21 @@ static BOOL checkDirectFolderData(NSString** why) {
     }
   }
 
-  // If user dropped dt510_eng_mobile_all.cpk directly into Documents, link it to Download/
-  NSString* directBlv = [gDocs stringByAppendingPathComponent:@"dt510_eng_mobile_all.cpk"];
-  if ([fm fileExistsAtPath:directBlv]) {
-    ensureSymlink([dlDir stringByAppendingPathComponent:@"dt510_eng_mobile_all.cpk"], directBlv);
+  // Accept commentary next to the data, inside cpk/, or inside a nested data
+  // folder. Keep the real 1.26 GB file in place and repair the Download alias.
+  NSString* blvName = @"dt510_eng_mobile_all.cpk";
+  NSArray* blvRoots = @[gDocs, cpkDir, [gDocs stringByAppendingPathComponent:@"data"],
+    [gDocs stringByAppendingPathComponent:@"PES2027-data"],
+    [gDocs stringByAppendingPathComponent:@"PES2027-data/cpk"],
+    [gDocs stringByAppendingPathComponent:@"data/cpk"],
+    [gDocs stringByAppendingPathComponent:@"data/Download"]];
+  for (NSString* root in blvRoots) {
+    NSString* source = [root stringByAppendingPathComponent:blvName];
+    NSDictionary* attrs = [fm attributesOfItemAtPath:source.stringByResolvingSymlinksInPath error:nil];
+    if ([attrs[NSFileType] isEqualToString:NSFileTypeRegular] && [attrs[NSFileSize] unsignedLongLongValue] > 0) {
+      ensureSymlink([dlDir stringByAppendingPathComponent:blvName], source);
+      break;
+    }
   }
 
   BOOL isDir = NO;

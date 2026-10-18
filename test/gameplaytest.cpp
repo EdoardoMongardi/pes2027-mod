@@ -85,7 +85,20 @@ int main() {
     asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
     {
       OfflineServer s(cfg);
+      auto a = call(s, "CMD_CREATE_MYCLUB_SQUAD", newObj()->put("name", "First tactic"))->getJSONObject("new_squad_data");
+      auto b = call(s, "CMD_CREATE_MYCLUB_SQUAD", newObj()->put("name", "Second tactic"))->getJSONObject("new_squad_data");
+      check(a->getInt("squad_id") != b->getInt("squad_id"), "creating two tactics must allocate distinct IDs");
+      check(a->getString("name") == "First tactic" && a->optJSONObject("squad_data") && a->getJSONArray("base_team")->length() == 1,
+          "create result matches native MyclubSquad wrapper");
+      check(Object::parse(*s.loadSquad(a->getInt("squad_id")))->getString("squad_name") == "First tactic",
+          "second create must preserve first tactic");
+    }
+    {
+      OfflineServer s(cfg);
       check(s.z27State()->getInt("division") == 10, "starts at D10 by default");
+      s.ziruMyLeagueSetActive(1);
+      call(s, "CMD_GET_LEAGUE_COM_INFO");
+      check(!s.ziruMyLeagueIsActive(), "entering AI rank exits a previous MyLeague session");
       s.ziruDb->saveMeta("z27_division_state", R"({"division":10,"best":10,"point":0,"matches":0,"win":0,"draw":0,"lose":0,"sequence":0,"completed":{}})");
       s.ziruDb->saveMeta("z27_div10_reset_v3", "1");
       auto first = call(s, "CMD_GET_VSCOM_OPPONENT"); auto id = first->getLong("game_id");

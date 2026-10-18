@@ -338,6 +338,7 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=N
             report.setdefault("builtin_responses", []).append(fn)
             n += 1
         # Embed livedata (all 55 Epic/BigTime paks/ucas/utoc and dt870) directly into the IPA
+        table_fixes = {}
         with zipfile.ZipFile(apk) as a:
             for e in a.infolist():
                 if e.filename.startswith("assets/livedata/") and not e.is_dir():
@@ -346,8 +347,20 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=N
                     zi = zipfile.ZipInfo(arc, time.localtime()[:6])
                     zi.external_attr = 0o100644 << 16
                     zi.compress_type = zipfile.ZIP_DEFLATED
-                    z.writestr(zi, a.read(e))
+                    content = a.read(e)
+                    if os.path.basename(e.filename) == "dt870_mobile_and.cpk":
+                        from repair_ios_tables import repair_cpk_bytes
+                        original_hash = hashlib.sha256(content).hexdigest()
+                        content, changes = repair_cpk_bytes(content)
+                        if changes:
+                            table_fixes[os.path.basename(e.filename)] = {"original_sha256": original_hash,
+                                "sha256": hashlib.sha256(content).hexdigest(), "changes": changes}
+                            report["ios_table_fixes"] = table_fixes
+                    z.writestr(zi, content)
                     n += 1
+        if table_fixes:
+            z.writestr(root + "ziru/table-fixes.json", json.dumps(table_fixes))
+            n += 1
         # Extra UI container (tools/make_extra_pak.py): card photos, emblems and kit thumbnails that Ziru's Android
         # data has and the iOS data lacks. The dylib links ziru/pak_extra/* into Documents/pak at launch.
         if extra_pak and os.path.isdir(extra_pak):
