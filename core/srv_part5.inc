@@ -22,10 +22,15 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     bool missing = true;
     for (int i = 50; i <= 60; ++i) if (values->optInt(i, 0) != 0) missing = false;
     auto preset = kAppearancePresets.find(base_id);
-    if (missing && preset != kAppearancePresets.end()) {
-      // Ziru's special-card records zero these appearance fields. Restore the
-      // known base-player values instead of assigning every player skin 1.
+    bool presetValid = false;
+    if (preset != kAppearancePresets.end()) {
+      for (int i = 0; i < 12; ++i) if (preset->second.v[i] != 0) presetValid = true;
+    }
+    if (missing && presetValid) {
       for (int i = 0; i < 12; ++i) values->put(49 + i, preset->second.v[i]);
+    } else if (missing) {
+      static const int defFace[12] = {7, 1, 1, 2, 3, 0, 2, 0, 2, 2, 48, 0};
+      for (int i = 0; i < 12; ++i) values->put(49 + i, defFace[i]);
     }
   };
   restoreAppearance(params);
@@ -39,6 +44,12 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     int st1 = ps->optInt(0, 0);
     if (st1 > 0) params->put(61, st1);
     int st2 = ps->optInt(1, 0);
+    if (st2 <= 0) {
+      int pos = params->optInt(0, 0);
+      st2 = z27GetDefensiveStyle(pos, st1);
+      if (ps->length() > 1) ps->put(1, st2);
+      else ps->put(st2);
+    }
     params->put(62, st2);
     if (params->optInt(63, 0) == 0) params->put(63, 1);
     if (params->optInt(64, 0) == 0) params->put(64, 1);
@@ -50,6 +61,10 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     int st1 = ps->optInt(0, 0);
     if (st1 > 0) origParams->put(61, st1);
     int st2 = ps->optInt(1, 0);
+    if (st2 <= 0) {
+      int pos = origParams->optInt(0, 0);
+      st2 = z27GetDefensiveStyle(pos, st1);
+    }
     origParams->put(62, st2);
     if (origParams->optInt(63, 0) == 0) origParams->put(63, 1);
     if (origParams->optInt(64, 0) == 0) origParams->put(64, 1);

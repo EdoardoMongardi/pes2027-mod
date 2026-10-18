@@ -440,23 +440,54 @@ ObjP getZiruPlayerWrapperByBaseId(int32_t baseId, bool warehouse = false) {
   }
 }
 
+inline int z27GetDefensiveStyle(int pos, int st1) {
+  if (pos == 1 || (st1 >= 16 && st1 <= 17)) return 33; // Sweeper GK (33)
+  if (pos == 2) return 30; // CB -> Line Controller (30)
+  if (pos == 3 || pos == 4) return 28; // LB/RB -> Lane Blocker (28)
+  if (pos == 5 || pos == 6) return 25; // DMF/CMF -> Cover Shadow (25)
+  if (pos == 7 || pos == 8) return 27; // LMF/RMF -> Hard Worker (27)
+  if (pos == 9) return 23; // AMF -> Press Back (23)
+  if (pos == 10 || pos == 11) return 23; // LWG/RWG -> Press Back (23)
+  if (pos == 12 || pos == 13) return 26; // SS/CF -> Outlet Forward (26)
+  if (st1 == 1 || st1 == 2 || st1 == 3 || st1 == 13 || st1 == 22) return 26; // Forwards -> Outlet Forward
+  if (st1 == 4 || st1 == 6 || st1 == 10 || st1 == 14 || st1 == 18 || st1 == 19) return 23; // Attackers/Wingers -> Press Back
+  if (st1 == 7 || st1 == 8 || st1 == 9 || st1 == 20) return 25; // Midfielders -> Cover Shadow
+  if (st1 == 11 || st1 == 12 || st1 == 15 || st1 == 21) return 28; // Defenders -> Lane Blocker
+  return 27; // Hard Worker
+}
+
 ArrP z27ResolvePlayStyle(int64_t id, const ObjP& existing = nullptr) {
+  int pos = 0;
   if (existing) {
-    ArrP ps = existing->optJSONArray("play_style");
-    if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+    ArrP par = existing->optJSONArray("parameters");
+    if (par && par->length() > 0) pos = par->optInt(0, 0);
+  }
+  auto ensureTwoStyles = [&](ArrP ps) -> ArrP {
+    if (!ps || ps->length() == 0 || ps->optInt(0, 0) <= 0) return nullptr;
+    int st1 = ps->optInt(0, 0);
+    int st2 = ps->length() > 1 ? ps->optInt(1, 0) : 0;
+    if (st2 <= 0) st2 = z27GetDefensiveStyle(pos, st1);
+    ArrP res = newArr();
+    res->put(st1);
+    res->put(st2);
+    return res;
+  };
+  if (existing) {
+    ArrP ps = ensureTwoStyles(existing->optJSONArray("play_style"));
+    if (ps) return ps;
   }
   // 1. Try getZiruPlayerWrapper by exact ID
   ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
   if (w && w->optJSONObject("gameplayer")) {
-    ArrP ps = w->getJSONObject("gameplayer")->optJSONArray("play_style");
-    if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+    ArrP ps = ensureTwoStyles(w->getJSONObject("gameplayer")->optJSONArray("play_style"));
+    if (ps) return ps;
   }
   // 2. Try getZiruPlayerWrapper by base ID (lower 24 bits)
   int32_t bid = (int32_t)(id & 0xFFFFFF);
   ObjP wBase = getZiruPlayerWrapperByBaseId(bid);
   if (wBase && wBase->optJSONObject("gameplayer")) {
-    ArrP ps = wBase->getJSONObject("gameplayer")->optJSONArray("play_style");
-    if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+    ArrP ps = ensureTwoStyles(wBase->getJSONObject("gameplayer")->optJSONArray("play_style"));
+    if (ps) return ps;
   }
   // 3. Try CmdLogin.json
   try {
@@ -473,26 +504,21 @@ ArrP z27ResolvePlayStyle(int64_t id, const ObjP& existing = nullptr) {
           if (!gid) continue;
           int64_t oid = gid->optLong("id", 0);
           if (oid == id || ((oid & 0xFFFFFF) == bid)) {
-            ArrP ps = o->optJSONArray("play_style");
-            if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) return ps;
+            ArrP ps = ensureTwoStyles(o->optJSONArray("play_style"));
+            if (ps) return ps;
           }
         }
       }
     }
   } catch (...) {}
   // 4. Semantic default from position parameters so NO player is ever "Basic"
-  int pos = 0;
-  if (existing) {
-    ArrP par = existing->optJSONArray("parameters");
-    if (par && par->length() > 0) pos = par->optInt(0, 0);
-  }
   ArrP fallback = newArr();
-  if (pos == 1) { fallback->put(20); fallback->put(0); } // GK -> Offensive Goalkeeper
-  else if (pos == 2 || pos == 3 || pos == 4) { fallback->put(15); fallback->put(0); } // CB/LB/RB -> Build Up
-  else if (pos == 5 || pos == 6 || pos == 7 || pos == 8) { fallback->put(11); fallback->put(0); } // DMF/CMF/LMF/RMF -> Box-to-Box
-  else if (pos == 9) { fallback->put(10); fallback->put(0); } // AMF -> Hole Player
-  else if (pos == 10 || pos == 11) { fallback->put(6); fallback->put(0); } // LWG/RWG -> Prolific Winger
-  else { fallback->put(1); fallback->put(0); } // CF/SS -> Goal Poacher
+  if (pos == 1) { fallback->put(20); fallback->put(33); } // GK -> Offensive Goalkeeper + Sweeper GK
+  else if (pos == 2 || pos == 3 || pos == 4) { fallback->put(15); fallback->put(30); } // CB/LB/RB -> Build Up + Line Controller
+  else if (pos == 5 || pos == 6 || pos == 7 || pos == 8) { fallback->put(11); fallback->put(27); } // DMF/CMF/LMF/RMF -> Box-to-Box + Hard Worker
+  else if (pos == 9) { fallback->put(10); fallback->put(23); } // AMF -> Hole Player + Press Back
+  else if (pos == 10 || pos == 11) { fallback->put(6); fallback->put(23); } // LWG/RWG -> Prolific Winger + Press Back
+  else { fallback->put(1); fallback->put(26); } // CF/SS -> Goal Poacher + Outlet Forward
   return fallback;
 }
 

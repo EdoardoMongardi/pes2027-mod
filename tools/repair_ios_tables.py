@@ -40,19 +40,27 @@ def unpack_wesys(data):
 
 def compact_table(raw):
     # Legacy records contain a 4-byte bitfield followed by localized names.
-    # Require consecutive IDs and name/padding bytes to avoid guessing a stride.
-    if len(raw) % 168 or not raw:
+    # Playstyle.bin has 168 bytes per record (36 records).
+    # PlayerSkill.bin has 104 bytes per record (72 records).
+    # Both tables use 4-byte records on iOS 11.1.1 (pesdb::Manager entries 42 and 43).
+    if not raw:
         return raw
-    count = len(raw) // 168
-    if not 30 <= count <= 100:
-        return raw
-    records = [raw[i:i + 168] for i in range(0, len(raw), 168)]
-    ids = [struct.unpack_from("<I", r)[0] & 63 for r in records]
-    # Skill IDs can be wider than the six-bit playstyle ID.
-    ids8 = [struct.unpack_from("<I", r)[0] & 255 for r in records]
-    if ids != list(range(count)) and ids8 != list(range(count)):
+    candidate_matched = False
+    for stride in (168, 104):
+        if len(raw) % stride == 0:
+            count = len(raw) // stride
+            if 30 <= count <= 100:
+                candidate_matched = True
+                records = [raw[i * stride:(i + 1) * stride] for i in range(count)]
+                ids63 = [struct.unpack_from("<I", r)[0] & 63 for r in records]
+                ids127 = [struct.unpack_from("<I", r)[0] & 127 for r in records]
+                ids255 = [struct.unpack_from("<I", r)[0] & 255 for r in records]
+                target = list(range(count))
+                if ids63 == target or ids127 == target or ids255 == target:
+                    return b"".join(r[:4] for r in records)
+    if candidate_matched:
         raise ValueError("unrecognized legacy table IDs")
-    return b"".join(r[:4] for r in records)
+    return raw
 
 
 def repair_cpk_bytes(data):

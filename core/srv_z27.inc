@@ -130,6 +130,27 @@ inline void z27BoostCoach(const ObjP& c) {
   c->put("overload", 99);
 }
 
+inline void z27ActivateCoachLink(const ObjP& sqData) {
+  if (!sqData) return;
+  ObjP gp = sqData->optJSONObject("squad_gameplan");
+  ArrP forms = gp ? gp->optJSONArray("formation") : nullptr;
+  if (!forms) return;
+  for (int i = 0; i < forms->length(); i++) {
+    ObjP f = forms->optJSONObject(i);
+    ArrP cld = f ? f->optJSONArray("coach_link_data") : nullptr;
+    if (cld && cld->length() > 0) {
+      for (int k = 0; k < cld->length(); k++) {
+        ObjP link = cld->optJSONObject(k);
+        if (link) {
+          link->put("is_link_on", "YES");
+          if (link->optInt("key_member_Id", 255) == 255) link->put("key_member_Id", k * 2);
+          if (link->optInt("link_member_Id", 255) == 255) link->put("link_member_Id", k * 2 + 1);
+        }
+      }
+    }
+  }
+}
+
 inline void z27BoostAllCoaches(const ObjP& entry) {
   if (!entry) return;
   ArrP cl = entry->optJSONArray("coach_list");
@@ -143,10 +164,13 @@ inline void z27BoostAllCoaches(const ObjP& entry) {
     for (int i = 0; i < sqs->length(); i++) {
       ObjP sq = sqs->optJSONObject(i);
       ObjP sd = sq ? sq->optJSONObject("squad_data") : nullptr;
-      ArrP co = sd ? sd->optJSONArray("coach") : nullptr;
-      if (co) {
-        for (int j = 0; j < co->length(); j++) {
-          z27BoostCoach(co->optJSONObject(j));
+      if (sd) {
+        z27ActivateCoachLink(sd);
+        ArrP co = sd->optJSONArray("coach");
+        if (co) {
+          for (int j = 0; j < co->length(); j++) {
+            z27BoostCoach(co->optJSONObject(j));
+          }
         }
       }
     }
@@ -576,7 +600,14 @@ ObjP z27Opponent(const ObjP& active) {
         ->put("team_style", prof->getInt("team_style"))
         ->put("use_multi_formation", "NO");
     ArrP cl = f->optJSONArray("coach_link_data");
-    if (cl) for (int k = 0; k < cl->length(); k++) cl->getJSONObject(k)->put("is_link_on", "NO")->put("key_member_Id", 255)->put("link_member_Id", 255);
+    if (cl) {
+      for (int k = 0; k < cl->length(); k++) {
+        ObjP link = cl->getJSONObject(k);
+        link->put("is_link_on", "YES");
+        link->put("key_member_Id", k * 2);
+        link->put("link_member_Id", k * 2 + 1);
+      }
+    }
   }
   ArrP order = newArr();
   for (int i = 0; i < 40; i++) order->put(i < 23 ? i : 255);

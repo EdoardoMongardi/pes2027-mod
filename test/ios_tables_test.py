@@ -16,6 +16,13 @@ class IosTablesTest(unittest.TestCase):
         self.assertEqual(struct.unpack("<36I", fixed), tuple(values))
         self.assertEqual(compact_table(fixed), fixed)
 
+    def test_player_skill_104_byte_stride(self):
+        values = [i | ((i % 5) << 7) | 1024 for i in range(72)]
+        raw = b"".join(struct.pack("<I", n) + "Kỹ năng".encode().ljust(100, b"\0") for n in values)
+        fixed = compact_table(raw)
+        self.assertEqual(len(fixed), 72 * 4)
+        self.assertEqual(struct.unpack("<72I", fixed), tuple(values))
+
     def test_unknown_legacy_ids_are_rejected(self):
         with self.assertRaises(ValueError):
             compact_table(b"\0" * (168 * 36))
