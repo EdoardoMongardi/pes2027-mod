@@ -194,17 +194,39 @@ int32_t z27Main() { return z27Int("main_squad_id", z27Entry()->getInt("main_squa
 
 ObjP z27Squad(int32_t id) {
   JStr s = loadSquad(id);
+  ObjP res = nullptr;
   if (s) {
     ObjP jo = Object::parse(*s);
-    return jo->optJSONObject("squad_data") ? jo->getJSONObject("squad_data") : jo;
+    res = jo->optJSONObject("squad_data") ? jo->getJSONObject("squad_data") : jo;
+  } else {
+    ArrP list = z27Entry()->getJSONArray("squad_list");
+    for (int i = 0; i < list->length(); i++) {
+      ObjP sq = list->getJSONObject(i);
+      if (sq->optInt("squad_id", -1) == id) { res = z27Copy(sq->getJSONObject("squad_data")); break; }
+    }
+    if (!res && list->length() > 0) res = z27Copy(list->getJSONObject(0)->getJSONObject("squad_data"));
   }
-  ArrP list = z27Entry()->getJSONArray("squad_list");
-  for (int i = 0; i < list->length(); i++) {
-    ObjP sq = list->getJSONObject(i);
-    if (sq->optInt("squad_id", -1) == id) return z27Copy(sq->getJSONObject("squad_data"));
+  if (!res) throw IllegalState("Unknown squad " + str(id));
+  ArrP pl = res->optJSONArray("player_list");
+  if (pl) {
+    bool mod = false;
+    for (int i = 0; i < pl->length(); i++) {
+      ObjP item = pl->optJSONObject(i);
+      ObjP gid = item ? item->optJSONObject("gameplayer_id") : nullptr;
+      if (gid) {
+        int64_t pid = gid->optLong("id", 0);
+        int32_t bid = (int32_t)(pid & 0xFFFFFF);
+        if ((bid == 44379 || bid == 40352) && pid > 0xFFFFFF) {
+          gid->put("id", (long long)bid);
+          mod = true;
+        }
+      }
+    }
+    if (mod && s) {
+      ziruDb->saveSquad(id, res->toString());
+    }
   }
-  if (list->length() > 0) return z27Copy(list->getJSONObject(0)->getJSONObject("squad_data"));
-  throw IllegalState("Unknown squad " + str(id));
+  return res;
 }
 
 ObjP z27Base(int32_t id) {
@@ -467,21 +489,38 @@ void z27Restore(const ObjP& jo) {
     if (gl) {
       for (int i = 0; i < gl->length(); i++) {
         ObjP p = gl->getJSONObject(i);
-        JStr lp = loadPlayer(p->getJSONObject("gameplayer_id")->optLong("serial", 0));
+        int64_t serial = p->getJSONObject("gameplayer_id")->optLong("serial", 0);
+        int64_t pPid = p->getJSONObject("gameplayer_id")->getLong("id");
+        int32_t bid = (int32_t)(pPid & 0xFFFFFF);
+        JStr lp = loadPlayer(serial);
         if (lp) {
           ObjP sv = Object::parse(*lp);
           if (sv->optJSONObject("gameplayer")) sv = sv->getJSONObject("gameplayer");
-          if (sv->getJSONObject("gameplayer_id")->getLong("id") == p->getJSONObject("gameplayer_id")->getLong("id")) {
+          int64_t svPid = sv->getJSONObject("gameplayer_id")->getLong("id");
+          if (svPid == pPid || (svPid & 0xFFFFFF) == bid) {
+            if ((bid == 44379 || bid == 40352) && sv->optString("type", "NORMAL") == "NORMAL") {
+              sv->getJSONObject("gameplayer_id")->put("id", (long long)bid);
+            }
             z27ApplyAppearanceAndClub(sv);
+            ObjP w = getZiruPlayerWrapper(Value((long long)sv->getJSONObject("gameplayer_id")->getLong("id")), false);
+            if (!w) w = getZiruPlayerWrapperByBaseId(bid);
+            ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
+            ArrP svParams = sv->optJSONArray("parameters");
+            if (baseParams && svParams && baseParams->length() >= 142 && svParams->length() >= 142) {
+              for (int idx = 70; idx <= 141; idx++) {
+                if (baseParams->optInt(idx, 0) == 1) svParams->put(idx, 1);
+              }
+            }
             ArrP svPs = sv->optJSONArray("play_style");
             if (!svPs || svPs->length() == 0 || svPs->optInt(0, 0) <= 0) {
-              sv->put("play_style", z27ResolvePlayStyle(p->getJSONObject("gameplayer_id")->getLong("id"), p));
-              z27ApplyAppearanceAndClub(sv);
-              ziruDb->savePlayer(p->getJSONObject("gameplayer_id")->optLong("serial", 0), p->getJSONObject("gameplayer_id")->getLong("id"), sv->toString());
+              sv->put("play_style", z27ResolvePlayStyle(sv->getJSONObject("gameplayer_id")->getLong("id"), p));
             }
+            z27ApplyAppearanceAndClub(sv);
+            ziruDb->savePlayer(serial, sv->getJSONObject("gameplayer_id")->getLong("id"), sv->toString());
             gl->put(i, sv);
           }
         } else {
+          z27ApplyAppearanceAndClub(p);
           ArrP pPs = p->optJSONArray("play_style");
           if (!pPs || pPs->length() == 0 || pPs->optInt(0, 0) <= 0) {
             p->put("play_style", z27ResolvePlayStyle(p->getJSONObject("gameplayer_id")->getLong("id"), p));
@@ -731,34 +770,59 @@ ObjP z27Player(const ObjP& gid) {
       i++;
     }
   }
+  int64_t pid = gid->getLong("id");
+  int32_t bid = (int32_t)(pid & 0xFFFFFF);
   ArrP curPs = p->optJSONArray("play_style");
   if (!curPs || curPs->length() == 0 || curPs->optInt(0, 0) <= 0) {
-    p->put("play_style", z27ResolvePlayStyle(gid->getLong("id"), p));
-    if (serial > 0) ziruDb->savePlayer(serial, gid->getLong("id"), p->toString());
+    p->put("play_style", z27ResolvePlayStyle(pid, p));
+    if (serial > 0) ziruDb->savePlayer(serial, pid, p->toString());
   }
   z27ApplyAppearanceAndClub(p);
   applyZiruRonaldoMaxProgression(p);
   applyZiruWeakFootFix(p);
   p = ziruSyncActiveBooster(p);
-  ArrP addSkills = p->optJSONArray("additional_skill_id");
-  if (!addSkills && serial > 0) {
-    std::string s = sp("almanac_state").getString("ziru_skills_" + str(serial), "");
-    if (!s.empty()) {
-      addSkills = newArr();
-      for (auto& part : split(s, ',')) {
-        try { addSkills->put(parseInt(part)); } catch (...) {}
-      }
-      p->put("additional_skill_id", addSkills);
+
+  // Always restore base skills from template catalog
+  ObjP w = getZiruPlayerWrapper(Value((long long)pid), false);
+  if (!w) w = getZiruPlayerWrapperByBaseId(bid);
+  ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
+  ArrP params = p->optJSONArray("parameters");
+  if (baseParams && params && baseParams->length() >= 142 && params->length() >= 142) {
+    for (int idx = 70; idx <= 141; idx++) {
+      if (baseParams->optInt(idx, 0) == 1) params->put(idx, 1);
     }
   }
-  if (addSkills) {
-    ArrP params = p->optJSONArray("parameters");
-    if (params && params->length() >= 142) {
+
+  std::vector<int32_t> al;
+  if (serial > 0) {
+    std::string s = sp("almanac_state").getString("ziru_skills_" + str(serial), "");
+    if (!s.empty()) {
+      for (auto& part : split(s, ',')) {
+        try {
+          int v = parseInt(part);
+          if (v >= 72) v = iosSkillId(v, false);
+          if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
+        } catch (...) {}
+      }
+    }
+  }
+  if (al.empty()) {
+    ArrP addSkills = p->optJSONArray("additional_skill_id");
+    if (addSkills) {
       for (int i = 0; i < addSkills->length(); i++) {
-        int skId = addSkills->optInt(i, -1);
-        if (isZiruSkillId(skId)) {
-          params->put(kZiruSkillParameters[skId], 1);
-        }
+        int v = addSkills->optInt(i, -1);
+        if (v >= 72) v = iosSkillId(v, false);
+        if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
+      }
+    }
+  }
+  ArrP ja = newArr();
+  for (int v : al) ja->put(v);
+  p->put("additional_skill_id", ja);
+  if (params && params->length() >= 142) {
+    for (int v : al) {
+      if (isZiruSkillId(v)) {
+        params->put(kZiruSkillParameters[v], 1);
       }
     }
   }
@@ -888,6 +952,48 @@ ObjP z27ContrastAwayUniform(int32_t homeTeamId, int32_t awayTeamId, const ObjP& 
   return newObj()->put("base_team_id", awayTeamId)->put("uniform_list", out);
 }
 
+ObjP z27AwaySquad(const ObjP& active) {
+  ObjP opp = z27Opponent(active);
+  ObjP sd = opp ? opp->optJSONObject("squad_data") : nullptr;
+  ArrP players = opp ? opp->optJSONArray("player_list") : nullptr;
+  ObjP coach = opp ? opp->optJSONObject("coach_data") : nullptr;
+  if (!coach && sd && sd->optJSONArray("coach") && sd->getJSONArray("coach")->length() > 0) {
+    int64_t cid = sd->getJSONArray("coach")->getJSONObject(0)->getJSONObject("coach_id")->getLong("id");
+    coach = resolveZiruCoachFromLoginV73(cid);
+  }
+  if (!coach) coach = resolveZiruCoachFromLoginV73(17608560707469LL);
+  if (!coach) coach = resolveZiruCoachFromLoginV73(17608292273375LL);
+
+  ObjP awaySquad = newObj();
+  int awayTeamId = active->getJSONObject("away")->getInt("base_team_id");
+  awaySquad->put("team_id", awayTeamId);
+  awaySquad->put("base_team", newArr()->put(active->getJSONObject("away")));
+  awaySquad->put("coach", z27Copy(coach));
+
+  ArrP playerList = newArr();
+  if (players) {
+    for (int i = 0; i < players->length(); i++) {
+      ObjP p = players->getJSONObject(i);
+      ObjP gid = p->getJSONObject("gameplayer_id");
+      ObjP pObj = newObj()->put("gameplayer_id", z27Copy(gid))
+                         ->put("parameters", Array::parse(p->getJSONArray("parameters")->toString()))
+                         ->put("averaged_overall", 0)
+                         ->put("uniform_number", p->optInt("uniform_number", i + 1));
+      ArrP ps = p->optJSONArray("play_style");
+      if (ps) pObj->put("play_style", Array::parse(ps->toString()));
+      playerList->put(pObj);
+    }
+  }
+  awaySquad->put("player_list", playerList);
+
+  ObjP gp = sd ? z27Copy(sd->getJSONObject("squad_gameplan")) : newObj();
+  ObjP sdWrap = newObj()->put("squad_gameplan", gp);
+  z27ActivateCoachLink(sdWrap);
+  awaySquad->put("squad_gameplan", gp);
+
+  return awaySquad;
+}
+
 Response z27Start() {
   try {
     ObjP req = z27Request();
@@ -919,10 +1025,8 @@ Response z27Start() {
         ->put("squad_data_home", z27Copy(act->getJSONObject("home_squad")))
         ->put("uniform_list_home", z27Copy(act->getJSONObject("home_uniform")))
         ->put("uniform_list_away", z27Copy(act->getJSONObject("away_uniform")));
-    ObjP opp = z27Opponent(act);
-    ObjP oppSquad = opp ? opp->optJSONObject("squad_data") : nullptr;
-    if (oppSquad) out->put("squad_data_away", z27Copy(oppSquad));
-    else out->put("squad_data_away", Value::null());
+    ObjP awaySquad = z27AwaySquad(act);
+    out->put("squad_data_away", awaySquad);
     ObjP ci = out->optJSONObject("commentary_info");
     if (ci) ci->put("pre_division", act->getInt("division"));
     logRequest("ZIRU_MATCH_START", "game=" + str(gid) + " squad=" + str(mainId) + " coach=" +

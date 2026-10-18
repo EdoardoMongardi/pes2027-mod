@@ -501,41 +501,53 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
       if (!p || !(gid = p->optJSONObject("gameplayer_id"))) continue;
       int64_t serial = gid->optLong("serial", 0);
       if (serial == 0) continue;
+      int64_t pid = gid->optLong("id", 0);
       std::vector<int32_t> al;
-      ArrP sk = p->optJSONArray("additional_skill_id");
-      if (sk) {
-        for (int i2 = 0; i2 < sk->length(); i2++) {
-          int v = sk->optInt(i2);
-          if (isZiruSkillId(v)) {
-            if (vcontains(al, v)) continue;
-            if (al.size() >= 5) break;
-            al.push_back(v);
-          }
-        }
-      }
       std::string s = prefs.getString("ziru_skills_" + str(serial), "");
       if (!s.empty()) {
-        al.clear();
         for (auto& part : split(s, ',')) {
           try {
             int v = parseInt(part);
-            if (!isZiruSkillId(v) || vcontains(al, v)) continue;
-            if (al.size() >= 5) break;
-            al.push_back(v);
+            if (v >= 72) v = iosSkillId(v, false);
+            if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
           } catch (const NumberFormat&) {
+          }
+        }
+      }
+      if (al.empty()) {
+        ArrP sk = p->optJSONArray("additional_skill_id");
+        if (sk) {
+          for (int i2 = 0; i2 < sk->length(); i2++) {
+            int v = sk->optInt(i2);
+            if (v >= 72) v = iosSkillId(v, false);
+            if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
           }
         }
       }
       ArrP ja = newArr();
       for (int v : al) ja->put(v);
       p->put("additional_skill_id", ja);
+
       ArrP params = p->optJSONArray("parameters");
       if (params && params->length() >= 142) {
+        ObjP w = getZiruPlayerWrapper(Value((long long)pid), false);
+        if (!w) w = getZiruPlayerWrapperByBaseId((int32_t)(pid & 0xFFFFFF));
+        ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
+        if (baseParams && baseParams->length() >= 142) {
+          for (int idx = 70; idx <= 141; idx++) {
+            if (baseParams->optInt(idx, 0) == 1) {
+              params->put(idx, 1);
+            }
+          }
+        }
         for (int v : al) {
           if (isZiruSkillId(v)) {
             params->put(kZiruSkillParameters[v], 1);
           }
         }
+      }
+      if (!al.empty()) {
+        prefs.edit().putString("ziru_skills_" + str(serial), joinInts(al)).commit();
       }
       JStr saved = loadPlayer(serial);
       if (!saved || *saved != p->toString()) saveZiruPlayerToDb(p);

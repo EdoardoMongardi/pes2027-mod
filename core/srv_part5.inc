@@ -69,6 +69,7 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
   if (!gid) return;
   int64_t pid = gid->optLong("id", 0);
   int32_t base_id = (int32_t)(pid & 0xFFFFFF);
+  ArrP params = cur->optJSONArray("parameters");
 
   // 1. Fix club kit if initial_base_team_id == 0
   if (cur->optInt("initial_base_team_id", 0) == 0) {
@@ -78,8 +79,35 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     }
   }
 
+  // Fix position proficiencies and minimum rating for Calhanoglu & Mkhitaryan
+  if (base_id == 44379 || base_id == 40352) {
+    if (params && params->length() >= 70) {
+      params->put(5, 2); // DMF full
+      params->put(6, 2); // CMF full
+      params->put(7, 2); // LMF full
+      params->put(8, 2); // RMF full
+      params->put(9, 2); // AMF full
+      if (base_id == 40352) params->put(12, 2); // SS full
+      if (params->optInt(14, 0) < 80) params->put(14, 84);
+    }
+    ArrP origParams = cur->optJSONArray("original_parameters");
+    if (origParams && origParams->length() >= 70) {
+      origParams->put(5, 2);
+      origParams->put(6, 2);
+      origParams->put(7, 2);
+      origParams->put(8, 2);
+      origParams->put(9, 2);
+      if (base_id == 40352) origParams->put(12, 2);
+      if (origParams->optInt(14, 0) < 80) origParams->put(14, 84);
+    }
+    // Normalize ID to base ID so Konami engine loads 44379_.uasset / 40352_.uasset thumbnail
+    if (pid > 0xFFFFFF && cur->optString("type", "NORMAL") == "NORMAL") {
+      gid->put("id", (long long)base_id);
+      pid = base_id;
+    }
+  }
+
   // 2. Fix skin tone parameter 49 if 0 (chalk-white albino bug)
-  ArrP params = cur->optJSONArray("parameters");
   auto restoreAppearance = [&](const ArrP& values) {
     if (!values || values->length() < 61) return;
     bool missing = true;
@@ -234,7 +262,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           if (baseParams && curParams) {
             for (int idx = 70; idx <= 141; ++idx) {
               int baseSkill = baseParams->optInt(idx, 0);
-              if (baseSkill != 0 && curParams->optInt(idx, 0) == 0) {
+              if (baseSkill != 0) {
                 curParams->put(idx, baseSkill);
               }
             }
@@ -243,7 +271,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           if (baseParams && origParams) {
             for (int idx = 70; idx <= 141; ++idx) {
               int baseSkill = baseParams->optInt(idx, 0);
-              if (baseSkill != 0 && origParams->optInt(idx, 0) == 0) {
+              if (baseSkill != 0) {
                 origParams->put(idx, baseSkill);
               }
             }
@@ -279,25 +307,35 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
         if (!curPs || curPs->length() == 0 || curPs->optInt(0, 0) <= 0) {
           cur->put("play_style", z27ResolvePlayStyle(id, cur));
         }
-        ArrP addSkills = cur->optJSONArray("additional_skill_id");
-        if ((!addSkills || addSkills->length() == 0) && serial > 0) {
-          std::string s = sp("almanac_state").getString("ziru_skills_" + str(serial), "");
-          if (!s.empty()) {
-            addSkills = newArr();
-            for (auto& part : split(s, ',')) {
-              try { addSkills->put(parseInt(part)); } catch (...) {}
-            }
-            cur->put("additional_skill_id", addSkills);
+        std::vector<int32_t> al;
+        std::string s = sp("almanac_state").getString("ziru_skills_" + str(serial), "");
+        if (!s.empty()) {
+          for (auto& part : split(s, ',')) {
+            try {
+              int v = parseInt(part);
+              if (v >= 72) v = iosSkillId(v, false);
+              if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
+            } catch (...) {}
           }
         }
-        if (addSkills) {
-          ArrP params = cur->optJSONArray("parameters");
-          if (params && params->length() >= 142) {
+        if (al.empty()) {
+          ArrP addSkills = cur->optJSONArray("additional_skill_id");
+          if (addSkills) {
             for (int i = 0; i < addSkills->length(); i++) {
-              int skId = addSkills->optInt(i, -1);
-              if (isZiruSkillId(skId)) {
-                params->put(kZiruSkillParameters[skId], 1);
-              }
+              int v = addSkills->optInt(i, -1);
+              if (v >= 72) v = iosSkillId(v, false);
+              if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
+            }
+          }
+        }
+        ArrP ja = newArr();
+        for (int v : al) ja->put(v);
+        cur->put("additional_skill_id", ja);
+        ArrP params = cur->optJSONArray("parameters");
+        if (params && params->length() >= 142) {
+          for (int v : al) {
+            if (isZiruSkillId(v)) {
+              params->put(kZiruSkillParameters[v], 1);
             }
           }
         }
