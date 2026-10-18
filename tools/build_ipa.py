@@ -108,12 +108,11 @@ PATCHES = [
     # Prevent AddStadiumDlTask crash at 0x1046fe0b4 on null interrupt size by branching directly to return success
     (0x1046FE0B0, 0xB4000060, 0x14000003, "AddStadiumDlTask::Bind: branch over null SetInterruptGameSize"),
 
-    # Force Uniform Name configuration and rendering on jersey back (APlayerActorMobile / APlayerActor)
-    (0x1008F2FA8, 0x7100003F, 0x52800048, "PlayerModelConfig::SetHasUniformName: cmp w1, #0 -> mov w8, #2"),
-    (0x1008F2FAC, 0x52800048, 0xD503201F, "PlayerModelConfig::SetHasUniformName: mov w8, #2 -> nop"),
-    (0x1008F2FB0, 0x1A8813E8, 0xD503201F, "PlayerModelConfig::SetHasUniformName: csel -> nop"),
+    # ACharacterActor::SetUniformConfigType(bool), 0x1008f2fa8, selects
+    # licensed/edit font mode (0/2). Preserve it and BackNumberStep's load of
+    # that mode at 0x10089f4a4: forcing 2 redirects BOTH names and numbers.
+    # Enable only the actual name visibility flag, stored at actor + 0xf10.
     (0x10162331C, 0x1A9F07E1, 0x52800021, "SetupUniformConfig: cset w1, ne -> mov w1, #1"),
-    (0x10089F4A4, 0xB94E3A68, 0x52800048, "APlayerActorMobile::BackNumberStep: ldr w8,[x19,#0xe38] -> mov w8, #2"),
     (0x100895F44, 0x397C4268, 0x52800028, "APlayerActorMobile::SetUniformName: ldrb w8,[x19,#0xf10] -> mov w8, #1"),
     (0x100895F50, 0x540008C1, 0xD503201F, "APlayerActorMobile::SetUniformName: b.ne -> nop"),
     (0x100896058, 0x397C4268, 0x52800028, "APlayerActorMobile::SetUniformName (init): ldrb w8,[x19,#0xf10] -> mov w8, #1"),
