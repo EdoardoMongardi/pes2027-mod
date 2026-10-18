@@ -252,14 +252,18 @@ static const char* routeAsset(const std::string& uri) {
 
 Response serveInner(Request& r) {
   const std::string& uri = r.uri;
+  std::string norm = toUpperUS(replaceAll(uri, "_", ""));
+  auto isCmd = [&](const char* c) {
+    return contains(norm, toUpperUS(replaceAll(c, "_", "")));
+  };
   if (startsWith(uri, "/livedata/")) return serveLivedataAsset(uri.substr(1));
-  if (contains(uri, "CMD_SELL_MYCLUB_GAMEPLAYER")) {
+  if (isCmd("CMD_SELL_MYCLUB_GAMEPLAYER")) {
     auto x = handleZiruSellPlayerEarly(r);
     if (!x) return newFixedText(500, "SERVER INTERNAL ERROR: Serve() returned a null response.");
     return *x;
   }
   logRequest(uri, r.method);
-  if (contains(uri, "CMD_GET_STADIUM_DATA")) {
+  if (isCmd("CMD_GET_STADIUM_DATA")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;
     ObjP jo = newObj();
@@ -278,7 +282,7 @@ Response serveInner(Request& r) {
     jo->put("data_list", dl);
     return serveObjectAsEncryptedMsgPack(jo);
   }
-  if (contains(uri, "CMD_CHECK_STRING")) {
+  if (isCmd("CMD_CHECK_STRING")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;
     ObjP jo = newObj();
@@ -288,7 +292,7 @@ Response serveInner(Request& r) {
     jo->put("check_result", "OK");
     return serveObjectAsEncryptedMsgPack(jo);
   }
-  if (contains(uri, "CMD_GET_MYCLUB_SELECT_SKILL")) {
+  if (isCmd("CMD_GET_MYCLUB_SELECT_SKILL")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;
     ObjP jo = newObj();
@@ -301,10 +305,10 @@ Response serveInner(Request& r) {
     jo->put("select_skill_list", list);
     return serveObjectAsEncryptedMsgPack(jo);
   }
-  if (contains(uri, "CMD_CREATE_MYCLUB_SQUAD")) {
+  if (isCmd("CMD_CREATE_MYCLUB_SQUAD")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;
-    std::string name = req ? req->optString("name", req->optString("squad_name", "TACTIC")) : "TACTIC";
+    std::string name = req ? req->optString("name", req->optString("squad_name", "Tactic")) : "Tactic";
     int32_t mainId = z27Main();
     ObjP baseSquad = z27Squad(mainId);
     std::set<int> used;
@@ -334,13 +338,68 @@ Response serveInner(Request& r) {
     jo->put("squad_data", newSquad);
     // CmdCreateMyclubSquadResult::UnPackJson reads this MyclubSquad wrapper,
     // not a top-level squad_data field (iOS 11.1.1 VA 0x103b204bc).
-    jo->put("new_squad_data", newObj()->put("squad_id", nextId)->put("name", name)
-        ->put("squad_data", newSquad)->put("base_team", newArr()->put(z27Base(mainId))));
+    ObjP squadEntry = newObj()->put("squad_id", nextId)->put("name", name)
+        ->put("squad_data", newSquad)->put("base_team", newArr()->put(z27Base(mainId)));
+    jo->put("new_squad_data", squadEntry);
+    existing->put(squadEntry);
     z27PutMeta("z27_base_" + str(nextId), z27Base(mainId)->toString());
     logRequest("ZIRU_SQUAD_CREATE", "squad=" + str(nextId));
     return serveObjectAsEncryptedMsgPack(jo);
   }
-  if (contains(uri, "CMD_GET_EVENT_LIST_AND_LOG")) {
+  if (isCmd("CMD_DELETE_MYCLUB_SQUAD")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    int32_t sq = req ? req->optInt("squad_id", 0) : 0;
+    if (sq > 0) {
+      ziruDb->deleteSquad(sq);
+      ArrP sqs = z27Entry()->optJSONArray("squad_list");
+      if (sqs) {
+        for (int i = 0; i < sqs->length(); i++) {
+          ObjP s = sqs->optJSONObject(i);
+          if (s && s->optInt("squad_id", 0) == sq) {
+            sqs->remove(i);
+            break;
+          }
+        }
+      }
+      logRequest("ZIRU_SQUAD_DELETE", "deleted squad=" + str(sq));
+    }
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_DELETE_MYCLUB_SQUAD");
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
+  if (isCmd("CMD_SET_MYCLUB_SQUAD_NAME")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    int32_t sq = req ? req->optInt("squad_id", 0) : 0;
+    std::string newName = req ? req->optString("squad_name", req->optString("name", "Tactic")) : "Tactic";
+    if (sq > 0) {
+      ObjP sData = z27Squad(sq);
+      if (sData) {
+        sData->put("squad_name", newName);
+        saveSquad(sq, sData->toString());
+      }
+      ArrP sqs = z27Entry()->optJSONArray("squad_list");
+      if (sqs) {
+        for (int i = 0; i < sqs->length(); i++) {
+          ObjP s = sqs->optJSONObject(i);
+          if (s && s->optInt("squad_id", 0) == sq) {
+            s->put("name", newName);
+            break;
+          }
+        }
+      }
+      logRequest("ZIRU_SQUAD_RENAME", "renamed squad=" + str(sq) + " to " + newName);
+    }
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_SET_MYCLUB_SQUAD_NAME");
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
+  if (isCmd("CMD_GET_EVENT_LIST_AND_LOG")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;
     ObjP jo = loadZiruJsonAssetObject("responses/ZIRU_EVENT_LIST.json");
@@ -355,9 +414,9 @@ Response serveInner(Request& r) {
     jo->put("msgid", "CMD_GET_EVENT_LIST_AND_LOG");
     return serveObjectAsEncryptedMsgPack(jo);
   }
-  if (contains(uri, "CMD_CREATEJOIN_ROOM") || contains(uri, "CMD_JOIN_ROOM") ||
-      contains(uri, "CMD_GET_ROOM_LIST") || contains(uri, "CMD_GET_ROOM_INFO") ||
-      contains(uri, "CMD_GET_COMMUNITY_ROOM_LIST") || contains(uri, "CMD_GET_TURN_SERVER_LIST")) {
+  if (isCmd("CMD_CREATEJOIN_ROOM") || isCmd("CMD_JOIN_ROOM") ||
+      isCmd("CMD_GET_ROOM_LIST") || isCmd("CMD_GET_ROOM_INFO") ||
+      isCmd("CMD_GET_COMMUNITY_ROOM_LIST") || isCmd("CMD_GET_TURN_SERVER_LIST")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;
     std::string msgid = req ? req->optString("msgid", "") : "";
@@ -368,7 +427,7 @@ Response serveInner(Request& r) {
       msgid = sub;
     }
     ObjP jo = newObj();
-    if (contains(uri, "CMD_GET_ROOM_INFO")) {
+    if (isCmd("CMD_GET_ROOM_INFO")) {
       jo->put("result", "ERR_NOT_IN_ROOM");
     } else {
       jo->put("result", "ERROR_MAINTENANCE");
@@ -377,51 +436,51 @@ Response serveInner(Request& r) {
     jo->put("msgid", msgid);
     return serveObjectAsEncryptedMsgPack(jo);
   }
-  if (contains(uri, "CMD_GET_AGE_GATE_REQUIREMENTS") || contains(uri, "CmdGetAgeGateRequirements")) return handleZiruStartupAck("CMD_GET_AGE_GATE_REQUIREMENTS");
-  if (contains(uri, "CMD_SET_USER_EULA_INFO") || contains(uri, "CmdSetUserEulaInfo")) return handleZiruStartupAck("CMD_SET_USER_EULA_INFO");
-  if (contains(uri, "CMD_USE_MYCLUB_CAREERPLAN")) return handleZiruCareerplan(r);
+  if (isCmd("CMD_GET_AGE_GATE_REQUIREMENTS")) return handleZiruStartupAck("CMD_GET_AGE_GATE_REQUIREMENTS");
+  if (isCmd("CMD_SET_USER_EULA_INFO")) return handleZiruStartupAck("CMD_SET_USER_EULA_INFO");
+  if (isCmd("CMD_USE_MYCLUB_CAREERPLAN")) return handleZiruCareerplan(r);
   logAlmanacAgentRequestBody(r);
   traceZiruUserCompeV87(uri);
   auto zr = z27Route(uri);
   if (zr) return *zr;
-  if (contains(uri, "CMD_GET_MAINMENU_MATCH_CREATIVE_INFO")) return handleZiruMyLeagueMainmenuCreativeV78();
-  if (contains(uri, "CMD_SET_SEASON_ENTER")) return handleZiruMyLeagueEnterV71();
-  if (contains(uri, "CMD_GET_SEASON_INFO")) return handleZiruMyLeagueInfoV71();
-  if (contains(uri, "CMD_GET_SEASON_SCHEDULE")) return handleZiruMyLeagueScheduleV74();
-  if (contains(uri, "CMD_GET_SEASON_POINT_ITEM_LIST")) return handleZiruLeagueStatic("responses/ZIRU_ML_POINT_ITEM_LIST.json");
-  if (contains(uri, "CMD_EXCHANGE_SEASON_POINT_ITEM")) return handleZiruMyLeagueExchangeItemV71();
-  if (contains(uri, "CMD_GET_SEASON_POINT_RENTALPLAYER_LIST")) return handleZiruLeagueStatic("responses/ZIRU_ML_RENTAL_LIST.json");
-  if (contains(uri, "CMD_EXCHANGE_SEASON_POINT_RENTALPLAYER")) return handleZiruMyLeagueExchangeRentalV71();
-  if (contains(uri, "CMD_SET_MYCLUB_SPECIAL_DREAM_SQUAD_INFO")) return handleZiruMyLeagueSpecialSquadV71();
-  if (contains(uri, "CMD_SET_SEASON_MISSION_DISPED")) return handleZiruLeagueStatic("responses/ZIRU_ML_SET_MISSION_DISPED.json");
-  if (contains(uri, "CMD_SET_PLAYDATA_MATCH") && ziruMyLeagueIsActive()) return handleZiruLeagueStatic("responses/ZIRU_ML_SET_PLAYDATA_MATCH.json");
-  if (contains(uri, "CMD_RECV_CAMPAIGN_PASS_REWARD") && ziruMyLeagueIsActive()) return handleZiruLeagueStatic("responses/ZIRU_ML_CAMPAIGN_PASS_REWARD.json");
-  if (contains(uri, "CMD_GET_MYCLUB_PLAYER_DATA")) return handleZiruGetMyclubPlayerData(ziruLastRequestBody);
-  if (contains(uri, "CMD_SET_MYCLUB_SQUAD_INFO")) return handleZiruSquadAck();
-  if (contains(uri, "CMD_SELL_MYCLUB_GAMEPLAYER")) {
+  if (isCmd("CMD_GET_MAINMENU_MATCH_CREATIVE_INFO")) return handleZiruMyLeagueMainmenuCreativeV78();
+  if (isCmd("CMD_SET_SEASON_ENTER")) return handleZiruMyLeagueEnterV71();
+  if (isCmd("CMD_GET_SEASON_INFO")) return handleZiruMyLeagueInfoV71();
+  if (isCmd("CMD_GET_SEASON_SCHEDULE")) return handleZiruMyLeagueScheduleV74();
+  if (isCmd("CMD_GET_SEASON_POINT_ITEM_LIST")) return handleZiruLeagueStatic("responses/ZIRU_ML_POINT_ITEM_LIST.json");
+  if (isCmd("CMD_EXCHANGE_SEASON_POINT_ITEM")) return handleZiruMyLeagueExchangeItemV71();
+  if (isCmd("CMD_GET_SEASON_POINT_RENTALPLAYER_LIST")) return handleZiruLeagueStatic("responses/ZIRU_ML_RENTAL_LIST.json");
+  if (isCmd("CMD_EXCHANGE_SEASON_POINT_RENTALPLAYER")) return handleZiruMyLeagueExchangeRentalV71();
+  if (isCmd("CMD_SET_MYCLUB_SPECIAL_DREAM_SQUAD_INFO")) return handleZiruMyLeagueSpecialSquadV71();
+  if (isCmd("CMD_SET_SEASON_MISSION_DISPED")) return handleZiruLeagueStatic("responses/ZIRU_ML_SET_MISSION_DISPED.json");
+  if (isCmd("CMD_SET_PLAYDATA_MATCH") && ziruMyLeagueIsActive()) return handleZiruLeagueStatic("responses/ZIRU_ML_SET_PLAYDATA_MATCH.json");
+  if (isCmd("CMD_RECV_CAMPAIGN_PASS_REWARD") && ziruMyLeagueIsActive()) return handleZiruLeagueStatic("responses/ZIRU_ML_CAMPAIGN_PASS_REWARD.json");
+  if (isCmd("CMD_GET_MYCLUB_PLAYER_DATA")) return handleZiruGetMyclubPlayerData(ziruLastRequestBody);
+  if (isCmd("CMD_SET_MYCLUB_SQUAD_INFO")) return handleZiruSquadAck();
+  if (isCmd("CMD_SELL_MYCLUB_GAMEPLAYER")) {
     auto x = handleZiruSellPlayer();
     if (!x) return newFixedText(500, "SERVER INTERNAL ERROR: Serve() returned a null response.");
     return *x;
   }
-  if (contains(uri, "CMD_SET_TRACKRECORD")) return handleZiruTrackrecordMinimal();
-  if (contains(uri, "CMD_SEND_ADJUST_PARAM")) return handleZiruAdjustParamMinimal();
-  if (contains(uri, "CMD_SET_GAMERELAY_QUALITY")) return handleZiruGameRelayQualityMinimal();
-  if (contains(uri, "CMD_IS_FIRST_LEAGUE")) {
+  if (isCmd("CMD_SET_TRACKRECORD")) return handleZiruTrackrecordMinimal();
+  if (isCmd("CMD_SEND_ADJUST_PARAM")) return handleZiruAdjustParamMinimal();
+  if (isCmd("CMD_SET_GAMERELAY_QUALITY")) return handleZiruGameRelayQualityMinimal();
+  if (isCmd("CMD_IS_FIRST_LEAGUE")) {
     ziruMyLeagueSetActive(0);
     return handleZiruLeagueStatic("responses/ZIRU_IS_FIRST_LEAGUE.json");
   }
-  if (contains(uri, "CMD_GET_LEAGUE_COM_INFO")) {
+  if (isCmd("CMD_GET_LEAGUE_COM_INFO")) {
     // Entering the AI league after MyLeague must switch the following opponent
     // and START_GAME requests back to the division handlers.
     ziruMyLeagueSetActive(0);
     return handleZiruLeagueInfo();
   }
-  if (contains(uri, "CMD_GET_GAMERESULT_LIST")) return handleZiruLeagueHistoryDynamic();
-  if (contains(uri, "CMD_CHECK_MATCH_ENABLE"))
+  if (isCmd("CMD_GET_GAMERESULT_LIST")) return handleZiruLeagueHistoryDynamic();
+  if (isCmd("CMD_CHECK_MATCH_ENABLE"))
     return ziruMyLeagueIsActive() ? handleZiruLeagueStatic("responses/ZIRU_ML_CHECK_MATCH_ENABLE.json") : handleZiruLeagueStatic("responses/ZIRU_CHECK_MATCH_ENABLE.json");
-  if (contains(uri, "CMD_GET_VSCOM_OPPONENT")) return ziruMyLeagueIsActive() ? handleZiruMyLeagueOpponentV72() : handleZiruLeagueOpponentDynamicV75();
-  if (contains(uri, "CMD_START_GAME")) return ziruMyLeagueIsActive() ? handleZiruMyLeagueStartGameV71() : handleZiruLeagueStartGameDynamic();
-  if (contains(uri, "CMD_GET_VSCOM_GAME_RESULT")) return ziruMyLeagueIsActive() ? handleZiruMyLeagueResultV71() : handleZiruLeagueResult();
+  if (isCmd("CMD_GET_VSCOM_OPPONENT")) return ziruMyLeagueIsActive() ? handleZiruMyLeagueOpponentV72() : handleZiruLeagueOpponentDynamicV75();
+  if (isCmd("CMD_START_GAME")) return ziruMyLeagueIsActive() ? handleZiruMyLeagueStartGameV71() : handleZiruLeagueStartGameDynamic();
+  if (isCmd("CMD_GET_VSCOM_GAME_RESULT")) return ziruMyLeagueIsActive() ? handleZiruMyLeagueResultV71() : handleZiruLeagueResult();
   try {
     const char* a = routeAsset(uri);
     if (a) {

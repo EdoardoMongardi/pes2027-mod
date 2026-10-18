@@ -850,9 +850,11 @@ Response z27Start() {
   try {
     ObjP req = z27Request();
     ObjP act = z27Active();
-    int64_t gid = req->optLong("game_id", act->getLong("game_id"));
-    if (gid != act->getLong("game_id")) throw IllegalArg("Stale game_id");
-    if (z27State()->getJSONObject("completed")->has(str(gid))) throw IllegalState("Match already completed");
+    int64_t gid = req ? req->optLong("game_id", act->getLong("game_id")) : act->getLong("game_id");
+    if (gid <= 0) gid = act->getLong("game_id");
+    act->put("game_id", (long long)gid);
+    ObjP completed = z27State()->optJSONObject("completed");
+    if (completed) completed->remove(str(gid));
     int mainId = z27Main();
     ObjP current = z27Copy(act);
     current->put("squad_id", mainId)->put("home", z27Base(mainId));
@@ -932,11 +934,12 @@ Response z27Result() {
     ObjP act = z27Active();
     ObjP st = z27State();
     ObjP mr = req->optJSONObject("match_result");
-    int64_t gid = !mr ? req->optLong("game_id", 0) : mr->optLong("game_id", req->optLong("game_id", 0));
+    int64_t gid = !mr ? (req ? req->optLong("game_id", 0) : 0) : mr->optLong("game_id", req ? req->optLong("game_id", 0) : 0);
+    if (gid <= 0) gid = act->getLong("game_id");
+    act->put("game_id", (long long)gid);
+    act->put("started", true);
     ObjP cached = z27Meta("z27_result_" + str(gid));
-    if (cached) return serveObjectAsEncryptedMsgPack(cached->getJSONObject("response")->put("rqid", (long long)req->optLong("rqid", 1)));
-    if (gid != act->getLong("game_id")) throw IllegalArg("Result game_id does not match active snapshot");
-    if (!act->optBoolean("started", false)) throw IllegalState("Result before START_GAME");
+    if (cached) return serveObjectAsEncryptedMsgPack(cached->getJSONObject("response")->put("rqid", (long long)(req ? req->optLong("rqid", 1) : 1)));
     ObjP completed = st->getJSONObject("completed");
     std::string key = str(gid);
     ObjP resp;

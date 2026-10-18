@@ -13,10 +13,24 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
       int64_t j = ziruPlayerDataId;
       ObjP w, gp;
       ArrP params;
-      if (j > 0 && (w = getZiruPlayerWrapper(Value((long long)j), false)) && (gp = w->optJSONObject("gameplayer")) &&
-          (params = gp->optJSONArray("parameters"))) {
+      if (j > 0) {
+        w = getZiruPlayerWrapper(Value((long long)j), false);
+        if (!w) w = getZiruPlayerWrapperByBaseId((int32_t)(j & 0xFFFFFF));
+      }
+      if (w && (gp = w->optJSONObject("gameplayer"))) {
+        params = gp->optJSONArray("parameters");
+      }
+      int64_t j2 = ziruPlayerDataSerial;
+      if (!gp && j2 > 0) {
+        JStr lp = loadPlayer(j2);
+        if (lp && !lp->empty()) {
+          ObjP parsed = Object::parse(*lp);
+          gp = parsed->optJSONObject("gameplayer") ? parsed->getJSONObject("gameplayer") : parsed;
+          if (gp) params = gp->optJSONArray("parameters");
+        }
+      }
+      if (gp && params) {
         z27ApplyAppearanceAndClub(gp);
-        int64_t j2 = ziruPlayerDataSerial;
         JStr lp;
         ArrP saved;
         if (j2 > 0 && (lp = loadPlayer(j2)) && !lp->empty() && (saved = Object::parse(*lp)->optJSONArray("parameters"))) {
@@ -25,6 +39,10 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
             int a = 142, c = 142;
             if (l1 < 145 || l2 < 145) throw IllegalState("Incomplete player booster parameters");
             for (int k = 0; k < 3; k++) params->put(a + k, saved->optInt(c + k));
+          }
+          for (int idx = 70; idx <= 141; ++idx) {
+            int sv = saved->optInt(idx, 0);
+            if (sv != 0 && params->optInt(idx, 0) == 0) params->put(idx, sv);
           }
         }
         ObjP li = gp->optJSONObject("level_info");

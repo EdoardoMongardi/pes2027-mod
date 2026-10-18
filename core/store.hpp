@@ -84,6 +84,7 @@ struct ZiruDb {
   void savePlayer(int64_t serial, int64_t playerId, const std::string& json);
   void saveProgression(int64_t serial, const std::string& json);
   void saveSquad(int32_t id, const std::string& json);
+  void deleteSquad(int32_t id);
  private:
   void exec(const std::string& sql);
   bool queryOne(const std::string& sql, const std::vector<std::string>& args, std::string& out);

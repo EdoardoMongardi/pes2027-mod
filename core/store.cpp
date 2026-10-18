@@ -232,5 +232,8 @@ void ZiruDb::saveProgression(int64_t s, const std::string& json) {
 void ZiruDb::saveSquad(int32_t id, const std::string& json) {
   run(db, "INSERT OR REPLACE INTO squads(squad_id,squad_json,updated_at) VALUES(?,?,?)", {zj::Value((int)id), zj::Value(json), zj::Value((long long)zc::currentTimeMillis())});
 }
+void ZiruDb::deleteSquad(int32_t id) {
+  run(db, "DELETE FROM squads WHERE squad_id=?", {zj::Value((int)id)});
+}
 
 }  // namespace zs

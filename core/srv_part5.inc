@@ -29,13 +29,13 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     if (missing && presetValid) {
       for (int i = 0; i < 12; ++i) values->put(49 + i, preset->second.v[i]);
     } else if (missing) {
-      static const int defFace[12] = {7, 1, 1, 2, 3, 0, 2, 0, 2, 2, 48, 0};
+      static const int defFace[12] = {3, 1, 1, 2, 3, 0, 2, 0, 2, 2, 48, 0};
       for (int i = 0; i < 12; ++i) values->put(49 + i, defFace[i]);
     }
   };
   restoreAppearance(params);
   if (params && params->length() >= 65) {
-    if (params->optInt(49, 0) == 0) params->put(49, 1);
+    if (params->optInt(49, 0) <= 0) params->put(49, 3);
   }
 
   // 3. Synchronize parameters[61] (Offensive PlayStyle), parameters[62] (Defensive PlayStyle), and AI styles
@@ -57,7 +57,7 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
   ArrP origParams = cur->optJSONArray("original_parameters");
   restoreAppearance(origParams);
   if (origParams && origParams->length() >= 65 && ps && ps->length() > 0) {
-    if (origParams->optInt(49, 0) == 0) origParams->put(49, 1);
+    if (origParams->optInt(49, 0) <= 0) origParams->put(49, 3);
     int st1 = ps->optInt(0, 0);
     if (st1 > 0) origParams->put(61, st1);
     int st2 = ps->optInt(1, 0);
@@ -169,6 +169,25 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           if (!cur->optJSONArray("initial_booster_id_list") && (ib = base->optJSONArray("initial_booster_id_list"))) cur->put("initial_booster_id_list", ib);
           ArrP ps = base->optJSONArray("play_style");
           if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) cur->put("play_style", ps);
+          ArrP baseParams = base->optJSONArray("parameters");
+          ArrP curParams = cur->optJSONArray("parameters");
+          if (baseParams && curParams) {
+            for (int idx = 70; idx <= 141; ++idx) {
+              int baseSkill = baseParams->optInt(idx, 0);
+              if (baseSkill != 0 && curParams->optInt(idx, 0) == 0) {
+                curParams->put(idx, baseSkill);
+              }
+            }
+          }
+          ArrP origParams = cur->optJSONArray("original_parameters");
+          if (baseParams && origParams) {
+            for (int idx = 70; idx <= 141; ++idx) {
+              int baseSkill = baseParams->optInt(idx, 0);
+              if (baseSkill != 0 && origParams->optInt(idx, 0) == 0) {
+                origParams->put(idx, baseSkill);
+              }
+            }
+          }
           ObjP bl = base->optJSONObject("level_info");
           int lim = bl ? bl->optInt("level_limit", 1) : 1;
           if (lim == 1 && (((int32_t)id) & 16777215) == 134665) {
