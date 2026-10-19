@@ -48,6 +48,7 @@ static void load(void* actor) {
   originalLoad(actor);
 }
 static bool ready(void* actor) {
+  if (actor) *(uint8_t*)((uint8_t*)actor + 0x290) = 0;
   if (!originalReady(actor)) return false;
   auto p = (uint8_t*)actor;
   // A completed async load with a null primary atlas produces a blank canvas.
@@ -77,6 +78,7 @@ static void draw(void* actor, void* canvas) {
           *(void**)((uint8_t*)actor + 0x2b0), *(float*)((uint8_t*)actor + 0x298));
     }
   }
+  if (actor) *(uint8_t*)((uint8_t*)actor + 0x290) = 0;
   originalDraw(actor, canvas);
 }
 
@@ -113,7 +115,9 @@ static std::string sanitizeShirtName(const char* s) {
   raw.reserve(32);
   for (size_t i = 0; s[i] != '\0' && raw.size() < 30; ++i) {
     unsigned char c = (unsigned char)s[i];
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == ' ' || c == '.' || c == '-' || c == 0x27) {
+    if (c >= 'a' && c <= 'z') {
+      raw += (char)(c - 'a' + 'A');
+    } else if ((c >= 'A' && c <= 'Z') || c == ' ' || c == '.' || c == '-' || c == 0x27) {
       raw += (char)c;
     } else if (c == 0xC3 && s[i + 1] != '\0') {
       unsigned char c2 = (unsigned char)s[++i];
@@ -127,7 +131,7 @@ static std::string sanitizeShirtName(const char* s) {
       else if ((c2 >= 0x92 && c2 <= 0x96) || c2 == 0x98 || (c2 >= 0xB2 && c2 <= 0xB6) || c2 == 0xB8) raw += 'O';
       else if ((c2 >= 0x99 && c2 <= 0x9C) || (c2 >= 0xB9 && c2 <= 0xBC)) raw += 'U';
       else if (c2 == 0x9D || c2 == 0xBD || c2 == 0xBF) raw += 'Y';
-      else if (c2 == 0x9F) { raw += 's'; raw += 's'; }
+      else if (c2 == 0x9F) { raw += 'S'; raw += 'S'; }
     } else if (c == 0xC4 && s[i + 1] != '\0') {
       unsigned char c2 = (unsigned char)s[++i];
       if (c2 >= 0x80 && c2 <= 0x85) raw += 'A';
@@ -151,7 +155,7 @@ static std::string sanitizeShirtName(const char* s) {
   while (!raw.empty() && raw.front() == ' ') raw.erase(raw.begin());
   while (!raw.empty() && raw.back() == ' ') raw.pop_back();
   if (raw.empty() || raw.size() > 30) return "";
-  return toTitleCase(raw);
+  return raw;
 }
 
 static std::string fallbackPlayerName(uint32_t baseId) {
@@ -389,14 +393,14 @@ static void applyActorShirtName(void* actor, const std::string& name) {
   *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
   // NOTE: Never overwrite actor + 0xe38!
   // If set to 1, triggers referee branch at 0x1008ecb88 and aborts uniform creation (black screen).
-  // If set to 0, triggers cbz w23 at 0x1008a0184, zeroes nameTexActor + 0x290 and disables name rendering.
+  // If set to 0, triggers cbz w23 at 0x1008a0184, which skips font color setup.
   // Leave actor + 0xe38 at its native value.
 
   void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
   if (nameTexActor) {
     auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
     if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
-    *(uint8_t*)((uint8_t*)nameTexActor + 0x290) = 1;
+    *(uint8_t*)((uint8_t*)nameTexActor + 0x290) = 0; // 0 = render player name; 1 = debug font test grid (orange box)
   }
 }
 
@@ -459,9 +463,9 @@ static void hookedBackNumberStep(void* actor) {
       }
     } else if (curStr && len > 0) {
       std::string raw(curStr, len);
-      std::string tc = sanitizeShirtName(raw.c_str());
-      if (!tc.empty() && tc != raw) {
-        neededName = tc;
+      std::string uc = sanitizeShirtName(raw.c_str());
+      if (!uc.empty() && uc != raw) {
+        neededName = uc;
       }
     }
 
@@ -480,7 +484,7 @@ static void hookedBackNumberStep(void* actor) {
   if (actor) {
     void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
     if (nameTexActor) {
-      *(uint8_t*)((uint8_t*)nameTexActor + 0x290) = 1;
+      *(uint8_t*)((uint8_t*)nameTexActor + 0x290) = 0; // 0 = render player name; 1 = debug font test grid (orange box)
 
       const uint8_t* s = (const uint8_t*)actor + 0x1710;
       bool heap = (int8_t)s[23] < 0;
