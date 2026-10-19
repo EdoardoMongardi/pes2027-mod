@@ -24,7 +24,7 @@ static NSString* modInventory() {
   if (!count) [text appendString:@"Chưa có bộ sân iOS trong Download.\n"];
   NSArray* batches = [fm contentsOfDirectoryAtPath:[gSupport stringByAppendingPathComponent:@"PendingMods"] error:nil];
   for (NSString* b in batches) if (![b hasPrefix:@"."]) [text appendFormat:@"\nMod chờ khởi động lại: %@", b];
-  [text appendString:@"\n\nChọn ZIP có file .pak/.ucas/.utoc/.cpk, đặt trực tiếp hoặc trong pak, cpk, Download, livedata. Sân pc3xxx cần đủ cả 3 file trong cùng ZIP.\n\nDùng tài nguyên tương thích iOS. Đổi tên file Android sang iOS không chuyển đổi texture/shader.\n\nSau khi nhập xong, đóng hẳn game rồi mở lại. File cũ được giữ trong Documents/ModBackups. Bạn cũng có thể tự chép mod vào các thư mục dữ liệu trong ứng dụng Tệp."];
+  [text appendString:@"\n\nZIP từ eFootbase Editor chứa responses/*.json cũng được hỗ trợ. Chỉ dùng dữ liệu cho PES 11.1.1 (11.1.101).\n\nChọn ZIP có file .pak/.ucas/.utoc/.cpk, đặt trực tiếp hoặc trong pak, cpk, Download, livedata. Sân pc3xxx cần đủ cả 3 file trong cùng ZIP.\n\nDùng tài nguyên tương thích iOS. Đổi tên file Android sang iOS không chuyển đổi texture/shader.\n\nSau khi nhập xong, đóng hẳn game rồi mở lại. File cũ được giữ trong Documents/ModBackups. Bạn cũng có thể tự chép mod vào các thư mục dữ liệu trong ứng dụng Tệp."];
   return text;
 }
 
@@ -87,9 +87,13 @@ static NSString* modInventory() {
 }
 @end
 
-@interface ZiruModButtonTarget : NSObject
+@interface ZiruModButtonTarget : NSObject <UIGestureRecognizerDelegate>
 @end
 @implementation ZiruModButtonTarget
+- (void)holdForMods:(UILongPressGestureRecognizer*)gesture {
+  if (gesture.state == UIGestureRecognizerStateBegan) [self openMods:nil];
+}
+- (BOOL)gestureRecognizer:(UIGestureRecognizer*)gesture shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer*)other { return YES; }
 - (void)openMods:(UIButton*)button {
   UIViewController* vc = button.window.rootViewController;
   while (vc.presentedViewController) vc = vc.presentedViewController;
@@ -99,8 +103,16 @@ static NSString* modInventory() {
 }
 @end
 static void installModButton(UIWindow* win) {
-  (void)win;
-  // MOD button hidden per user request: mod files are added directly to the game directory
+  if (!win) return;
+  static ZiruModButtonTarget* target;
+  if (!target) target = [ZiruModButtonTarget new];
+  for (UIGestureRecognizer* existing in win.gestureRecognizers)
+    if ([existing.name isEqualToString:@"PES2027ModImport"]) return;
+  UILongPressGestureRecognizer* gesture = [[UILongPressGestureRecognizer alloc] initWithTarget:target action:@selector(holdForMods:)];
+  gesture.name = @"PES2027ModImport"; gesture.numberOfTouchesRequired = 3;
+  gesture.minimumPressDuration = 1.2; gesture.cancelsTouchesInView = NO; gesture.delegate = target;
+  [win addGestureRecognizer:gesture];
+  ZLog(@"[MOD] Import shortcut ready: hold three fingers for 1.2 seconds");
 }
 static void showModError(UIWindow* win, NSString* error) {
   UIViewController* vc = win.rootViewController; while (vc.presentedViewController) vc = vc.presentedViewController;
