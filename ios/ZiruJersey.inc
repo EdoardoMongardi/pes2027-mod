@@ -113,7 +113,7 @@ static std::string sanitizeShirtName(const char* s) {
   raw.reserve(32);
   for (size_t i = 0; s[i] != '\0' && raw.size() < 30; ++i) {
     unsigned char c = (unsigned char)s[i];
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == ' ' || c == '.' || c == '-' || c == ''') {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == ' ' || c == '.' || c == '-' || c == 0x27) {
       raw += (char)c;
     } else if (c == 0xC3 && s[i + 1] != '\0') {
       unsigned char c2 = (unsigned char)s[++i];
