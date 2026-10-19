@@ -542,6 +542,7 @@ static zsv::OfflineServer& server() {
   std::call_once(gServerOnce, [] {
     zsv::Config cfg;
     cfg.assetsDir = gBundleAssets.fileSystemRepresentation;
+    cfg.responseOverridesDir = [[gDocs stringByAppendingPathComponent:@"PES2027-editor/responses"] fileSystemRepresentation];
     cfg.dropAndroidLivedata = false;   // Retain 54 modded Epic/BigTime player paks; remapped to _mobile_ios
     // Vietnamese commentary is a paid add-on: offered only when dt510_eng_mobile_all.cpk is installed, and then with
     // its real size/SHA-256 so the client keeps it instead of deleting it as a mismatching download.

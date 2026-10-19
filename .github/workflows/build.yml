@@ -7,6 +7,25 @@ on:
 permissions:
   contents: write
 jobs:
+  ios-editor-host:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: build native iOS editor host
+        run: |
+          mkdir -p build
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun --sdk iphoneos clang++ -arch arm64 -isysroot "$SDK" -miphoneos-version-min=15.0 \
+            -std=c++17 -O2 -fobjc-arc editor/EditorApp.mm -framework Foundation -framework UIKit -framework WebKit \
+            -o build/eFootbase
+          codesign -f -s - build/eFootbase
+          shasum -a 256 build/eFootbase > build/eFootbase.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eFootbase-native-host
+          path: |
+            build/eFootbase
+            build/eFootbase.sha256
   linux-tests:
     runs-on: ubuntu-24.04
     steps:

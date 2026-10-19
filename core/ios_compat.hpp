@@ -68,7 +68,12 @@ inline bool adaptIosPlayerData(zj::Value& value, bool outgoing) {
     }
     for (const auto& key : value.o->keys()) {
       auto item = value.o->get(key);
-      if ((key == "additional_skill_id" || key == "skillcard_id_list") && item.t == zj::Value::ARR) {
+      if (outgoing && (key == "id" || key == "serial") && item.t == zj::Value::STR &&
+          !item.s.empty() && item.s.size() < 20 && item.s.find_first_not_of("0123456789") == std::string::npos) {
+        // Editor JSON preserves large serials as decimal strings; MessagePack
+        // delivered to the iOS game still requires the exact 64-bit integer.
+        try { value.o->put(key, (long long)std::stoll(item.s)); changed = true; } catch (...) {}
+      } else if ((key == "additional_skill_id" || key == "skillcard_id_list") && item.t == zj::Value::ARR) {
         auto skills = zj::Array::make();
         for (int i = 0; i < item.a->length(); ++i) skills->put(iosSkillId(item.a->getInt(i), outgoing));
         value.o->put(key, skills);

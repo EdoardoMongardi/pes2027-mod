@@ -16,11 +16,20 @@ namespace zs {
 // android.content.res.AssetManager over a directory (responses/, livedata/, ...)
 struct Assets {
   std::string root;
+  std::string responseRoot;
   std::string livedataRoot;  // optional: "livedata/<x>" -> livedataRoot + "/<x>"
   bool exists(const std::string& name) const;
   bool read(const std::string& name, std::string& out) const;  // false = IOException
   std::vector<std::string> list(const std::string& dir) const;
   std::string path(const std::string& name) const {
+    if (!responseRoot.empty() && name.rfind("responses/", 0) == 0) {
+      std::string base = name.substr(10);
+      if (!base.empty() && base.find_first_of("/\\:") == std::string::npos && base != "." && base != "..") {
+        std::string candidate = responseRoot + "/" + base;
+        struct stat st;
+        if (lstat(candidate.c_str(), &st) == 0 && S_ISREG(st.st_mode)) return candidate;
+      }
+    }
     if (!livedataRoot.empty() && name.rfind("livedata/", 0) == 0) {
       std::string p = livedataRoot + "/" + name.substr(9);
       struct stat st;

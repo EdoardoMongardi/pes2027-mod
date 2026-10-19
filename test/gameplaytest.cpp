@@ -87,12 +87,27 @@ int main() {
           "booster IDs survive skill-list reconstruction");
       check(!isZiruSkillParameter(kZiruSkillParameters[72]) && !isZiruSkillParameter(kZiruSkillParameters[73]),
           "new skills are represented by explicit IDs, never by overwriting save boosters");
+      Value identity(newObj()->put("gameplayer_id", newObj()->put("id", "89135066911146")->put("serial", "359042717000000260")));
+      adaptIosPlayerData(identity, true);
+      check(identity.o->getJSONObject("gameplayer_id")->getLong("serial") == 359042717000000260LL &&
+            identity.o->getJSONObject("gameplayer_id")->get("serial").t == Value::LONG,
+            "editor preserves exact 64-bit serials through decimal JSON strings");
     }
     char temp[] = "/tmp/pes-gameplay-XXXXXX";
     check(mkdtemp(temp), "temporary directory");
     std::string root(temp);
     std::filesystem::create_directories(root + "/responses");
     Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
+    {
+      auto overrides = root + "/editor/responses";
+      std::filesystem::create_directories(overrides);
+      std::ofstream(overrides + "/ZIRU_PACKS_CONFIG.json") << "{\"packs\":[]}";
+      zs::Assets a; a.root = root; a.responseRoot = overrides; std::string data;
+      check(a.read("responses/ZIRU_PACKS_CONFIG.json", data) && data == "{\"packs\":[]}",
+            "game reads the editor's installed override before its bundled response");
+      check(a.path("responses/../save/ziru_save.db") != overrides + "/../save/ziru_save.db",
+            "response overrides cannot select sibling save files");
+    }
     {
       Config stadiumCfg = cfg; stadiumCfg.downloadDir = root + "/stadiums";
       std::filesystem::create_directories(stadiumCfg.downloadDir);

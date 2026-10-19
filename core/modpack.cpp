@@ -36,6 +36,10 @@ static std::string destination(const std::string& source) {
   if (name.empty() || name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != std::string::npos) return "";
   auto dot = name.rfind('.'); if (dot == std::string::npos) return "";
   std::string ext = name.substr(dot);
+  if (ext == ".json" && (source.find("responses/") != std::string::npos ||
+      name.rfind("ZIRU_", 0) == 0 || name.rfind("Cmd", 0) == 0 ||
+      name.rfind("get_", 0) == 0 || name.rfind("cmd_", 0) == 0))
+    return "PES2027-editor/responses/" + name;
   if (ext != ".pak" && ext != ".utoc" && ext != ".ucas" && ext != ".cpk") return "";
   if (stadiumName(name) || name.rfind("dt510", 0) == 0) return "Download/" + name;
   if (name.rfind("dt870", 0) == 0 || source.find("livedata/") != std::string::npos) return "livedata/" + name;
@@ -69,6 +73,9 @@ bool stageZip(const std::string& path, const std::string& pending, uint64_t free
     if (!targets.insert(target).second) { err = "ZIP trung ten tep: " + target; return false; }
     if (!e.size || e.size > UINT64_MAX - total) { err = "Kich thuoc tep khong hop le"; return false; }
     total += e.size; files.push_back({&e, target});
+    if (target.rfind("PES2027-editor/responses/", 0) == 0 && e.size > 64 * 1024 * 1024) {
+      err = "File du lieu editor qua lon"; return false;
+    }
   }
   if (files.empty()) { err = "ZIP khong co file .pak/.ucas/.utoc/.cpk"; return false; }
   for (const auto& f : files) {
@@ -90,6 +97,12 @@ bool stageZip(const std::string& path, const std::string& pending, uint64_t free
     std::string dst = stage + "/" + f.second, hash;
     if (!zd::mkdirs(dst.substr(0, dst.rfind('/'))) || !zip.extract(*f.first, dst, hash, err)) {
       zd::removeTree(stage); return false;
+    }
+    if (f.second.rfind("PES2027-editor/responses/", 0) == 0) {
+      try {
+        std::ifstream in(dst); std::string data((std::istreambuf_iterator<char>(in)), {});
+        Object::parse(data); // response files must be JSON objects, not command text
+      } catch (...) { err = "JSON editor khong hop le: " + f.second; zd::removeTree(stage); return false; }
     }
     entries->put(Object::make()->put("path", f.second)->put("size", (long long)f.first->size)->put("sha256", hash));
   }

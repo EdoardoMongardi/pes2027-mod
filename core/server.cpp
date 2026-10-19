@@ -80,6 +80,7 @@ size_t Request::read(uint8_t* out, size_t n) {
 
 OfflineServer::OfflineServer(const Config& c) : cfg(c) {
   assets.root = cfg.assetsDir;
+  assets.responseRoot = cfg.responseOverridesDir;
   assets.livedataRoot = cfg.livedataDir;
   livedataBaseUrl = cfg.livedataBaseUrl;
   mkdir(cfg.dataDir.c_str(), 0755);

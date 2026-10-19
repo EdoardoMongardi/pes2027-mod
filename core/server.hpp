@@ -80,6 +80,7 @@ struct Response {
 
 struct Config {
   std::string assetsDir;    // contains responses/, livedata/
+  std::string responseOverridesDir; // validated editor JSON; activated before launch
   std::string livedataDir;  // optional separate livedata root (imported data pack)
   std::string livedataBaseUrl = "https://127.0.0.1:8085/livedata/";
   std::string dataDir;      // ziru_save.db, prefs, Download/

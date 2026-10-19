@@ -13,11 +13,15 @@ int main(int argc, char** argv) {
     fs::create_directories(root / "docs/Download");
     std::ofstream(root / "docs/Download/pc3099_mobile_ios.pak") << "old";
     check(zm::stadiumName("pc3099_mobile_ios.pak") && !zm::stadiumName("pc7999_mobile_ios.pak"), "stadium classification");
-    for (const char* name : {"traversal", "duplicate", "partial", "empty", "corrupt"}) {
+    for (const char* name : {"traversal", "duplicate", "partial", "empty", "corrupt", "editor-invalid"}) {
       check(!zm::stageZip((root / (std::string(name) + ".zip")).string(), pending, 1000000000, s, e), name);
       check(read(root / "docs/Download/pc3099_mobile_ios.pak") == "old", "invalid ZIP leaves installed mods intact");
     }
     check(!zm::stageZip((root / "good.zip").string(), pending, 1, s, e), "low disk space");
+    check(zm::stageZip((root / "editor.zip").string(), pending, 1000000000, s, e), "editor JSON staged");
+    check(zm::activatePending(pending, docs, s, e), "editor JSON activated");
+    check(read(root / "docs/PES2027-editor/responses/ZIRU_PACKS_CONFIG.json") == "{\"packs\":[]}",
+          "editor configuration is installed in the response override namespace");
     check(zm::stageZip((root / "good.zip").string(), pending, 1000000000, s, e), e.c_str());
     check(read(root / "docs/Download/pc3099_mobile_ios.pak") == "old", "staging does not hot-replace loaded containers");
     fs::path stage;

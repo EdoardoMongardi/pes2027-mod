@@ -12,6 +12,8 @@ fixtures = {
     "empty": {"README.txt": b"no game resources"},
     "duplicate": {"a/pc3099_mobile_ios.pak": b"a", "b/pc3099_mobile_ios.pak": b"b"},
     "corrupt": good,
+    "editor": {"responses/ZIRU_PACKS_CONFIG.json": b'{"packs":[]}'},
+    "editor-invalid": {"responses/ZIRU_PACKS_CONFIG.json": b'not-json'},
 }
 for name, files in fixtures.items():
     with zipfile.ZipFile(root / f"{name}.zip", "w") as z:
