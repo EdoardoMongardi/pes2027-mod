@@ -130,15 +130,53 @@
           if (typeof showToast === "function") showToast(msg);
         } else {
           downloadBlob(jsonFilesStr, "pes_export_files.json", "application/json");
-          if (typeof showToast === "function") showToast(successMsg || "Đã xuất file cấu hình!");
+          showExportGuideModal();
         }
       })
       .catch(function(err) {
         downloadBlob(jsonFilesStr, "pes_export_files.json", "application/json");
-        if (typeof showToast === "function") showToast(successMsg || "Đã xuất file cấu hình!");
+        showExportGuideModal();
       });
     }
   };
+
+  function showExportGuideModal() {
+    let oldModal = document.getElementById("export-guide-modal");
+    if (oldModal) oldModal.remove();
+
+    let modal = document.createElement("div");
+    modal.id = "export-guide-modal";
+    modal.style.cssText = "position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,0.8);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px;";
+    modal.innerHTML = `
+      <div style="background:#0c1324;border:1.5px solid rgba(0,229,255,0.4);border-radius:20px;max-width:440px;width:100%;padding:24px;box-shadow:0 12px 40px rgba(0,0,0,0.8);color:#fff;font-family:sans-serif;">
+        <div style="font-size:18px;font-weight:800;color:#00e5ff;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+          <span>✓</span> Đã xuất cấu hình thành công!
+        </div>
+        <p style="font-size:13px;line-height:1.5;color:#94a3b8;margin-bottom:16px;">
+          File cấu hình đã được tải xuống máy của bạn. Vì chính sách bảo mật Sandbox của iOS, trình duyệt Safari không thể tự ý ghi đè vào ứng dụng game khác.
+        </p>
+        <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px;margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:700;color:#10b981;margin-bottom:4px;">Cách 1: Nạp tự động 1-click qua PC (Khuyên dùng)</div>
+          <div style="font-size:12px;color:#cbd5e1;line-height:1.4;">
+            Cắm cáp iPhone vào PC, nháy đúp chạy file <strong>Nap_RoBeo_Zidane.bat</strong> trên máy tính. Dữ liệu sẽ tự động nạp thẳng vào game trong 3 giây!
+          </div>
+        </div>
+        <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px;margin-bottom:16px;">
+          <div style="font-size:13px;font-weight:700;color:#38bdf8;margin-bottom:4px;">Cách 2: Nạp trên iPhone (Filza / TrollStore)</div>
+          <div style="font-size:12px;color:#cbd5e1;line-height:1.4;">
+            Sao chép file <code>pes_export_files.json</code> vừa tải vào thư mục <strong>Documents</strong> của game eFootball.
+          </div>
+        </div>
+        <button id="close-export-guide" type="button" style="width:100%;height:46px;background:linear-gradient(135deg,#00e5ff,#3b82f6);color:#041019;border:none;border-radius:12px;font-weight:800;font-size:14px;cursor:pointer;">
+          Đã hiểu ›
+        </button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById("close-export-guide").addEventListener("click", function() {
+      modal.remove();
+    });
+  }
 
   console.log("[eFootbase] iOS / Web Bridge ready!");
 })();
