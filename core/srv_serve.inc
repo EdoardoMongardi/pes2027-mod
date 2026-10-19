@@ -312,6 +312,74 @@ Response serveInner(Request& r) {
     jo->put("select_skill_list", list);
     return serveObjectAsEncryptedMsgPack(jo);
   }
+  if (isCmd("CMD_GET_MYCLUB_PACK_LIST")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_GET_MYCLUB_PACK_LIST");
+    ArrP packList = newArr();
+    ObjP pcfg = loadZiruJsonAssetObject("responses/ZIRU_PACKS_CONFIG.json");
+    ArrP packs = pcfg ? pcfg->optJSONArray("packs") : nullptr;
+    if (packs) {
+      for (int i = 0; i < packs->length(); ++i) {
+        ObjP p = packs->optJSONObject(i);
+        if (!p) continue;
+        int aid = p->optInt("agent_id", 1000 + i);
+        std::string title = p->optString("title", "ZIRU PACK");
+        ArrP pids = p->optJSONArray("player_ids");
+        int64_t demoPid = (pids && pids->length() > 0) ? pids->optLong(0, 0) : 0;
+        ObjP item = newObj();
+        item->put("pack_id", aid);
+        item->put("title", title);
+        item->put("description", title);
+        item->put("banner_file_c_name", "banner_" + str(aid) + "_c");
+        item->put("banner_file_d_name", "banner_" + str(aid) + "_d");
+        item->put("text_color_a", "#FFFFFF");
+        item->put("text_color_b", "#FFCC00");
+        item->put("start_date", 1700000000LL);
+        item->put("expiration_date", 2100000000LL);
+        item->put("price", 0);
+        item->put("purchase_able_num", 99);
+        item->put("demo_player_id", demoPid);
+        item->put("note_text", "");
+        packList->put(item);
+      }
+    }
+    jo->put("pack_list", packList);
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
+  if (isCmd("CMD_GET_ASSET_SHOP_LIST")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_GET_ASSET_SHOP_LIST");
+    jo->put("asset_shop_list", newArr());
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
+  if (isCmd("CMD_GET_EXCHANGE_LIST")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_GET_EXCHANGE_LIST");
+    jo->put("exchange_list", newArr());
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
+  if (isCmd("CMD_GET_GPSHOP_ITEM_LIST")) {
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    long long rq = req ? req->optLong("rqid", 1) : 1;
+    ObjP jo = newObj();
+    jo->put("result", "NOERR");
+    jo->put("rqid", rq);
+    jo->put("msgid", "CMD_GET_GPSHOP_ITEM_LIST");
+    jo->put("gpshop_item_list", newArr());
+    return serveObjectAsEncryptedMsgPack(jo);
+  }
   if (isCmd("CMD_CREATE_MYCLUB_SQUAD")) {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
     long long rq = req ? req->optLong("rqid", 1) : 1;

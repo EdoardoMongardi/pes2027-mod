@@ -85,30 +85,6 @@ static void draw(void* actor, void* canvas) {
 extern "C" int32_t gZiruHomeTeamId;
 extern "C" int32_t gZiruAwayTeamId;
 
-static std::string toTitleCase(const std::string& input) {
-  if (input.empty()) return "";
-  std::string out;
-  out.reserve(input.size());
-  bool newWord = true;
-  for (size_t i = 0; i < input.size(); ++i) {
-    unsigned char c = (unsigned char)input[i];
-    if (c == ' ' || c == '.' || c == '-' || c == '\'') {
-      out += (char)c;
-      newWord = true;
-    } else {
-      if (newWord) {
-        if (c >= 'a' && c <= 'z') out += (char)(c - 'a' + 'A');
-        else out += (char)c;
-        newWord = false;
-      } else {
-        if (c >= 'A' && c <= 'Z') out += (char)(c - 'A' + 'a');
-        else out += (char)c;
-      }
-    }
-  }
-  return out;
-}
-
 static std::string sanitizeShirtName(const char* s) {
   if (!s || !s[0]) return "";
   std::string raw;
@@ -160,35 +136,35 @@ static std::string sanitizeShirtName(const char* s) {
 
 static std::string fallbackPlayerName(uint32_t baseId) {
   static const std::unordered_map<uint32_t, const char*> sMap = {
-    {133580, "Haaland"}, {7511, "Messi"}, {4522, "C. Ronaldo"}, {40352, "Neymar Jr"},
-    {110718, "Mbappe"}, {44379, "De Bruyne"}, {138036, "Bellingham"}, {117047, "Vini Jr."},
-    {109005, "Rodri"}, {45260, "Salah"}, {40571, "Lewandowski"}, {47287, "Kane"},
-    {45023, "Son"}, {32664, "Modric"}, {36770, "Kroos"}, {33702, "Benzema"},
-    {36769, "Suarez"}, {42641, "Griezmann"}, {131976, "Saka"}, {118007, "Foden"},
-    {141673, "Musiala"}, {138384, "Pedri"}, {145952, "Gavi"}, {167375, "Lamine Yamal"},
-    {42668, "Courtois"}, {60512, "Alisson"}, {103380, "Ederson"}, {33145, "Neuer"},
-    {45843, "Van Dijk"}, {113351, "Ruben"}, {126955, "Saliba"}, {118073, "Davies"},
-    {111451, "A. Arnold"}, {41103, "Walker"}, {109265, "Kimmich"}, {118485, "Rice"},
-    {133465, "Camavinga"}, {113408, "Valverde"}, {101057, "Bernardo"}, {60587, "Bruno F."},
-    {110638, "Rashford"}, {118334, "Lautaro"}, {117765, "Osimhen"}, {126280, "Leao"},
-    {140321, "Kvaratskhelia"}, {109867, "Barella"}, {118047, "Bastoni"}, {113405, "T. Hernandez"},
-    {103445, "Dimarco"}, {47000, "Dybala"}, {44378, "Morata"}, {120281, "Enzo"},
-    {134907, "Mac Allister"}, {127179, "Julian Alvarez"}, {108919, "R. Dias"}, {100780, "Casemiro"},
-    {100688, "Marquinhos"}, {46845, "Gabriel Jesus"}, {45129, "De Gea"}, {41571, "Ter Stegen"},
-    {100236, "Odegaard"}, {114878, "Gabriel"}, {4073, "Iniesta"}, {1082, "Xavi"},
-    {2439, "Puyol"}, {133543, "Zion Suzuki"}, {134639, "Cannavaro"}, {35496, "Mertesacker"},
-    {134594, "Bonucci"}, {134632, "Suphanan"}, {137955, "Jun"}, {129961, "Tomiyasu"},
-    {44840, "Jorginho"}, {30210, "Partey"}, {137957, "Trossard"}, {110815, "Havertz"},
-    {107686, "Martinelli"}, {124266, "Zinchenko"}, {132933, "Raya"}, {983, "Beckham"},
-    {33185, "Pirlo"}, {134670, "Maldini"}, {134701, "Nedved"}, {34691, "Nedved"},
-    {45735, "Mane"}, {126343, "Rodrygo"}, {3214, "Ronaldinho"}, {15676, "Kaka"},
-    {3000, "Zidane"}, {41066, "R. Carlos"}, {3279, "Casillas"}, {3843, "Buffon"},
-    {3234, "Shevchenko"}, {3334, "Figo"}, {15886, "Gullit"}, {16369, "Van Basten"},
-    {16368, "Rijkaard"}, {136270, "Wirtz"}, {133668, "Palmer"}, {143093, "Mainoo"},
-    {105809, "Calhanoglu"}, {101097, "Calhanoglu"}, {42647, "Lukaku"},
-    {42669, "Casemiro"}, {40871, "Eriksen"}, {42659, "Eriksen"},
-    {39936, "Mkhitaryan"}, {43026, "Mkhitaryan"},
-    {133215, "Ansu Fati"}, {135760, "Ansu Fati"}
+    {133580, "HAALAND"}, {7511, "MESSI"}, {4522, "C. RONALDO"}, {40352, "NEYMAR JR"},
+    {110718, "MBAPPE"}, {44379, "DE BRUYNE"}, {138036, "BELLINGHAM"}, {117047, "VINI JR."},
+    {109005, "RODRI"}, {45260, "SALAH"}, {40571, "LEWANDOWSKI"}, {47287, "KANE"},
+    {45023, "SON"}, {32664, "MODRIC"}, {36770, "KROOS"}, {33702, "BENZEMA"},
+    {36769, "SUAREZ"}, {42641, "GRIEZMANN"}, {131976, "SAKA"}, {118007, "FODEN"},
+    {141673, "MUSIALA"}, {138384, "PEDRI"}, {145952, "GAVI"}, {167375, "LAMINE YAMAL"},
+    {42668, "COURTOIS"}, {60512, "ALISSON"}, {103380, "EDERSON"}, {33145, "NEUER"},
+    {45843, "VAN DIJK"}, {113351, "RUBEN"}, {126955, "SALIBA"}, {118073, "DAVIES"},
+    {111451, "A. ARNOLD"}, {41103, "WALKER"}, {109265, "KIMMICH"}, {118485, "RICE"},
+    {133465, "CAMAVINGA"}, {113408, "VALVERDE"}, {101057, "BERNARDO"}, {60587, "BRUNO F."},
+    {110638, "RASHFORD"}, {118334, "LAUTARO"}, {117765, "OSIMHEN"}, {126280, "LEAO"},
+    {140321, "KVARATSKHELIA"}, {109867, "BARELLA"}, {118047, "BASTONI"}, {113405, "T. HERNANDEZ"},
+    {103445, "DIMARCO"}, {47000, "DYBALA"}, {44378, "MORATA"}, {120281, "ENZO"},
+    {134907, "MAC ALLISTER"}, {127179, "JULIAN ALVAREZ"}, {108919, "R. DIAS"}, {100780, "CASEMIRO"},
+    {100688, "MARQUINHOS"}, {46845, "GABRIEL JESUS"}, {45129, "DE GEA"}, {41571, "TER STEGEN"},
+    {100236, "ODEGAARD"}, {114878, "GABRIEL"}, {4073, "INIESTA"}, {1082, "XAVI"},
+    {2439, "PUYOL"}, {133543, "ZION SUZUKI"}, {134639, "CANNAVARO"}, {35496, "MERTESACKER"},
+    {134594, "BONUCCI"}, {134632, "SUPHANAN"}, {137955, "JUN"}, {129961, "TOMIYASU"},
+    {44840, "JORGINHO"}, {30210, "PARTEY"}, {137957, "TROSSARD"}, {110815, "HAVERTZ"},
+    {107686, "MARTINELLI"}, {124266, "ZINCHENKO"}, {132933, "RAYA"}, {983, "BECKHAM"},
+    {33185, "PIRLO"}, {134670, "MALDINI"}, {134701, "NEDVED"}, {34691, "NEDVED"},
+    {45735, "MANE"}, {126343, "RODRYGO"}, {3214, "RONALDINHO"}, {15676, "KAKA"},
+    {3000, "ZIDANE"}, {41066, "R. CARLOS"}, {3279, "CASILLAS"}, {3843, "BUFFON"},
+    {3234, "SHEVCHENKO"}, {3334, "FIGO"}, {15886, "GULLIT"}, {16369, "VAN BASTEN"},
+    {16368, "RIJKAARD"}, {136270, "WIRTZ"}, {133668, "PALMER"}, {143093, "MAINOO"},
+    {105809, "CALHANOGLU"}, {101097, "CALHANOGLU"}, {42647, "LUKAKU"},
+    {42669, "CASEMIRO"}, {40871, "ERIKSEN"}, {42659, "ERIKSEN"},
+    {39936, "MKHITARYAN"}, {43026, "MKHITARYAN"},
+    {133215, "ANSU FATI"}, {135760, "ANSU FATI"}
   };
   auto it = sMap.find(baseId);
   return (it != sMap.end()) ? it->second : "";
@@ -205,10 +181,18 @@ static void sanitizeMatchPlayerNames(uint8_t* match) {
       uint8_t* p = teamPlayers + (i * 0x258);
       char* name = (char*)(p + 0x89);
       if (name && name[0] != '\0') {
-        std::string tc = toTitleCase(name);
-        if (!tc.empty() && tc.size() < 60 && tc != name) {
-          strncpy(name, tc.c_str(), 60);
+        std::string uc = sanitizeShirtName(name);
+        if (!uc.empty() && uc.size() < 60 && uc != name) {
+          strncpy(name, uc.c_str(), 60);
           name[59] = '\0';
+        }
+      }
+      char* shirtName = (char*)(p + 0xc6);
+      if (shirtName && shirtName[0] != '\0') {
+        std::string uc = sanitizeShirtName(shirtName);
+        if (!uc.empty() && uc.size() < 60 && uc != shirtName) {
+          strncpy(shirtName, uc.c_str(), 60);
+          shirtName[59] = '\0';
         }
       }
     }
@@ -218,15 +202,28 @@ static void sanitizeMatchPlayerNames(uint8_t* match) {
 static int resolveActorSide(void* actor, uint8_t* match) {
   if (!actor) return -1;
 
-  // 1. Check actor + 0x1110 (native side flag: 0 = Home, 1 = Away)
-  int32_t actorSide = *(int32_t*)((uint8_t*)actor + 0x1110);
-  if (actorSide == 0 || actorSide == 1) return actorSide;
+  // 1. Check actor + 0x1100 (native uniformIndex: 0=Home Outfield, 1=Away Outfield, 2=Home GK, 3=Away GK)
+  int32_t uIdx = *(int32_t*)((uint8_t*)actor + 0x1100);
+  if (uIdx >= 0 && uIdx <= 10) {
+    return (uIdx % 2 == 0) ? 0 : 1;
+  }
 
-  // 2. Check actor + 0x450 uniform path string (e.g. u0108p1, u0128p2, u0108g1, u0128g2)
+  // 2. Check nameTexActor + 0x2c0 texture asset string (e.g. T_u0108p1_FontName_D, T_u0122p2_FontName_D)
+  void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
+  if (nameTexActor) {
+    auto s = (NativeString*)((uint8_t*)nameTexActor + 0x2c0);
+    if (s && s->data && s->num >= 6) {
+      for (int i = 0; i < s->num - 1; ++i) {
+        if ((s->data[i] == u'p' || s->data[i] == u'g') && s->data[i+1] == u'1') return 0;
+        if ((s->data[i] == u'p' || s->data[i] == u'g') && s->data[i+1] == u'2') return 1;
+      }
+    }
+  }
+
+  // 3. Check actor + 0x450 uniform path string
   const char16_t* uStr = *(const char16_t**)((uint8_t*)actor + 0x450);
   int32_t uLen = *(int32_t*)((uint8_t*)actor + 0x458);
   if (uStr && uLen >= 6) {
-    // Check kit slot indicator ('p1' or 'g1' = home, 'p2' or 'g2' = away)
     for (int i = 0; i < uLen - 1; ++i) {
       if ((uStr[i] == u'p' || uStr[i] == u'g') && uStr[i+1] == u'1') return 0;
       if ((uStr[i] == u'p' || uStr[i] == u'g') && uStr[i+1] == u'2') return 1;
@@ -250,7 +247,7 @@ static int resolveActorSide(void* actor, uint8_t* match) {
     }
   }
 
-  // 3. Check actor + 0xe10 (teamId)
+  // 4. Check actor + 0xe10 (teamId)
   int32_t actorTeamId = *(int32_t*)((uint8_t*)actor + 0xe10);
   if (actorTeamId > 0 && match) {
     uint32_t homeTeamId = *(uint32_t*)(match + 0x11d0 + 0x10);
@@ -324,9 +321,11 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   if (preferredSide >= 0) {
     return checkSide(preferredSide);
   }
-  std::string res = checkSide(0);
-  if (!res.empty()) return res;
-  return checkSide(1);
+  std::string res0 = checkSide(0);
+  std::string res1 = checkSide(1);
+  if (!res0.empty() && res1.empty()) return res0;
+  if (!res1.empty() && res0.empty()) return res1;
+  return res0;
 }
 
 static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {

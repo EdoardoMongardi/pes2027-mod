@@ -60,24 +60,45 @@ inline bool adaptIosPlayerData(zj::Value& value, bool outgoing) {
       } else if ((key == "parameters" || key == "original_parameters") && item.t == zj::Value::ARR) {
         auto src = item.a;
         int n = src->length();
-        if ((outgoing && (n == 145 || n == 149)) || (!outgoing && n == 147)) {
+        if (outgoing && n >= 142) {
           auto dst = zj::Array::make();
           for (int i = 0; i < 142; ++i) dst->put(src->get(i));
-          if (outgoing) {
-            int b142 = 0, b143 = 0;
-            auto ask = value.o->optJSONArray("additional_skill_id");
-            if (ask) {
-              for (int si = 0; si < ask->length(); ++si) {
-                int sv = ask->optInt(si, -1);
-                if (sv == 73 || sv == 68) b142 = 1;
-                if (sv == 72 || sv == 25) b143 = 1;
-              }
+          dst->put(0)->put(0); // 142 = iOS Skill 68, 143 = iOS Skill 25
+          int b0 = (n == 147) ? src->optInt(144, 0) : ((n > 142) ? src->optInt(142, 0) : 0);
+          int b1 = (n == 147) ? src->optInt(145, 0) : ((n > 143) ? src->optInt(143, 0) : 0);
+          int b2 = (n == 147) ? src->optInt(146, 0) : ((n > 144) ? src->optInt(144, 0) : 0);
+          dst->put(b0)->put(b1)->put(b2);
+
+          auto activateSkill = [&](int sv) {
+            if (sv == 73 || sv == 68) dst->put(142, 1);
+            else if (sv == 72 || sv == 25) dst->put(143, 1);
+            else if (isZiruSkillId(sv)) {
+              int pIdx = kZiruSkillParameters[sv];
+              if (pIdx >= 70 && pIdx < 142) dst->put(pIdx, 1);
             }
-            if (!b142 && n > 142 && src->optInt(142, 0) == 1 && n != 145) b142 = 1;
-            if (!b143 && n > 143 && src->optInt(143, 0) == 1 && n != 145) b143 = 1;
-            dst->put(b142)->put(b143);
+          };
+
+          auto ask = value.o->optJSONArray("additional_skill_id");
+          if (ask) {
+            for (int si = 0; si < ask->length(); ++si) activateSkill(ask->optInt(si, -1));
           }
-          for (int i = 0; i < 3; ++i) dst->put(src->get((outgoing ? 142 : 144) + i));
+          auto skl = value.o->optJSONArray("skillcard_id_list");
+          if (skl) {
+            for (int si = 0; si < skl->length(); ++si) activateSkill(skl->optInt(si, -1));
+          }
+          if (n == 147) {
+            if (src->optInt(142, 0) == 1) dst->put(142, 1);
+            if (src->optInt(143, 0) == 1) dst->put(143, 1);
+          }
+          value.o->put(key, dst);
+          changed = true;
+        } else if (!outgoing && n == 147) {
+          auto dst = zj::Array::make();
+          for (int i = 0; i < 142; ++i) dst->put(src->get(i));
+          dst->put(src->get(144)); // Booster 0
+          dst->put(src->get(145)); // Booster 1 (2nd booster)
+          dst->put(src->get(146)); // Booster 2
+          for (int i = 0; i < 4; ++i) dst->put(0); // Pad to 149
           value.o->put(key, dst);
           changed = true;
         }

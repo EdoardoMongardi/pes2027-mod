@@ -616,7 +616,7 @@ void z27Restore(const ObjP& jo) {
               for (int v : skillList) {
                 if (isZiruSkillId(v)) {
                   int pIdx = kZiruSkillParameters[v];
-                  if (pIdx >= 0 && pIdx < svParams->length()) {
+                  if (pIdx >= 70 && pIdx < 142 && pIdx < svParams->length()) {
                     svParams->put(pIdx, 1);
                   }
                 }
@@ -653,6 +653,23 @@ void z27Restore(const ObjP& jo) {
               if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
             }
           }
+          if (skillList.empty()) {
+            JStr lp = loadPlayer(serial);
+            if (lp && !lp->empty()) {
+              try {
+                ObjP existing = Object::parse(*lp);
+                if (existing && existing->optJSONObject("gameplayer")) existing = existing->getJSONObject("gameplayer");
+                ArrP exSk = existing ? existing->optJSONArray("additional_skill_id") : nullptr;
+                if (exSk) {
+                  for (int k = 0; k < exSk->length(); ++k) {
+                    int val = exSk->optInt(k);
+                    if (val == 25 || val == 68) val = iosSkillId(val, false);
+                    if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
+                  }
+                }
+              } catch (...) {}
+            }
+          }
           ArrP newSkillArr = newArr();
           for (int v : skillList) newSkillArr->put(v);
           p->put("additional_skill_id", newSkillArr);
@@ -664,7 +681,7 @@ void z27Restore(const ObjP& jo) {
             for (int v : skillList) {
               if (isZiruSkillId(v)) {
                 int pIdx = kZiruSkillParameters[v];
-                if (pIdx >= 0 && pIdx < pParams->length()) pParams->put(pIdx, 1);
+                if (pIdx >= 70 && pIdx < 142 && pIdx < pParams->length()) pParams->put(pIdx, 1);
               }
             }
           }
@@ -991,6 +1008,23 @@ ObjP z27Player(const ObjP& gid) {
       }
     }
   }
+  if (al.empty() && serial > 0) {
+    JStr lp = loadPlayer(serial);
+    if (lp && !lp->empty()) {
+      try {
+        ObjP existing = Object::parse(*lp);
+        if (existing && existing->optJSONObject("gameplayer")) existing = existing->getJSONObject("gameplayer");
+        ArrP exSk = existing ? existing->optJSONArray("additional_skill_id") : nullptr;
+        if (exSk) {
+          for (int k = 0; k < exSk->length(); ++k) {
+            int v = exSk->optInt(k);
+            if (v == 25 || v == 68) v = iosSkillId(v, false);
+            if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
+          }
+        }
+      } catch (...) {}
+    }
+  }
   ArrP ja = newArr();
   for (int v : al) ja->put(v);
   p->put("additional_skill_id", ja);
@@ -998,7 +1032,7 @@ ObjP z27Player(const ObjP& gid) {
     for (int v : al) {
       if (isZiruSkillId(v)) {
         int pIdx = kZiruSkillParameters[v];
-        if (pIdx >= 0 && pIdx < params->length()) params->put(pIdx, 1);
+        if (pIdx >= 70 && pIdx < 142 && pIdx < params->length()) params->put(pIdx, 1);
       }
     }
   }
@@ -1022,7 +1056,7 @@ ObjP z27Home(const ObjP& active) {
     ArrP ib = p->optJSONArray("initial_booster_id_list");
     if (ib) pObj->put("initial_booster_id_list", Array::parse(ib->toString()));
     ArrP sk = p->optJSONArray("additional_skill_id");
-    if (!sk) {
+    if (!sk || sk->length() == 0) {
       std::string prefSkills = sp("almanac_state").getString("ziru_skills_" + str(gid->optLong("serial", 0)), "");
       if (!prefSkills.empty()) {
         sk = newArr();
@@ -1039,12 +1073,12 @@ ObjP z27Home(const ObjP& active) {
     }
     pObj->put("play_style", ps);
     ArrP params = pObj->getJSONArray("parameters");
-    if (sk && params && params->length() >= 142) {
+    if (sk && params && params->length() >= 70) {
       for (int sIdx = 0; sIdx < sk->length(); ++sIdx) {
         int v = sk->optInt(sIdx);
         if (isZiruSkillId(v)) {
           int pIdx = kZiruSkillParameters[v];
-          if (pIdx >= 0 && pIdx < params->length()) params->put(pIdx, 1);
+          if (pIdx >= 70 && pIdx < 142 && pIdx < params->length()) params->put(pIdx, 1);
         }
       }
     }
@@ -1054,9 +1088,9 @@ ObjP z27Home(const ObjP& active) {
       if (sk) {
         for (int si = 0; si < sk->length(); ++si) addSkillSet.insert(sk->optInt(si, -1));
       }
-      for (int s = 0; s < 74; ++s) {
+      for (int s = 0; s < 72; ++s) {
         int pIdx = kZiruSkillParameters[s];
-        if (pIdx >= 0 && pIdx < params->length() && params->optInt(pIdx, 0) == 1) {
+        if (pIdx >= 70 && pIdx < 142 && pIdx < params->length() && params->optInt(pIdx, 0) == 1) {
           if (addSkillSet.find(s) == addSkillSet.end()) {
             baseSkills->put(s);
           }
@@ -1197,15 +1231,24 @@ ObjP z27AwaySquad(const ObjP& active) {
       ArrP sk = p->optJSONArray("additional_skill_id");
       if (sk) pObj->put("additional_skill_id", Array::parse(sk->toString()));
       ArrP params = pObj->getJSONArray("parameters");
+      if (sk && params && params->length() >= 70) {
+        for (int sIdx = 0; sIdx < sk->length(); ++sIdx) {
+          int v = sk->optInt(sIdx);
+          if (isZiruSkillId(v)) {
+            int pIdx = kZiruSkillParameters[v];
+            if (pIdx >= 70 && pIdx < 142 && pIdx < params->length()) params->put(pIdx, 1);
+          }
+        }
+      }
       if (params && params->length() >= 70) {
         ArrP baseSkills = newArr();
         std::set<int> addSkillSet;
         if (sk) {
           for (int si = 0; si < sk->length(); ++si) addSkillSet.insert(sk->optInt(si, -1));
         }
-        for (int s = 0; s < 74; ++s) {
+        for (int s = 0; s < 72; ++s) {
           int pIdx = kZiruSkillParameters[s];
-          if (pIdx >= 0 && pIdx < params->length() && params->optInt(pIdx, 0) == 1) {
+          if (pIdx >= 70 && pIdx < 142 && pIdx < params->length() && params->optInt(pIdx, 0) == 1) {
             if (addSkillSet.find(s) == addSkillSet.end()) {
               baseSkills->put(s);
             }

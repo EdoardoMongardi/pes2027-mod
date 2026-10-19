@@ -508,6 +508,11 @@ void applyZiruWeakFootFix(const ObjP& jo) {
 }
 
 static bool vcontains(const std::vector<int32_t>& v, int32_t x) { return std::find(v.begin(), v.end(), x) != v.end(); }
+static std::string joinInts(const std::vector<int32_t>& v) {
+  std::string s;
+  for (size_t i = 0; i < v.size(); i++) { if (i) s += ","; s += std::to_string(v[i]); }
+  return s;
+}
 
 void applyZiruSkillStateToLogin(const ObjP& jo) {
   try {
@@ -543,6 +548,23 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
           }
         }
       }
+      if (al.empty()) {
+        JStr lp = loadPlayer(serial);
+        if (lp && !lp->empty()) {
+          try {
+            ObjP existing = Object::parse(*lp);
+            if (existing && existing->optJSONObject("gameplayer")) existing = existing->getJSONObject("gameplayer");
+            ArrP exSk = existing ? existing->optJSONArray("additional_skill_id") : nullptr;
+            if (exSk) {
+              for (int k = 0; k < exSk->length(); ++k) {
+                int v = exSk->optInt(k);
+                if (v == 25 || v == 68) v = iosSkillId(v, false);
+                if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
+              }
+            }
+          } catch (...) {}
+        }
+      }
       ArrP ja = newArr();
       for (int v : al) ja->put(v);
       p->put("additional_skill_id", ja);
@@ -562,7 +584,7 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
         for (int v : al) {
           if (isZiruSkillId(v)) {
             int pIdx = kZiruSkillParameters[v];
-            if (pIdx >= 0 && pIdx < params->length()) {
+            if (pIdx >= 70 && pIdx < 142 && pIdx < params->length()) {
               params->put(pIdx, 1);
             }
           }
@@ -580,11 +602,7 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
   }
 }
 
-static std::string joinInts(const std::vector<int32_t>& v) {
-  std::string s;
-  for (size_t i = 0; i < v.size(); i++) { if (i) s += ","; s += std::to_string(v[i]); }
-  return s;
-}
+
 
 void applyZiruSkillTrainingResponse(const ObjP& jo) {
   try {
@@ -696,7 +714,7 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
       for (int skillId : al) {
         if (isZiruSkillId(skillId)) {
           int pIdx = kZiruSkillParameters[skillId];
-          if (pIdx >= 0 && pIdx < params->length()) {
+          if (pIdx >= 70 && pIdx < 142 && pIdx < params->length()) {
             params->put(pIdx, 1);
           }
         }
