@@ -26,7 +26,7 @@ const translations = {
     "banner-loaded": "Đã thêm banner gói thẻ.", "banner-too-large": "Ảnh banner phải nhỏ hơn 8 MB.",
     export: "Xuất lệnh / Nạp vào game", "pack-count-label": "GÓI THẺ", "player-records": "CƠ SỞ DỮ LIỆU",
     "total-cards": "TỔNG CẦU THỦ", "package-list": "DANH SÁCH GÓI", "search-packages": "Tìm gói thẻ...",
-    "new-package": "Tạo Gói Mới", loading: "Memuat paket…", "package-settings": "CÀI ĐẶT GÓI THẺ",
+    "new-package": "Tạo Gói Mới", loading: "Đang tải dữ liệu…", "package-settings": "CÀI ĐẶT GÓI THẺ",
     "delete-package": "Xóa Gói", "package-title": "TÊN GÓI THẺ", "package-title-placeholder": "Nhập tên gói thẻ",
     "featured-players": "CẦU THỦ TIÊU BIỂU", "first-three": "3 cầu thủ nổi bật hàng đầu",
     "player-ids": "ID CẦU THỦ", squad: "ĐỘI HÌNH", "player-list": "Danh Sách Cầu Thủ",
@@ -351,18 +351,23 @@ function t(key, values = {}) {
 function applyLanguage() {
   const language = state?.language || "vi";
   document.documentElement.lang = language;
-  document.title = "Offline Pack Manager";
+  document.title = language === "vi" ? "eFootbase - Trình Quản Lý & Chỉnh Sửa eFootball" : (language === "en" ? "eFootbase - Ziru Database Editor" : "Offline Pack Manager");
   document.querySelectorAll("[data-i18n]").forEach(element => {
     element.textContent = t(element.dataset.i18n);
   });
   document.querySelectorAll("[data-i18n-placeholder]").forEach(element => {
     element.placeholder = t(element.dataset.i18nPlaceholder);
   });
-  document.getElementById("language-toggle").textContent = (state?.language || "vi").toUpperCase();
-  document.getElementById("clear-player-search").setAttribute("aria-label", language === "tr" ? "Aramayı temizle" : "Clear search");
-  document.getElementById("mobile-package-select").setAttribute("aria-label", language === "tr" ? "Paket seç" : "Select package");
-  document.getElementById("position-filter").setAttribute("aria-label", t("all-positions"));
-  document.getElementById("age-filter").setAttribute("aria-label", t("filter-age"));
+  const toggleBtn = document.getElementById("language-toggle");
+  if (toggleBtn) toggleBtn.textContent = (state?.language || "vi").toUpperCase();
+  const clearSearch = document.getElementById("clear-player-search");
+  if (clearSearch) clearSearch.setAttribute("aria-label", language === "vi" ? "Xóa tìm kiếm" : (language === "tr" ? "Aramayı temizle" : "Clear search"));
+  const mobSelect = document.getElementById("mobile-package-select");
+  if (mobSelect) mobSelect.setAttribute("aria-label", language === "vi" ? "Chọn gói thẻ" : (language === "tr" ? "Paket seç" : "Select package"));
+  const posFilter = document.getElementById("position-filter");
+  if (posFilter) posFilter.setAttribute("aria-label", t("all-positions"));
+  const ageFilter = document.getElementById("age-filter");
+  if (ageFilter) ageFilter.setAttribute("aria-label", t("filter-age"));
   renderPackList();
   renderRoster();
   renderFeatured();
@@ -480,7 +485,7 @@ function loadState(savedOverride = null) {
       }
     });
     return {
-      language: parsed.language === "en" ? "en" : "tr",
+      language: (parsed.language === "en" || parsed.language === "id" || parsed.language === "tr") ? parsed.language : "vi",
       custom_records: Object.fromEntries(Object.entries(parsed.custom_records || {}).filter(([id]) => !basePlayerIds.has(id))),
       player_overrides: Object.fromEntries(Object.entries(parsed.player_overrides || {}).filter(([id]) => basePlayerIds.has(id))),
       player_originals: playerOriginals,
@@ -1084,7 +1089,7 @@ function importConfig(config, command, importedFiles) {
     const updated = {
       ...(existing || {}),
       agent_id: agentId,
-      title: String(item.title || commandItem?.title || `${state.language === "en" ? "Package" : "Paket"} ${agentId}`).slice(0, 72),
+      title: String(item.title || commandItem?.title || `${state.language === "vi" ? "Gói Thẻ" : (state.language === "en" ? "Package" : "Paket")} ${agentId}`).slice(0, 72),
       player_ids: playerIds,
       featured_ids: featuredIds,
       banner_data: bannerData || existing?.banner_data || "",
@@ -1501,7 +1506,7 @@ document.getElementById("show-roster").addEventListener("click", () => {
 });
 document.getElementById("new-pack").addEventListener("click", () => {
   const source = originalPack(selectedAgentId) || catalog.packs[0];
-  const customPack = appendCustomPack(source, state.language === "en" ? "New package" : "Yeni paket");
+  const customPack = appendCustomPack(source, state.language === "vi" ? "Gói Mới" : (state.language === "en" ? "New package" : "Yeni paket"));
   persist();
   renderStats();
   selectedAgentId = customPack.agent_id;

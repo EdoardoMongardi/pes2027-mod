@@ -2,10 +2,87 @@
 /* Eklenti: açılışta dil seçimi, Oyuncular sekmesi (ID ile oyuncu bilgisi + düzenleme), Yanıtlar sekmesi İngilizce çevirisi */
 (function () {
   const $ = (id) => document.getElementById(id);
-  const lang = () => (state && state.language === "en" ? "en" : "tr");
+  const lang = () => (typeof state !== "undefined" && state && state.language) || "vi";
+  const VI_MAP = {
+    "Paketler": "Gói Thẻ", "Packages": "Gói Thẻ",
+    "Oyuncular": "Dữ Liệu Thẻ", "Players": "Dữ Liệu Thẻ",
+    "Kadro": "Đội Hình", "Squad": "Đội Hình",
+    "Yanıtlar": "Lệnh Ziru", "Responses": "Lệnh Ziru",
+    "berwtproxy tarafından yapıldı": "Phát triển bởi eFootbase · Phiên bản Tiếng Việt",
+    "Made by berwtproxy": "Phát triển bởi eFootbase · Phiên bản Tiếng Việt",
+    "Oyuncu": "Cầu thủ", "Player": "Cầu thủ",
+    "Oyuncu kartı": "Thẻ cầu thủ", "Player card": "Thẻ cầu thủ",
+    "Geçerli bir oyuncu ID’si girin.": "Vui lòng nhập ID cầu thủ hợp lệ.",
+    "Enter a valid player ID.": "Vui lòng nhập ID cầu thủ hợp lệ.",
+    "Bu oyuncu kadroda zaten var.": "Cầu thủ này đã có trong đội hình.",
+    "This player is already in the squad.": "Cầu thủ này đã có trong đội hình.",
+    "Kadro en fazla 23 oyuncu içerebilir.": "Đội hình chỉ chứa tối đa 23 cầu thủ.",
+    "A squad can contain at most 23 players.": "Đội hình chỉ chứa tối đa 23 cầu thủ.",
+    "Oyuncu ve menajer seçin veya ID ile ekleyin.": "Chọn cầu thủ và huấn luyện viên hoặc thêm theo ID.",
+    "Select players and managers or add them by ID.": "Chọn cầu thủ và huấn luyện viên hoặc thêm theo ID.",
+    "Kadro adı": "Tên đội hình", "Squad name": "Tên đội hình",
+    "Menajer": "Huấn luyện viên", "Manager": "Huấn luyện viên",
+    "Menajer ID’si": "ID Huấn luyện viên", "Manager ID": "ID Huấn luyện viên",
+    "ID ile menajer seç": "Chọn HLV theo ID", "Select manager by ID": "Chọn HLV theo ID",
+    "ID ekle": "Thêm ID", "Add ID": "Thêm ID",
+    "Oyunculardan seç": "Chọn từ danh sách", "Choose from Players": "Chọn từ danh sách",
+    "Kadro oyuncuları": "Cầu thủ trong đội hình", "Squad players": "Cầu thủ trong đội hình",
+    "Kadro oyuncularını Paketler’e ekle": "Thêm đội hình này vào Gói thẻ",
+    "Add squad players to Packages": "Thêm đội hình này vào Gói thẻ",
+    "Pakete ekle": "Thêm vào gói", "Add to package": "Thêm vào gói",
+    "Kadro değişikliklerini oyuna aktar": "Nạp thay đổi đội hình vào game",
+    "Export squad changes for the game": "Nạp thay đổi đội hình vào game",
+    "Dışa aktarma CmdLogin yanıtındaki ana kadroyu günceller. Bilinmeyen ID’ler için oyuncu özellikleri oluşturulmaz.": "Lệnh xuất sẽ cập nhật đội hình chính trong phản hồi CmdLogin trên thiết bị.",
+    "Export updates the main squad in the CmdLogin response. Player data is not fabricated for unknown IDs.": "Lệnh xuất sẽ cập nhật đội hình chính trong phản hồi CmdLogin trên thiết bị.",
+    "Geçerli bir menajer ID’si girin.": "Vui lòng nhập ID HLV hợp lệ.", "Enter a valid manager ID.": "Vui lòng nhập ID HLV hợp lệ.",
+    "Bu menajer ID’si response verisinde bulunamadı.": "Không tìm thấy HLV này trong dữ liệu.",
+    "This manager ID was not found in the response data.": "Không tìm thấy HLV này trong dữ liệu.",
+    "Menajer değerleri 0-99 arasında tam sayı olmalıdır.": "Chỉ số HLV phải là số nguyên từ 0 đến 99.",
+    "Manager values must be whole numbers from 0 to 99.": "Chỉ số HLV phải là số nguyên từ 0 đến 99.",
+    "Menajer özellikleri kaydedilemedi.": "Không thể lưu thông tin HLV.",
+    "Manager settings could not be saved.": "Không thể lưu thông tin HLV.",
+    "Menajer özellikleri kaydedildi.": "Đã lưu thông tin HLV thành công.",
+    "Manager settings saved.": "Đã lưu thông tin HLV thành công.",
+    "Seçilen menajer response dosyasında yok.": "HLV đã chọn không có trong phản hồi dữ liệu.",
+    "The selected manager is not present in the response.": "HLV đã chọn không có trong phản hồi dữ liệu.",
+    "Menajer özellikleri dışa aktarılamadı: menajer kayıt listesinde bulunamadı.": "Không thể xuất HLV: thiếu HLV trong danh sách.",
+    "Manager attributes could not be exported: the manager is missing from the coach list.": "Không thể xuất HLV: thiếu HLV trong danh sách.",
+    "Menajer özellikleri geçersiz. Tekrar düzenleyip kaydedin.": "Chỉ số HLV không hợp lệ.",
+    "Manager attributes are invalid. Edit and save them again.": "Chỉ số HLV không hợp lệ.",
+    "Yeni Kadro": "Đội Hình Mới", "New squad": "Đội Hình Mới",
+    "Pozisyona göre filtrele": "Lọc theo vị trí", "Filter by position": "Lọc theo vị trí",
+    "Tüm pozisyonlar": "Tất cả vị trí", "All positions": "Tất cả vị trí",
+    "Oyuncu veritabanı": "Cơ sở dữ liệu cầu thủ", "Player database": "Cơ sở dữ liệu cầu thủ",
+    "Veritabanındaki oyuncuları kartlarıyla görüntüleyin veya arayın. Seçili veritabanındaki tüm oyuncular listelenir.": "Xem và tìm kiếm dữ liệu cầu thủ chi tiết theo thẻ. Hiển thị toàn bộ cầu thủ trong cơ sở dữ liệu.",
+    "Browse and search database players by card. All players of the selected database are listed.": "Xem và tìm kiếm dữ liệu cầu thủ chi tiết theo thẻ. Hiển thị toàn bộ cầu thủ trong cơ sở dữ liệu.",
+    "Göster": "Hiển thị", "Show": "Hiển thị",
+    "Oyuncu ID’si": "ID Cầu thủ", "Player ID": "ID Cầu thủ",
+    "Oyuncu adı veya ID ara...": "Tìm theo tên hoặc ID cầu thủ...",
+    "Search player name or ID...": "Tìm theo tên hoặc ID cầu thủ...",
+    "Ana pozisyon": "Vị trí chính", "Main position": "Vị trí chính",
+    "Ülke ID’si": "Mã quốc gia", "Country ID": "Mã quốc gia",
+    "Boy (kaynak değeri)": "Chiều cao (cm)", "Height (source value)": "Chiều cao (cm)",
+    "Kilo (kaynak değeri)": "Cân nặng (kg)", "Weight (source value)": "Cân nặng (kg)",
+    "Oyuncu bilgisi": "Thông tin cầu thủ", "Player data": "Thông tin cầu thủ",
+    "Varsayılan canlı veriden temel profil": "Hồ sơ cơ bản từ dữ liệu trực tuyến",
+    "Basic profile from default live data": "Hồ sơ cơ bản từ dữ liệu trực tuyến",
+    "Seviye": "Cấp độ", "Level": "Cấp độ",
+    "Seviye sınırı": "Giới hạn cấp", "Level limit": "Giới hạn cấp",
+    "Ülke": "Quốc gia", "Country": "Quốc gia",
+    "Takım": "Câu lạc bộ", "Team": "Câu lạc bộ",
+    "Güçlü ayak": "Chân thuận", "Strong foot": "Chân thuận",
+    "Zayıf ayak": "Chân không thuận", "Weak foot": "Chân không thuận",
+    "Sağ (zayıf: sol)": "Phải (chân nghịch: trái)", "Right (weak: left)": "Phải (chân nghịch: trái)",
+    "Sol (zayıf: sağ)": "Trái (chân nghịch: phải)", "Left (weak: right)": "Trái (chân nghịch: phải)",
+    "Oyuncu adı": "Tên cầu thủ", "Player name": "Tên cầu thủ",
+    "Ülke (ID veya ad)": "Quốc gia (ID hoặc tên)", "Country (ID or name)": "Quốc gia (ID hoặc tên)",
+    "Takım (ID veya ad)": "Câu lạc bộ (ID hoặc tên)", "Team (ID or name)": "Câu lạc bộ (ID hoặc tên)",
+    "Bilinmeyen oyun tarzı": "Phong cách thi đấu chưa xác định", "Unknown playing style": "Phong cách thi đấu chưa xác định",
+    "Yok / serbest": "Tự do / Không có", "None / free agent": "Tự do / Không có"
+  };
   const L = (tr, en, idn, vi) => {
-    const cur = (typeof state !== "undefined" && state && state.language) || "vi";
-    if (cur === "vi") return vi || idn || en || tr;
+    const cur = lang();
+    if (cur === "vi") return vi || VI_MAP[tr] || VI_MAP[en] || en || tr;
     if (cur === "id") return idn || en || tr;
     if (cur === "en") return en || tr;
     return tr;
@@ -189,7 +266,7 @@
     const t = teamNames()[String(id)];
     return t ? `${t.name} (${t.short})` : `${L("Takım", "Team")} #${id}`;
   };
-  const posName = (p) => (lang() === "en" ? POS_NAMES_EN : POS_NAMES_TR)[p] || p;
+  const posName = (p) => (lang() === "en" ? POS_NAMES_EN : (lang() === "vi" ? POS_NAMES_VI : POS_NAMES_TR))[p] || p;
 
   function packsOf(id) {
     return state.packs.filter((p) => p.player_ids.includes(Number(id))).map((p) => p.title);
@@ -2477,17 +2554,24 @@ function openWebImporter(id, parentContainer) {
     });
   }
   function relabel() {
-    const names = { packs: L("Paketler", "Packages"), players: L("Oyuncular", "Players"), squad: L("Kadro", "Squad"), resp: L("Yanıtlar", "Responses") };
+    const names = {
+      packs: lang() === "vi" ? "Gói Thẻ" : L("Paketler", "Packages"),
+      players: lang() === "vi" ? "Dữ Liệu Thẻ" : L("Oyuncular", "Players"),
+      squad: lang() === "vi" ? "Đội Hình" : L("Kadro", "Squad"),
+      resp: lang() === "vi" ? "Lệnh Ziru" : L("Yanıtlar", "Responses")
+    };
     document.querySelectorAll(".nav-tab").forEach((b) => { const s = b.querySelector("span"); if (s && names[b.dataset.v]) s.textContent = names[b.dataset.v]; });
-    document.querySelectorAll(".credit-text").forEach((el) => { el.textContent = L("berwtproxy tarafından yapıldı", "Made by berwtproxy"); });
+    document.querySelectorAll(".credit-text").forEach((el) => { el.textContent = lang() === "vi" ? "Phát triển bởi eFootbase Team · Tiếng Việt" : L("berwtproxy tarafından yapıldı", "Made by berwtproxy"); });
     document.querySelectorAll("[aria-label]").forEach((el) => {
       const hit = ARIA.find(([a, b]) => el.getAttribute("aria-label") === (lang() === "en" ? a : b));
-      if (hit) el.setAttribute("aria-label", lang() === "en" ? hit[1] : hit[0]);
+      if (hit) el.setAttribute("aria-label", lang() === "en" ? hit[1] : (lang() === "vi" ? (VI_MAP[b] || hit[1]) : hit[0]));
     });
-    const g = $("lang-gate"); if (g) g.querySelector(".lg-title").textContent = "Dil seçin · Choose language";
+    const g = $("lang-gate"); if (g) g.querySelector(".lg-title").textContent = lang() === "vi" ? "Chọn ngôn ngữ · Select language" : "Dil seçin · Choose language";
     labels();
     document.dispatchEvent(new CustomEvent("opm-lang"));
-    [$("view-resp"), $("splash"), document.querySelector(".sheet")].forEach(translateNode);
+    if (lang() === "en") {
+      [$("view-resp"), $("splash"), document.querySelector(".sheet")].forEach(translateNode);
+    }
   }
 
   const baseApply = window.applyLanguage;

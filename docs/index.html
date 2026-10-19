@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id">
+<html lang="vi">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes, viewport-fit=cover">
@@ -7,8 +7,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="eFootbase">
   <link rel="apple-touch-icon" href="app_logo.png">
-  <meta name="theme-color" content="#090d16">
-  <title>eFootbase - Ziru Database Editor</title>
+  <meta name="theme-color" content="#070b14">
+  <title>eFootbase - Trình Quản Lý & Chỉnh Sửa eFootball</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="modern.css">
   <script src="theme.js"></script>
@@ -16,114 +16,119 @@
   <script src="ios_bridge.js"></script>
 </head>
 <body>
-    <div id="splash" class="video-splash">
+  <div id="splash" class="video-splash">
     <video id="intro-video" src="intro.mp4" autoplay muted playsinline></video>
-    <button id="skip-intro" type="button" class="skip-intro-btn">Lewati Intro ›</button>
+    <button id="skip-intro" type="button" class="skip-intro-btn">Bỏ qua giới thiệu ›</button>
   </div>
-    <div id="lang-gate" hidden><div class="lg-box"><div class="lg-title">Dil seçin · Choose language</div><button type="button" class="lg-btn" data-lang="tr">Türkçe</button><button type="button" class="lg-btn" data-lang="vi" style="background:#00e5ff;color:#041019;font-weight:800">Tiếng Việt</button><button type="button" class="lg-btn" data-lang="id">Bahasa Indonesia</button>
-      <button type="button" class="lg-btn" data-lang="en">English</button></div></div>
+  <div id="lang-gate" hidden>
+    <div class="lg-box">
+      <div class="lg-title">Chọn ngôn ngữ · Select language</div>
+      <button type="button" class="lg-btn" data-lang="vi" style="background:#00e5ff;color:#041019;font-weight:800">Tiếng Việt</button>
+      <button type="button" class="lg-btn" data-lang="en">English</button>
+      <button type="button" class="lg-btn" data-lang="id">Bahasa Indonesia</button>
+      <button type="button" class="lg-btn" data-lang="tr">Türkçe</button>
+    </div>
+  </div>
   <div class="app-shell">
     <header class="topbar">
       <div class="app-icon" aria-hidden="true"><img src="app_logo.png" alt="Logo" style="width:100%;height:100%;border-radius:12px;object-fit:cover"></div>
       <div class="brand">
         <strong>eFootbase</strong>
-        <span data-i18n="subtitle">Database &amp; Ziru DB Editor</span>
+        <span data-i18n="subtitle">Trình Quản Lý Database &amp; Gói Thẻ eFootball</span>
       </div>
       <div class="header-actions">
-        <span class="status"><i></i><span data-i18n="offline">ÇEVRİMDIŞI</span></span>
+        <span class="status"><i></i><span data-i18n="offline">OFFLINE</span></span>
         <button class="language-button" id="language-toggle" type="button">VI</button>
       </div>
     </header>
-    
-
     
     <main>
       <div id="view-packs">
       <section class="overview">
         <div>
-          <div class="eyebrow" data-i18n="overview">GENEL BAKIŞ</div>
-          <h1 data-i18n="packages">Paketler</h1>
-          <p data-i18n="intro">Paketleri ve oyuncu listelerini düzenleyin. Değişiklikler bu cihazda saklanır.</p>
+          <div class="eyebrow" data-i18n="overview">TỔNG QUAN</div>
+          <h1 data-i18n="packages">Gói Cầu Thủ</h1>
+          <p data-i18n="intro">Quản lý và tùy chỉnh các gói mở thẻ cầu thủ. Dữ liệu được lưu trữ an toàn trên thiết bị.</p>
         </div>
-        <button class="button button-primary" id="export-button" type="button"><span aria-hidden="true">↓</span> <span data-i18n="export">Komutları dışa aktar</span></button>
+        <button class="button button-primary" id="export-button" type="button"><span aria-hidden="true">↓</span> <span data-i18n="export">Xuất lệnh / Nạp vào game</span></button>
       </section>
-      <nav class="tool-bar" aria-label="Package tools">
-        <button class="tool-button" id="undo-button" type="button">↶ <span data-i18n="undo">Geri al</span></button>
-        <button class="tool-button" id="redo-button" type="button">↷ <span data-i18n="redo">Yinele</span></button>
-        <button class="tool-button" id="duplicate-pack" type="button">▣ <span data-i18n="duplicate">Paketi kopyala</span></button>
-        <button class="tool-button" id="backup-export" type="button">⇧ <span data-i18n="backup">Yedekle</span></button>
-        <button class="tool-button" id="backup-import" type="button">⇩ <span data-i18n="import">İçe aktar</span></button>
-        <button class="tool-button" id="change-summary" type="button">≡ <span data-i18n="changes">Değişiklikler</span></button>
-        <button class="tool-button" id="validate-button" type="button">✓ <span data-i18n="validate">Doğrula</span></button>
+      <nav class="tool-bar" aria-label="Thao tác nhanh">
+        <button class="tool-button" id="undo-button" type="button">↶ <span data-i18n="undo">Hoàn tác</span></button>
+        <button class="tool-button" id="redo-button" type="button">↷ <span data-i18n="redo">Làm lại</span></button>
+        <button class="tool-button" id="duplicate-pack" type="button">▣ <span data-i18n="duplicate">Nhân bản gói</span></button>
+        <button class="tool-button" id="backup-export" type="button">⇧ <span data-i18n="backup">Sao lưu</span></button>
+        <button class="tool-button" id="backup-import" type="button">⇩ <span data-i18n="import">Nhập file</span></button>
+        <button class="tool-button" id="change-summary" type="button">≡ <span data-i18n="changes">Thay đổi</span></button>
+        <button class="tool-button" id="validate-button" type="button">✓ <span data-i18n="validate">Kiểm tra</span></button>
       </nav>
 
-      <section class="summary" aria-label="Summary">
-        <div><span data-i18n="pack-count-label">PAKET</span><strong id="stat-packs">12</strong></div>
-        <div><span data-i18n="player-records">OYUNCU KAYDI</span><strong id="stat-players">—</strong></div>
-        <div><span data-i18n="total-cards">TOPLAM KART</span><strong id="stat-total">—</strong></div>
+      <section class="summary" aria-label="Thống kê">
+        <div><span data-i18n="pack-count-label">GÓI THẺ</span><strong id="stat-packs">12</strong></div>
+        <div><span data-i18n="player-records">DỮ LIỆU CẦU THỦ</span><strong id="stat-players">—</strong></div>
+        <div><span data-i18n="total-cards">TỔNG CẦU THỦ</span><strong id="stat-total">—</strong></div>
       </section>
 
       <section class="workspace">
         <aside class="sidebar">
-          <div class="panel-heading"><span data-i18n="package-list">PAKET LİSTESİ</span><span id="list-count" class="count">12</span></div>
-          <label class="search-box"><span aria-hidden="true">⌕</span><input id="pack-search" data-i18n-placeholder="search-packages" placeholder="Paket ara..." autocomplete="off"></label>
-          <select class="mobile-package-select" id="mobile-package-select" aria-label="Select package"></select>
+          <div class="panel-heading"><span data-i18n="package-list">DANH SÁCH GÓI</span><span id="list-count" class="count">12</span></div>
+          <label class="search-box"><span aria-hidden="true">⌕</span><input id="pack-search" data-i18n-placeholder="search-packages" placeholder="Tìm kiếm gói thẻ..." autocomplete="off"></label>
+          <select class="mobile-package-select" id="mobile-package-select" aria-label="Chọn gói thẻ"></select>
           <div id="pack-list" class="pack-list"></div>
-          <button class="button button-secondary new-pack-button" id="new-pack" type="button"><span aria-hidden="true">+</span> <span data-i18n="new-package">Yeni paket</span></button>
+          <button class="button button-secondary new-pack-button" id="new-pack" type="button"><span aria-hidden="true">+</span> <span data-i18n="new-package">Tạo gói mới</span></button>
         </aside>
 
         <section class="editor" id="editor">
-          <div class="empty-state" id="empty-state" data-i18n="loading">Paketler yükleniyor…</div>
+          <div class="empty-state" id="empty-state" data-i18n="loading">Đang tải gói thẻ…</div>
           <div id="editor-content" hidden>
             <div class="editor-heading">
-              <div><div class="eyebrow" data-i18n="package-settings">PAKET AYARLARI</div><h2 id="editor-kicker">PAKET</h2></div>
-              <button class="button button-danger" id="delete-pack" type="button" data-i18n="delete-package">Paketi sil</button>
+              <div><div class="eyebrow" data-i18n="package-settings">CÀI ĐẶT GÓI THẺ</div><h2 id="editor-kicker">GÓI THẺ</h2></div>
+              <button class="button button-danger" id="delete-pack" type="button" data-i18n="delete-package">Xóa gói này</button>
             </div>
 
-            <label class="field-label" for="pack-title" data-i18n="package-title">PAKET BAŞLIĞI</label>
-            <input class="title-input" id="pack-title" maxlength="72" data-i18n-placeholder="package-title-placeholder" placeholder="Paket adı">
+            <label class="field-label" for="pack-title" data-i18n="package-title">TÊN GÓI THẺ</label>
+            <input class="title-input" id="pack-title" maxlength="72" data-i18n-placeholder="package-title-placeholder" placeholder="Nhập tên gói thẻ...">
             <div class="metadata"><span id="pack-agent">Agent ID —</span><span id="pack-category">EPIC</span></div>
 
             <section class="banner-editor subsection">
-              <div class="subsection-heading"><div><div class="eyebrow" data-i18n="package-banner">PAKET BANNER’I</div><h3 data-i18n="banner-background">Paket arka planı</h3></div></div>
+              <div class="subsection-heading"><div><div class="eyebrow" data-i18n="package-banner">BANNER GÓI THẺ</div><h3 data-i18n="banner-background">Hình nền gói thẻ</h3></div></div>
               <div id="pack-banner-preview" class="pack-banner-preview">
-                <span id="banner-preview-title">Offline Pack Manager</span>
+                <span id="banner-preview-title">eFootbase Pack</span>
                 <small id="banner-preview-id">AGENT ID</small>
               </div>
               <div class="banner-actions">
-                <button class="button button-secondary" id="select-banner" type="button" data-i18n="select-banner">Banner seç</button>
-                <button class="text-button" id="clear-banner" type="button" data-i18n="clear-banner">Banner’ı kaldır</button>
+                <button class="button button-secondary" id="select-banner" type="button" data-i18n="select-banner">Chọn Banner</button>
+                <button class="text-button" id="clear-banner" type="button" data-i18n="clear-banner">Xóa Banner</button>
               </div>
-              <p class="banner-help" data-i18n="banner-help">Seçtiğiniz görsel paket arka planı olarak önizlenir ve komut ZIP’ine eklenir.</p>
+              <p class="banner-help" data-i18n="banner-help">Ảnh được chọn sẽ hiển thị làm hình nền của gói thẻ trong game.</p>
             </section>
 
             <section class="subsection">
-              <div class="subsection-heading"><div><div class="eyebrow" data-i18n="featured-players">ÖNE ÇIKAN OYUNCULAR</div><h3 data-i18n="first-three">İlk üç oyuncu</h3></div><span class="tag" data-i18n="player-ids">OYUNCU ID’LERİ</span></div>
+              <div class="subsection-heading"><div><div class="eyebrow" data-i18n="featured-players">CẦU THỦ TIÊU BIỂU</div><h3 data-i18n="first-three">3 cầu thủ nổi bật hàng đầu</h3></div><span class="tag" data-i18n="player-ids">ID CẦU THỦ</span></div>
               <div id="featured-list" class="featured-list"></div>
-              <button class="text-button featured-picker-toggle" id="toggle-featured-picker" type="button" data-i18n="edit-featured">Öne çıkanları düzenle</button>
+              <button class="text-button featured-picker-toggle" id="toggle-featured-picker" type="button" data-i18n="edit-featured">Chỉnh sửa tiêu biểu</button>
               <div id="featured-picker" class="featured-picker" hidden></div>
             </section>
 
             <section class="subsection roster-section">
-              <div class="subsection-heading"><div><div class="eyebrow" data-i18n="squad">KADRO</div><h3><span data-i18n="player-list">Oyuncu listesi</span> <span id="roster-count" class="inline-count">0</span></h3></div><button class="text-button" id="show-roster" type="button"></button></div>
-              <label class="search-box player-search"><span aria-hidden="true">⌕</span><input id="player-search" data-i18n-placeholder="search-players" placeholder="Oyuncu adı veya ID ile ara..." autocomplete="off"><button id="clear-player-search" type="button" aria-label="Clear" hidden>×</button></label>
+              <div class="subsection-heading"><div><div class="eyebrow" data-i18n="squad">DANH SÁCH</div><h3><span data-i18n="player-list">Cầu thủ trong gói</span> <span id="roster-count" class="inline-count">0</span></h3></div><button class="text-button" id="show-roster" type="button"></button></div>
+              <label class="search-box player-search"><span aria-hidden="true">⌕</span><input id="player-search" data-i18n-placeholder="search-players" placeholder="Tìm theo tên hoặc ID cầu thủ..." autocomplete="off"><button id="clear-player-search" type="button" aria-label="Xóa" hidden>×</button></label>
               <div class="filter-row">
-                <select id="position-filter" class="filter-select"><option value="" data-i18n="all-positions">Tüm pozisyonlar</option></select>
-                <input id="age-filter" class="filter-age" type="number" min="1" max="99" inputmode="numeric" data-i18n-placeholder="filter-age" placeholder="Yaş">
+                <select id="position-filter" class="filter-select"><option value="" data-i18n="all-positions">Tất cả vị trí</option></select>
+                <input id="age-filter" class="filter-age" type="number" min="1" max="99" inputmode="numeric" data-i18n-placeholder="filter-age" placeholder="Tuổi">
               </div>
               <div id="player-results" class="player-results" hidden></div>
               <div class="manual-id-row">
-                <label class="search-box manual-id-input"><span aria-hidden="true">#</span><input id="manual-player-id" type="text" inputmode="numeric" maxlength="20" data-i18n-placeholder="manual-player-id" placeholder="Oyuncu ID’si gir"></label>
-                <button class="button button-secondary" id="add-player-id" type="button" data-i18n="add-by-id">ID ekle</button>
-                <button class="button button-secondary" id="toggle-bulk-add" type="button" data-i18n="bulk-add">Toplu ID</button>
+                <label class="search-box manual-id-input"><span aria-hidden="true">#</span><input id="manual-player-id" type="text" inputmode="numeric" maxlength="20" data-i18n-placeholder="manual-player-id" placeholder="Nhập ID cầu thủ"></label>
+                <button class="button button-secondary" id="add-player-id" type="button" data-i18n="add-by-id">Thêm ID</button>
+                <button class="button button-secondary" id="toggle-bulk-add" type="button" data-i18n="bulk-add">Thêm hàng loạt</button>
               </div>
               <div id="bulk-add-panel" class="bulk-add-panel" hidden>
-                <textarea id="bulk-player-ids" rows="2" data-i18n-placeholder="bulk-placeholder" placeholder="ID’leri virgül veya satırla ayırın"></textarea>
-                <button class="button button-secondary" id="add-bulk-ids" type="button" data-i18n="add-all">Tümünü ekle</button>
+                <textarea id="bulk-player-ids" rows="2" data-i18n-placeholder="bulk-placeholder" placeholder="Nhập các ID cách nhau bằng dấu phẩy, khoảng trắng hoặc xuống dòng"></textarea>
+                <button class="button button-secondary" id="add-bulk-ids" type="button" data-i18n="add-all">Thêm tất cả</button>
               </div>
               <div id="roster-list" class="roster-list"></div>
             </section>
-            <div class="editor-footer"><span data-i18n="auto-save">Değişiklikler otomatik kaydedilir</span><span data-i18n="saved-locally">Yerel olarak kaydedildi</span></div>
+            <div class="editor-footer"><span data-i18n="auto-save">Tự động lưu thay đổi</span><span data-i18n="saved-locally">Đã lưu trên thiết bị</span></div>
           </div>
         </section>
       </section>
@@ -131,13 +136,13 @@
       <div id="view-players" hidden></div>
       <div id="view-squad" hidden></div>
       <div id="view-resp" hidden></div>
-      <footer><span class="credit-text"></span><span>·</span><span data-i18n="local-only">YALNIZCA YEREL</span><span>·</span><span data-i18n="no-server">SUNUCU BAĞLANTISI YOK</span><span>·</span><span>JSON</span></footer>
+      <footer><span class="credit-text"></span><span>·</span><span data-i18n="local-only">OFFLINE HOÀN TOÀN</span><span>·</span><span data-i18n="no-server">KHÔNG CẦN INTERNET</span><span>·</span><span>JSON</span></footer>
     </main>
-    <nav class="nav-tabs" aria-label="Bölümler"><button class="nav-tab on" data-v="packs" type="button"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg><span>Packs</span></button><button class="nav-tab" data-v="players" type="button"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg><span>Ziru DB</span></button><button class="nav-tab" data-v="squad" type="button"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v14H3z"/><path d="M12 5v14M3 12h18"/><circle cx="12" cy="12" r="2"/></svg><span>Squad</span></button><button class="nav-tab" data-v="resp" type="button"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span>Commands</span></button></nav>
+    <nav class="nav-tabs" aria-label="Điều hướng chính"><button class="nav-tab on" data-v="packs" type="button"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg><span>Gói Thẻ</span></button><button class="nav-tab" data-v="players" type="button"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg><span>Dữ Liệu Thẻ</span></button><button class="nav-tab" data-v="squad" type="button"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v14H3z"/><path d="M12 5v14M3 12h18"/><circle cx="12" cy="12" r="2"/></svg><span>Đội Hình</span></button><button class="nav-tab" data-v="resp" type="button"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span>Lệnh Ziru</span></button></nav>
     <div class="toast" id="toast" role="status"></div>
     <div class="modal-backdrop" id="modal-backdrop" hidden>
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        <div class="modal-heading"><h2 id="modal-title"></h2><button class="modal-close" id="modal-close" type="button" aria-label="Close">×</button></div>
+        <div class="modal-heading"><h2 id="modal-title"></h2><button class="modal-close" id="modal-close" type="button" aria-label="Đóng">×</button></div>
         <div id="modal-content" class="modal-content"></div>
         <div id="modal-actions" class="modal-actions"></div>
       </section>
