@@ -171,6 +171,24 @@ static std::string fallbackPlayerName(uint32_t baseId) {
 static std::mutex sActorLock;
 static std::unordered_map<void*, int64_t> sActorPlayerId;
 
+static void sanitizeMatchPlayerNames(uint8_t* match) {
+  if (!match) return;
+  for (int side = 0; side <= 1; ++side) {
+    uint8_t* teamPlayers = match + 0x14e0 + (side * 0x5dc0);
+    for (int i = 0; i < 40; ++i) {
+      uint8_t* p = teamPlayers + (i * 0x258);
+      char* name = (char*)(p + 0x89);
+      if (name && name[0] != '\0') {
+        std::string tc = toTitleCase(name);
+        if (!tc.empty() && tc.size() < 60 && tc != name) {
+          strncpy(name, tc.c_str(), 60);
+          name[59] = '\0';
+        }
+      }
+    }
+  }
+}
+
 static std::string lookupShirtName(void* actor, int uniformNumber) {
   if (uniformNumber <= 0 || uniformNumber > 99) return "";
 
@@ -182,7 +200,10 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   if (!base) return "";
 
   uint8_t* match = base + 0x6c4c0;
+  sanitizeMatchPlayerNames(match);
+
   int32_t actorTeamId = actor ? *(int32_t*)((uint8_t*)actor + 0xe10) : -1;
+  int32_t actorSide = actor ? *(int32_t*)((uint8_t*)actor + 0x1110) : -1;
 
   uint32_t homeTeamId = *(uint32_t*)(match + 0x11d0 + 0x10);
   uint32_t awayTeamId = *(uint32_t*)(match + 0x11d0 + 0x188 + 0x10);
@@ -190,7 +211,9 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   if (awayTeamId == 0 && gZiruAwayTeamId > 0) awayTeamId = (uint32_t)gZiruAwayTeamId;
 
   int preferredSide = -1;
-  if (actorTeamId > 0) {
+  if (actorSide == 0 || actorSide == 1) {
+    preferredSide = actorSide;
+  } else if (actorTeamId > 0) {
     if ((uint32_t)actorTeamId == homeTeamId) preferredSide = 0;
     else if ((uint32_t)actorTeamId == awayTeamId) preferredSide = 1;
   }
@@ -203,7 +226,10 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
       uint16_t num = *(uint16_t*)(p + 0x1ec);
       if (num == (uint16_t)uniformNumber) {
         uint32_t baseId = *(uint32_t*)(p + 0x38);
-        std::string name = sanitizeShirtName((const char*)(p + 0xc6));
+        auto getPlayerName = (const char* (*)(void*))(0x104bc2460 + gSlide);
+        const char* rawName = getPlayerName ? getPlayerName(p) : nullptr;
+        if (!rawName || !rawName[0]) rawName = (const char*)(p + 0x89);
+        std::string name = sanitizeShirtName(rawName);
         if (name.empty()) name = sanitizeShirtName((const char*)(p + 0x103));
         if (name.empty() && baseId > 0) name = fallbackPlayerName(baseId);
         if (!name.empty()) return name;
@@ -233,14 +259,20 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
   if (!base) return fallbackPlayerName(targetBaseId);
 
   uint8_t* match = base + 0x6c4c0;
+  sanitizeMatchPlayerNames(match);
+
   int32_t actorTeamId = actor ? *(int32_t*)((uint8_t*)actor + 0xe10) : -1;
+  int32_t actorSide = actor ? *(int32_t*)((uint8_t*)actor + 0x1110) : -1;
+
   uint32_t homeTeamId = *(uint32_t*)(match + 0x11d0 + 0x10);
   uint32_t awayTeamId = *(uint32_t*)(match + 0x11d0 + 0x188 + 0x10);
   if (homeTeamId == 0 && gZiruHomeTeamId > 0) homeTeamId = (uint32_t)gZiruHomeTeamId;
   if (awayTeamId == 0 && gZiruAwayTeamId > 0) awayTeamId = (uint32_t)gZiruAwayTeamId;
 
   int preferredSide = -1;
-  if (actorTeamId > 0) {
+  if (actorSide == 0 || actorSide == 1) {
+    preferredSide = actorSide;
+  } else if (actorTeamId > 0) {
     if ((uint32_t)actorTeamId == homeTeamId) preferredSide = 0;
     else if ((uint32_t)actorTeamId == awayTeamId) preferredSide = 1;
   }
@@ -252,8 +284,12 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
       uint8_t* p = teamPlayers + (i * 0x258);
       uint32_t baseId = *(uint32_t*)(p + 0x38);
       if (baseId == targetBaseId) {
-        std::string name = sanitizeShirtName((const char*)(p + 0xc6));
+        auto getPlayerName = (const char* (*)(void*))(0x104bc2460 + gSlide);
+        const char* rawName = getPlayerName ? getPlayerName(p) : nullptr;
+        if (!rawName || !rawName[0]) rawName = (const char*)(p + 0x89);
+        std::string name = sanitizeShirtName(rawName);
         if (name.empty()) name = sanitizeShirtName((const char*)(p + 0x103));
+        if (name.empty()) name = fallbackPlayerName(targetBaseId);
         if (!name.empty()) return name;
       }
     }
