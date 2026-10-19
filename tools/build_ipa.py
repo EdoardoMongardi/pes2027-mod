@@ -121,6 +121,7 @@ PATCHES = [
     (0x10091141C, 0x36001A2A, 0xD503201F, "APlayerActor::SetUniformName: tbz -> nop"),
     (0x100911448, 0x397C4268, 0x52800028, "APlayerActor::SetUniformName: ldrb w8,[x19,#0xf10] -> mov w8, #1"),
     (0x100911450, 0x54001881, 0xD503201F, "APlayerActor::SetUniformName: b.ne -> nop"),
+    (0x10089F61C, 0x392ABF3F, 0xD503201F, "BackNumberStep: do not clear nameTexActor enable flag 0x1aaf"),
 
     # Unlock selectable real stadiums in all match modes (Authentic, Exhibition, Tour, etc.)
     (0x104892B08, 0x540003A1, 0xD503201F, "GetSelectableStadium: b.ne -> nop"),

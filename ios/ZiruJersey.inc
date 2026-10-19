@@ -215,6 +215,55 @@ static void sanitizeMatchPlayerNames(uint8_t* match) {
   }
 }
 
+static int resolveActorSide(void* actor, uint8_t* match) {
+  if (!actor) return -1;
+
+  // 1. Check actor + 0x450 uniform path string (e.g. u0108p1, u0128p2, u0108g1, u0128g2)
+  const char16_t* uStr = *(const char16_t**)((uint8_t*)actor + 0x450);
+  int32_t uLen = *(int32_t*)((uint8_t*)actor + 0x458);
+  if (uStr && uLen >= 6) {
+    // Check kit slot indicator ('p1' or 'g1' = home, 'p2' or 'g2' = away)
+    for (int i = 0; i < uLen - 1; ++i) {
+      if ((uStr[i] == u'p' || uStr[i] == u'g') && uStr[i+1] == u'1') return 0;
+      if ((uStr[i] == u'p' || uStr[i] == u'g') && uStr[i+1] == u'2') return 1;
+    }
+    // Check 4-digit team ID after 'u' or 'g'
+    if ((uStr[0] == u'u' || uStr[0] == u'g') && uLen >= 5) {
+      int32_t kitTeamId = 0;
+      for (int i = 1; i <= 4 && i < uLen; ++i) {
+        if (uStr[i] >= u'0' && uStr[i] <= u'9') {
+          kitTeamId = kitTeamId * 10 + (uStr[i] - u'0');
+        }
+      }
+      if (kitTeamId > 0 && match) {
+        uint32_t homeTeamId = *(uint32_t*)(match + 0x11d0 + 0x10);
+        uint32_t awayTeamId = *(uint32_t*)(match + 0x11d0 + 0x188 + 0x10);
+        if (homeTeamId == 0 && gZiruHomeTeamId > 0) homeTeamId = (uint32_t)gZiruHomeTeamId;
+        if (awayTeamId == 0 && gZiruAwayTeamId > 0) awayTeamId = (uint32_t)gZiruAwayTeamId;
+        if ((uint32_t)kitTeamId == homeTeamId) return 0;
+        if ((uint32_t)kitTeamId == awayTeamId) return 1;
+      }
+    }
+  }
+
+  // 2. Check actor + 0x1110 (native side flag: 0 = Home, 1 = Away)
+  int32_t actorSide = *(int32_t*)((uint8_t*)actor + 0x1110);
+  if (actorSide == 0 || actorSide == 1) return actorSide;
+
+  // 3. Check actor + 0xe10 (teamId)
+  int32_t actorTeamId = *(int32_t*)((uint8_t*)actor + 0xe10);
+  if (actorTeamId > 0 && match) {
+    uint32_t homeTeamId = *(uint32_t*)(match + 0x11d0 + 0x10);
+    uint32_t awayTeamId = *(uint32_t*)(match + 0x11d0 + 0x188 + 0x10);
+    if (homeTeamId == 0 && gZiruHomeTeamId > 0) homeTeamId = (uint32_t)gZiruHomeTeamId;
+    if (awayTeamId == 0 && gZiruAwayTeamId > 0) awayTeamId = (uint32_t)gZiruAwayTeamId;
+    if ((uint32_t)actorTeamId == homeTeamId) return 0;
+    if ((uint32_t)actorTeamId == awayTeamId) return 1;
+  }
+
+  return -1;
+}
+
 static std::string lookupShirtName(void* actor, int uniformNumber) {
   if (uniformNumber <= 0 || uniformNumber > 99) return "";
 
@@ -228,29 +277,38 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   uint8_t* match = base + 0x6c4c0;
   sanitizeMatchPlayerNames(match);
 
-  int32_t actorTeamId = actor ? *(int32_t*)((uint8_t*)actor + 0xe10) : -1;
-  int32_t actorSide = actor ? *(int32_t*)((uint8_t*)actor + 0x1110) : -1;
-
-  uint32_t homeTeamId = *(uint32_t*)(match + 0x11d0 + 0x10);
-  uint32_t awayTeamId = *(uint32_t*)(match + 0x11d0 + 0x188 + 0x10);
-  if (homeTeamId == 0 && gZiruHomeTeamId > 0) homeTeamId = (uint32_t)gZiruHomeTeamId;
-  if (awayTeamId == 0 && gZiruAwayTeamId > 0) awayTeamId = (uint32_t)gZiruAwayTeamId;
-
-  int preferredSide = -1;
-  if (actorSide == 0 || actorSide == 1) {
-    preferredSide = actorSide;
-  } else if (actorTeamId > 0) {
-    if ((uint32_t)actorTeamId == homeTeamId) preferredSide = 0;
-    else if ((uint32_t)actorTeamId == awayTeamId) preferredSide = 1;
-  }
+  int preferredSide = resolveActorSide(actor, match);
 
   auto checkSide = [&](int side) -> std::string {
     if (side < 0 || side > 1) return "";
     uint8_t* teamPlayers = match + 0x14e0 + (side * 0x5dc0);
-    for (int i = 0; i < 40; ++i) {
+    uint8_t* teamObj = match + 0x620 + (side * 0x5d8);
+    uint16_t* uniformNums = (uint16_t*)(teamObj + 0x110);
+
+    // Pass 1: Starters (0..10)
+    for (int i = 0; i < 11; ++i) {
       uint8_t* p = teamPlayers + (i * 0x258);
-      uint16_t num = *(uint16_t*)(p + 0x1ec);
-      if (num == (uint16_t)uniformNumber) {
+      uint16_t num1 = *(uint16_t*)(p + 0x1ec);
+      uint16_t num2 = *(uint16_t*)(p + 0x1b4);
+      uint16_t num3 = uniformNums[i];
+      if (num1 == (uint16_t)uniformNumber || num2 == (uint16_t)uniformNumber || num3 == (uint16_t)uniformNumber) {
+        uint32_t baseId = *(uint32_t*)(p + 0x38);
+        const char* rawName = (const char*)(p + 0xc6);
+        if (!rawName || !rawName[0]) rawName = (const char*)(p + 0x89);
+        std::string name = sanitizeShirtName(rawName);
+        if (name.empty()) name = sanitizeShirtName((const char*)(p + 0x103));
+        if (name.empty() && baseId > 0) name = fallbackPlayerName(baseId & 0xFFFFFF);
+        if (!name.empty()) return name;
+      }
+    }
+
+    // Pass 2: Bench (11..39)
+    for (int i = 11; i < 40; ++i) {
+      uint8_t* p = teamPlayers + (i * 0x258);
+      uint16_t num1 = *(uint16_t*)(p + 0x1ec);
+      uint16_t num2 = *(uint16_t*)(p + 0x1b4);
+      uint16_t num3 = uniformNums[i];
+      if (num1 == (uint16_t)uniformNumber || num2 == (uint16_t)uniformNumber || num3 == (uint16_t)uniformNumber) {
         uint32_t baseId = *(uint32_t*)(p + 0x38);
         const char* rawName = (const char*)(p + 0xc6);
         if (!rawName || !rawName[0]) rawName = (const char*)(p + 0x89);
@@ -285,21 +343,7 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
   uint8_t* match = base + 0x6c4c0;
   sanitizeMatchPlayerNames(match);
 
-  int32_t actorTeamId = actor ? *(int32_t*)((uint8_t*)actor + 0xe10) : -1;
-  int32_t actorSide = actor ? *(int32_t*)((uint8_t*)actor + 0x1110) : -1;
-
-  uint32_t homeTeamId = *(uint32_t*)(match + 0x11d0 + 0x10);
-  uint32_t awayTeamId = *(uint32_t*)(match + 0x11d0 + 0x188 + 0x10);
-  if (homeTeamId == 0 && gZiruHomeTeamId > 0) homeTeamId = (uint32_t)gZiruHomeTeamId;
-  if (awayTeamId == 0 && gZiruAwayTeamId > 0) awayTeamId = (uint32_t)gZiruAwayTeamId;
-
-  int preferredSide = -1;
-  if (actorSide == 0 || actorSide == 1) {
-    preferredSide = actorSide;
-  } else if (actorTeamId > 0) {
-    if ((uint32_t)actorTeamId == homeTeamId) preferredSide = 0;
-    else if ((uint32_t)actorTeamId == awayTeamId) preferredSide = 1;
-  }
+  int preferredSide = resolveActorSide(actor, match);
 
   auto checkSide = [&](int side) -> std::string {
     if (side < 0 || side > 1) return "";
@@ -323,6 +367,7 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
   if (preferredSide >= 0) {
     std::string res = checkSide(preferredSide);
     if (!res.empty()) return res;
+    return fallbackPlayerName(targetBaseId);
   }
   std::string res = checkSide(0);
   if (!res.empty()) return res;
@@ -443,6 +488,10 @@ static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, i
 static void hookedBackNumberStep(void* actor) {
   if (actor) {
     int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
+    if (num <= 0 || num > 99) {
+      int32_t altNum = *(int32_t*)((uint8_t*)actor + 0x1924);
+      if (altNum > 0 && altNum <= 99) num = altNum;
+    }
     int64_t pid = 0;
     {
       std::lock_guard<std::mutex> lk(sActorLock);
@@ -482,6 +531,9 @@ static void hookedBackNumberStep(void* actor) {
   }
 
   if (actor) {
+    *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
+    *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
+
     void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
     if (nameTexActor) {
       *(uint8_t*)((uint8_t*)nameTexActor + 0x290) = 0; // 0 = render player name; 1 = debug font test grid (orange box)
