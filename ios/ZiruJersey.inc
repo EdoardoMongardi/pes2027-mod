@@ -110,25 +110,47 @@ static std::string toTitleCase(const std::string& input) {
 static std::string sanitizeShirtName(const char* s) {
   if (!s || !s[0]) return "";
   std::string raw;
-  raw.reserve(24);
-  for (size_t i = 0; s[i] != '\0' && raw.size() < 24; ++i) {
+  raw.reserve(32);
+  for (size_t i = 0; s[i] != '\0' && raw.size() < 30; ++i) {
     unsigned char c = (unsigned char)s[i];
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == ' ' || c == '.' || c == '-' || c == '\'') {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == ' ' || c == '.' || c == '-' || c == ''') {
       raw += (char)c;
     } else if (c == 0xC3 && s[i + 1] != '\0') {
       unsigned char c2 = (unsigned char)s[++i];
       if ((c2 >= 0x80 && c2 <= 0x85) || (c2 >= 0xA0 && c2 <= 0xA5)) raw += 'A';
+      else if (c2 == 0x86 || c2 == 0xA6) { raw += 'A'; raw += 'E'; }
       else if (c2 == 0x87 || c2 == 0xA7) raw += 'C';
       else if ((c2 >= 0x88 && c2 <= 0x8B) || (c2 >= 0xA8 && c2 <= 0xAB)) raw += 'E';
       else if ((c2 >= 0x8C && c2 <= 0x8F) || (c2 >= 0xAC && c2 <= 0xAF)) raw += 'I';
+      else if (c2 == 0x90 || c2 == 0xB0) raw += 'D';
       else if (c2 == 0x91 || c2 == 0xB1) raw += 'N';
       else if ((c2 >= 0x92 && c2 <= 0x96) || c2 == 0x98 || (c2 >= 0xB2 && c2 <= 0xB6) || c2 == 0xB8) raw += 'O';
       else if ((c2 >= 0x99 && c2 <= 0x9C) || (c2 >= 0xB9 && c2 <= 0xBC)) raw += 'U';
+      else if (c2 == 0x9D || c2 == 0xBD || c2 == 0xBF) raw += 'Y';
+      else if (c2 == 0x9F) { raw += 's'; raw += 's'; }
+    } else if (c == 0xC4 && s[i + 1] != '\0') {
+      unsigned char c2 = (unsigned char)s[++i];
+      if (c2 >= 0x80 && c2 <= 0x85) raw += 'A';
+      else if (c2 >= 0x86 && c2 <= 0x8D) raw += 'C';
+      else if (c2 >= 0x8E && c2 <= 0x91) raw += 'D';
+      else if (c2 >= 0x92 && c2 <= 0x9B) raw += 'E';
+      else if (c2 >= 0x9C && c2 <= 0x9F) raw += 'G';
+      else if (c2 >= 0xA8 && c2 <= 0xB1) raw += 'I';
+    } else if (c == 0xC5 && s[i + 1] != '\0') {
+      unsigned char c2 = (unsigned char)s[++i];
+      if (c2 >= 0x81 && c2 <= 0x84) raw += 'L';
+      else if (c2 >= 0x83 && c2 <= 0x8B) raw += 'N';
+      else if (c2 >= 0x8C && c2 <= 0x91) raw += 'O';
+      else if (c2 >= 0x94 && c2 <= 0x99) raw += 'R';
+      else if ((c2 >= 0x9A && c2 <= 0x9F) || (c2 >= 0xA0 && c2 <= 0xA3)) raw += 'S';
+      else if (c2 >= 0xA4 && c2 <= 0xA7) raw += 'T';
+      else if (c2 >= 0xAA && c2 <= 0xB3) raw += 'U';
+      else if (c2 >= 0xBD && c2 <= 0xC2) raw += 'Z';
     }
   }
   while (!raw.empty() && raw.front() == ' ') raw.erase(raw.begin());
   while (!raw.empty() && raw.back() == ' ') raw.pop_back();
-  if (raw.empty() || raw.size() > 24) return "";
+  if (raw.empty() || raw.size() > 30) return "";
   return toTitleCase(raw);
 }
 
@@ -231,7 +253,7 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
         if (!rawName || !rawName[0]) rawName = (const char*)(p + 0x89);
         std::string name = sanitizeShirtName(rawName);
         if (name.empty()) name = sanitizeShirtName((const char*)(p + 0x103));
-        if (name.empty() && baseId > 0) name = fallbackPlayerName(baseId);
+        if (name.empty() && baseId > 0) name = fallbackPlayerName(baseId & 0xFFFFFF);
         if (!name.empty()) return name;
       }
     }
@@ -239,8 +261,7 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   };
 
   if (preferredSide >= 0) {
-    std::string res = checkSide(preferredSide);
-    if (!res.empty()) return res;
+    return checkSide(preferredSide);
   }
   std::string res = checkSide(0);
   if (!res.empty()) return res;
@@ -283,7 +304,8 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
     for (int i = 0; i < 40; ++i) {
       uint8_t* p = teamPlayers + (i * 0x258);
       uint32_t baseId = *(uint32_t*)(p + 0x38);
-      if (baseId == targetBaseId) {
+      uint64_t fullPid = *(uint64_t*)(p + 0x38);
+      if ((baseId & 0xFFFFFF) == targetBaseId || (fullPid & 0xFFFFFF) == (uint64_t)targetBaseId || fullPid == (uint64_t)playerId) {
         auto getPlayerName = (const char* (*)(void*))(0x104bc2460 + gSlide);
         const char* rawName = getPlayerName ? getPlayerName(p) : nullptr;
         if (!rawName || !rawName[0]) rawName = (const char*)(p + 0x89);
@@ -307,6 +329,59 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
   return fallbackPlayerName(targetBaseId);
 }
 
+static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int uniformNumber) {
+  // 1. Try native TMPDB PlayerManager::FindPlayer with playerId (covers every player in database)
+  if (playerId > 0 || (playerId & 0xFFFFFF) > 0) {
+    auto getMgr = (void* (*)())(0x104bba084 + gSlide);
+    void* mgr = getMgr ? getMgr() : nullptr;
+    if (mgr) {
+      void* pmgr = *(void**)((uint8_t*)mgr + 0x40);
+      if (pmgr) {
+        auto findPl = (void* (*)(void*, int64_t, int64_t))(0x104b9588c + gSlide);
+        auto getPlName = (const char* (*)(void*))(0x104bc2460 + gSlide);
+        if (findPl) {
+          void* pl = nullptr;
+          if (playerId > 0) {
+            pl = findPl(pmgr, 0, playerId);
+            if (!pl && (playerId & 0xFFFFFF) > 0) {
+              pl = findPl(pmgr, (int64_t)(playerId & 0xFFFFFF), 0);
+            }
+            if (!pl && (uint32_t)playerId > 0) {
+              pl = findPl(pmgr, (int64_t)(uint32_t)playerId, 0);
+            }
+          }
+          if (pl) {
+            const char* raw = getPlName ? getPlName(pl) : nullptr;
+            if (!raw || !raw[0]) raw = (const char*)((uint8_t*)pl + 0x89);
+            std::string n = sanitizeShirtName(raw);
+            if (!n.empty()) return n;
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Try match roster lookup by player ID
+  if (playerId > 0) {
+    std::string n = lookupShirtNameByPlayerId(actor, playerId);
+    if (!n.empty()) return n;
+  }
+
+  // 3. Try match roster lookup by uniform number
+  if (uniformNumber > 0 && uniformNumber <= 99) {
+    std::string n = lookupShirtName(actor, uniformNumber);
+    if (!n.empty()) return n;
+  }
+
+  // 4. Try fallback player names
+  if (playerId > 0) {
+    std::string n = fallbackPlayerName((uint32_t)(playerId & 0xFFFFFF));
+    if (!n.empty()) return n;
+  }
+
+  return "";
+}
+
 static void applyActorShirtName(void* actor, const std::string& name) {
   if (!actor || name.empty()) return;
   auto setShirt = (void (*)(void*, const char*))(0x10090ef34 + gSlide);
@@ -315,11 +390,13 @@ static void applyActorShirtName(void* actor, const std::string& name) {
   }
   *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
   *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
+  *(int32_t*)((uint8_t*)actor + 0xe38) = 1;
 
   void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
   if (nameTexActor) {
     auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
     if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
+    if (originalLoad) originalLoad(nameTexActor);
   }
 }
 
@@ -334,15 +411,10 @@ static void hookedSetUniformNumber(void* actor, int uniformNumber) {
     auto it = sActorPlayerId.find(actor);
     if (it != sActorPlayerId.end()) pid = it->second;
   }
-  if (pid <= 0) {
-    pid = *(int64_t*)((uint8_t*)actor + 0x1700);
-  }
-  std::string name;
-  if (pid > 0) name = lookupShirtNameByPlayerId(actor, pid);
-  if (name.empty()) name = lookupShirtName(actor, uniformNumber);
+  std::string name = lookupPlayerNameUniversal(actor, pid, uniformNumber);
   if (!name.empty()) {
     applyActorShirtName(actor, name);
-    ZLog(@"[JERSEY] SetUniformNumber #%d -> '%s'", uniformNumber, name.c_str());
+    ZLog(@"[JERSEY] SetUniformNumber #%d pid=%lld -> '%s'", uniformNumber, (long long)pid, name.c_str());
   }
 }
 
@@ -353,71 +425,77 @@ static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, i
   if (!actor) return;
   {
     std::lock_guard<std::mutex> lk(sActorLock);
+    if (sActorPlayerId.size() > 512) sActorPlayerId.clear();
     sActorPlayerId[actor] = playerId;
   }
-  std::string name;
-  if (playerId > 0) name = lookupShirtNameByPlayerId(actor, playerId);
-  if (name.empty()) {
-    int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
-    if (num > 0) name = lookupShirtName(actor, num);
-  }
+  int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
+  std::string name = lookupPlayerNameUniversal(actor, playerId, num);
   if (!name.empty()) {
     applyActorShirtName(actor, name);
-    ZLog(@"[JERSEY] SetupFromPlayerId pid=%lld -> '%s'", (long long)playerId, name.c_str());
+    ZLog(@"[JERSEY] SetupFromPlayerId pid=%lld num=%d -> '%s'", (long long)playerId, num, name.c_str());
   }
 }
 
 static void hookedBackNumberStep(void* actor) {
   if (actor) {
     int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
+    int64_t pid = 0;
+    {
+      std::lock_guard<std::mutex> lk(sActorLock);
+      auto it = sActorPlayerId.find(actor);
+      if (it != sActorPlayerId.end()) pid = it->second;
+    }
+
     const uint8_t* s = (const uint8_t*)actor + 0x1710;
     bool heap = (int8_t)s[23] < 0;
     uint64_t len = heap ? ((const uint64_t*)s)[1] : (s[23] & 0x7f);
     const char* curStr = heap ? *(const char**)s : (const char*)s;
 
-    if (len == 0 && num > 0) {
-      int64_t pid = 0;
-      {
-        std::lock_guard<std::mutex> lk(sActorLock);
-        auto it = sActorPlayerId.find(actor);
-        if (it != sActorPlayerId.end()) pid = it->second;
+    std::string neededName;
+    if (len == 0) {
+      neededName = lookupPlayerNameUniversal(actor, pid, num);
+    } else if (curStr && len > 0) {
+      std::string raw(curStr, len);
+      std::string tc = sanitizeShirtName(raw.c_str());
+      if (!tc.empty() && tc != raw) {
+        neededName = tc;
       }
-      if (pid <= 0) {
-        pid = *(int64_t*)((uint8_t*)actor + 0x1700);
-      }
-      std::string name;
-      if (pid > 0) name = lookupShirtNameByPlayerId(actor, pid);
-      if (name.empty()) name = lookupShirtName(actor, num);
-      if (!name.empty()) {
-        applyActorShirtName(actor, name);
-      }
-    } else if (len > 0) {
-      // Ensure existing name is formatted in Title Case ("Viết hoa chữ đầu thôi")
-      if (curStr) {
-        std::string raw(curStr, len);
-        std::string tc = sanitizeShirtName(raw.c_str());
-        if (!tc.empty() && tc != raw) {
-          applyActorShirtName(actor, tc);
-        }
-      }
-      *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
-      *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
     }
 
-    void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
-    if (nameTexActor && len > 0) {
-      const uint8_t* ts = (const uint8_t*)nameTexActor + 0x278;
-      bool theap = (int8_t)ts[23] < 0;
-      uint64_t tlen = theap ? ((const uint64_t*)ts)[1] : (ts[23] & 0x7f);
-      if (tlen == 0) {
-        auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
-        if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
-      }
+    if (!neededName.empty()) {
+      applyActorShirtName(actor, neededName);
     }
+
+    *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
+    *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
+    *(int32_t*)((uint8_t*)actor + 0xe38) = 1;
   }
 
   if (originalBackNumberStep) {
     originalBackNumberStep(actor);
+  }
+
+  if (actor) {
+    const uint8_t* s = (const uint8_t*)actor + 0x1710;
+    bool heap = (int8_t)s[23] < 0;
+    uint64_t len = heap ? ((const uint64_t*)s)[1] : (s[23] & 0x7f);
+    const char* curStr = heap ? *(const char**)s : (const char*)s;
+
+    void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
+    if (nameTexActor && len > 0 && curStr && curStr[0]) {
+      const uint8_t* ts = (const uint8_t*)nameTexActor + 0x278;
+      bool theap = (int8_t)ts[23] < 0;
+      uint64_t tlen = theap ? ((const uint64_t*)ts)[1] : (ts[23] & 0x7f);
+      const char* tstr = theap ? *(const char**)ts : (const char*)ts;
+      void* texPtr = *(void**)((uint8_t*)nameTexActor + 0x2b0);
+
+      bool mismatch = (tlen == 0 || !tstr || strncmp(tstr, curStr, len) != 0);
+      if (mismatch || !texPtr) {
+        auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
+        if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
+        if (originalLoad) originalLoad(nameTexActor);
+      }
+    }
   }
 }
 
