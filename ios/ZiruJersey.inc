@@ -248,8 +248,7 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
       uint16_t num = *(uint16_t*)(p + 0x1ec);
       if (num == (uint16_t)uniformNumber) {
         uint32_t baseId = *(uint32_t*)(p + 0x38);
-        auto getPlayerName = (const char* (*)(void*))(0x104bc2460 + gSlide);
-        const char* rawName = getPlayerName ? getPlayerName(p) : nullptr;
+        const char* rawName = (const char*)(p + 0xc6);
         if (!rawName || !rawName[0]) rawName = (const char*)(p + 0x89);
         std::string name = sanitizeShirtName(rawName);
         if (name.empty()) name = sanitizeShirtName((const char*)(p + 0x103));
@@ -306,8 +305,7 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
       uint32_t baseId = *(uint32_t*)(p + 0x38);
       uint64_t fullPid = *(uint64_t*)(p + 0x38);
       if ((baseId & 0xFFFFFF) == targetBaseId || (fullPid & 0xFFFFFF) == (uint64_t)targetBaseId || fullPid == (uint64_t)playerId) {
-        auto getPlayerName = (const char* (*)(void*))(0x104bc2460 + gSlide);
-        const char* rawName = getPlayerName ? getPlayerName(p) : nullptr;
+        const char* rawName = (const char*)(p + 0xc6);
         if (!rawName || !rawName[0]) rawName = (const char*)(p + 0x89);
         std::string name = sanitizeShirtName(rawName);
         if (name.empty()) name = sanitizeShirtName((const char*)(p + 0x103));
@@ -330,7 +328,19 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
 }
 
 static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int uniformNumber) {
-  // 1. Try native TMPDB PlayerManager::FindPlayer with playerId (covers every player in database)
+  // 1. Try match roster lookup by uniform number (most accurate for on-field actor)
+  if (uniformNumber > 0 && uniformNumber <= 99) {
+    std::string n = lookupShirtName(actor, uniformNumber);
+    if (!n.empty()) return n;
+  }
+
+  // 2. Try match roster lookup by player ID
+  if (playerId > 0) {
+    std::string n = lookupShirtNameByPlayerId(actor, playerId);
+    if (!n.empty()) return n;
+  }
+
+  // 3. Try native TMPDB PlayerManager::FindPlayer with playerId
   if (playerId > 0 || (playerId & 0xFFFFFF) > 0) {
     auto getMgr = (void* (*)())(0x104bba084 + gSlide);
     void* mgr = getMgr ? getMgr() : nullptr;
@@ -338,7 +348,6 @@ static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int 
       void* pmgr = *(void**)((uint8_t*)mgr + 0x40);
       if (pmgr) {
         auto findPl = (void* (*)(void*, int64_t, int64_t))(0x104b9588c + gSlide);
-        auto getPlName = (const char* (*)(void*))(0x104bc2460 + gSlide);
         if (findPl) {
           void* pl = nullptr;
           if (playerId > 0) {
@@ -351,7 +360,7 @@ static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int 
             }
           }
           if (pl) {
-            const char* raw = getPlName ? getPlName(pl) : nullptr;
+            const char* raw = (const char*)((uint8_t*)pl + 0xc6);
             if (!raw || !raw[0]) raw = (const char*)((uint8_t*)pl + 0x89);
             std::string n = sanitizeShirtName(raw);
             if (!n.empty()) return n;
@@ -359,18 +368,6 @@ static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int 
         }
       }
     }
-  }
-
-  // 2. Try match roster lookup by player ID
-  if (playerId > 0) {
-    std::string n = lookupShirtNameByPlayerId(actor, playerId);
-    if (!n.empty()) return n;
-  }
-
-  // 3. Try match roster lookup by uniform number
-  if (uniformNumber > 0 && uniformNumber <= 99) {
-    std::string n = lookupShirtName(actor, uniformNumber);
-    if (!n.empty()) return n;
   }
 
   // 4. Try fallback player names
@@ -390,12 +387,16 @@ static void applyActorShirtName(void* actor, const std::string& name) {
   }
   *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
   *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
-  *(int32_t*)((uint8_t*)actor + 0xe38) = 0;
+  // NOTE: Never overwrite actor + 0xe38!
+  // If set to 1, triggers referee branch at 0x1008ecb88 and aborts uniform creation (black screen).
+  // If set to 0, triggers cbz w23 at 0x1008a0184, zeroes nameTexActor + 0x290 and disables name rendering.
+  // Leave actor + 0xe38 at its native value.
 
   void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
   if (nameTexActor) {
     auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
     if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
+    *(uint8_t*)((uint8_t*)nameTexActor + 0x290) = 1;
   }
 }
 
@@ -451,8 +452,11 @@ static void hookedBackNumberStep(void* actor) {
     const char* curStr = heap ? *(const char**)s : (const char*)s;
 
     std::string neededName;
-    if (len == 0) {
-      neededName = lookupPlayerNameUniversal(actor, pid, num);
+    std::string correctName = lookupPlayerNameUniversal(actor, pid, num);
+    if (!correctName.empty()) {
+      if (!curStr || len == 0 || len != correctName.size() || strncmp(curStr, correctName.c_str(), len) != 0) {
+        neededName = correctName;
+      }
     } else if (curStr && len > 0) {
       std::string raw(curStr, len);
       std::string tc = sanitizeShirtName(raw.c_str());
@@ -467,7 +471,6 @@ static void hookedBackNumberStep(void* actor) {
 
     *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
     *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
-    *(int32_t*)((uint8_t*)actor + 0xe38) = 0;
   }
 
   if (originalBackNumberStep) {
@@ -475,22 +478,26 @@ static void hookedBackNumberStep(void* actor) {
   }
 
   if (actor) {
-    const uint8_t* s = (const uint8_t*)actor + 0x1710;
-    bool heap = (int8_t)s[23] < 0;
-    uint64_t len = heap ? ((const uint64_t*)s)[1] : (s[23] & 0x7f);
-    const char* curStr = heap ? *(const char**)s : (const char*)s;
-
     void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
-    if (nameTexActor && len > 0 && curStr && curStr[0]) {
-      const uint8_t* ts = (const uint8_t*)nameTexActor + 0x278;
-      bool theap = (int8_t)ts[23] < 0;
-      uint64_t tlen = theap ? ((const uint64_t*)ts)[1] : (ts[23] & 0x7f);
-      const char* tstr = theap ? *(const char**)ts : (const char*)ts;
+    if (nameTexActor) {
+      *(uint8_t*)((uint8_t*)nameTexActor + 0x290) = 1;
 
-      bool mismatch = (tlen == 0 || !tstr || strncmp(tstr, curStr, len) != 0);
-      if (mismatch) {
-        auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
-        if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
+      const uint8_t* s = (const uint8_t*)actor + 0x1710;
+      bool heap = (int8_t)s[23] < 0;
+      uint64_t len = heap ? ((const uint64_t*)s)[1] : (s[23] & 0x7f);
+      const char* curStr = heap ? *(const char**)s : (const char*)s;
+
+      if (len > 0 && curStr && curStr[0]) {
+        const uint8_t* ts = (const uint8_t*)nameTexActor + 0x278;
+        bool theap = (int8_t)ts[23] < 0;
+        uint64_t tlen = theap ? ((const uint64_t*)ts)[1] : (ts[23] & 0x7f);
+        const char* tstr = theap ? *(const char**)ts : (const char*)ts;
+
+        bool mismatch = (tlen == 0 || !tstr || tlen != len || strncmp(tstr, curStr, len) != 0);
+        if (mismatch) {
+          auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
+          if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
+        }
       }
     }
   }
