@@ -1068,8 +1068,7 @@ static void setupGraphicsEnhancements() {
     }
   }
 
-  appendFn(u" -t.MaxFPS=120 -r.TonemapperGamma=2.1");
-  ZLog(@"[GRAPHICS] Unlocked engine tick cap to 120 FPS and warmed tonemapper (-t.MaxFPS=120 -r.TonemapperGamma=2.1)");
+  ZLog(@"[GRAPHICS] Native timing/quality retained; no automatic tick or gamma override");
 }
 
 // ---------------------------------------------------------------- launch gating
@@ -2252,18 +2251,8 @@ __attribute__((constructor)) static void ziruInit() {
       gGameStarted = true;
     }
 
-    // 120 FPS Unlock via CADisplayLink & Dynamic Max FPS
-    Class dlCls = CADisplayLink.class;
-    if (dlCls) {
-      gOrigDisplayLinkWithTarget = swizzleClassMethod(dlCls, @selector(displayLinkWithTarget:selector:), (IMP)hookDisplayLinkWithTarget);
-      gOrigSetPreferredFramesPerSecond = swizzleInstance(dlCls, @selector(setPreferredFramesPerSecond:), (IMP)hookSetPreferredFramesPerSecond);
-      if (@available(iOS 15.0, *)) {
-        gOrigSetPreferredFrameRateRange = swizzleInstance(dlCls, @selector(setPreferredFrameRateRange:), (IMP)hookSetPreferredFrameRateRange);
-      }
-      ZLog(@"[120FPS] CADisplayLink 120 FPS hooks installed");
-    }
-    enableDynamicMaxFps();
-    setupGraphicsEnhancements();
+    // Preserve requested presentation and simulation cadence.
+    ZLog(@"[TIMING_NATIVE] native CADisplayLink and engine tick limits retained");
     startFpsMeter();
   }
 }

@@ -21,29 +21,29 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
         params = gp->optJSONArray("parameters");
       }
       int64_t j2 = ziruPlayerDataSerial;
-      if (!gp && j2 > 0) {
+      ObjP catalog = gp ? z27Copy(gp) : nullptr;
+      if (j2 > 0) {
         JStr lp = loadPlayer(j2);
         if (lp && !lp->empty()) {
           ObjP parsed = Object::parse(*lp);
-          gp = parsed->optJSONObject("gameplayer") ? parsed->getJSONObject("gameplayer") : parsed;
-          if (gp) params = gp->optJSONArray("parameters");
+          ObjP owned = parsed->optJSONObject("gameplayer") ? parsed->getJSONObject("gameplayer") : parsed;
+          ObjP gid = owned ? owned->optJSONObject("gameplayer_id") : nullptr;
+          int64_t ownedId = gid ? gid->optLong("id", 0) : 0;
+          if (ownedId > 0 && (j <= 0 || ownedId == j || (ownedId & 0xFFFFFF) == (j & 0xFFFFFF))) gp = owned;
         }
+      }
+      if (gp) {
+        gp = z27Copy(gp);
+        params = gp->optJSONArray("parameters");
       }
       if (gp && params) {
         z27ApplyAppearanceAndClub(gp);
-        JStr lp;
-        ArrP saved;
-        if (j2 > 0 && (lp = loadPlayer(j2)) && !lp->empty() && (saved = Object::parse(*lp)->optJSONArray("parameters"))) {
-          int l1 = params->length(), l2 = saved->length();
-          if (l1 >= 7 && l2 >= 7) {
-            int a = 142, c = 142;
-            if (l1 < 145 || l2 < 145) throw IllegalState("Incomplete player booster parameters");
-            for (int k = 0; k < 3; k++) params->put(a + k, saved->optInt(c + k));
-          }
-          for (int idx = 70; idx <= 141; ++idx) {
-            int sv = saved->optInt(idx, 0);
-            if (sv != 0 && params->optInt(idx, 0) == 0) params->put(idx, sv);
-          }
+        // Restore missing intrinsic flags without replacing owned progression,
+        // boosters or learned skills with a catalog copy.
+        ArrP base = catalog ? catalog->optJSONArray("parameters") : nullptr;
+        ArrP original = gp->optJSONArray("original_parameters");
+        for (int index = 70; index < 142 && index < params->length(); ++index) {
+          if ((base && base->optInt(index, 0) == 1) || (original && original->optInt(index, 0) == 1)) params->put(index, 1);
         }
         ObjP li = gp->optJSONObject("level_info");
         int lim = li ? li->optInt("level_limit", 1) : 1;
@@ -56,7 +56,7 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
         e->put("experience", 0);
         expl->put(e);
         ArrP cards = newArr();
-        for (int i = 0; i < 74; i++) {
+        for (int i = 0; i < 72; i++) {
           int pIdx = kZiruSkillParameters[i];
           if (pIdx < params->length() && params->optInt(pIdx, 0) == 1) {
             cards->put(i);
@@ -69,13 +69,13 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
         out->put("skillcard_id_list", cards);
         out->put("booster_training_info", boost);
         out->put("parameters", params);
-        out->put("original_parameters", params);
+        out->put("original_parameters", original ? Array::parse(original->toString()) : Array::parse(params->toString()));
         ArrP addSkills = gp->optJSONArray("additional_skill_id");
         if (addSkills) out->put("additional_skill_id", addSkills);
         out->put("result", "NOERR");
         out->put("rqid", (long long)ziruPlayerDataRqid);
         out->put("msgid", "CMD_GET_MYCLUB_PLAYER_DATA");
-        logRequest("ZIRU_V11_PLAYERDATA", "[ZIRU_V11_PLAYERDATA_OK] id=" + str(j) + " level_limit=" + str(lim));
+        logRequest("ZIRU_V11_PLAYERDATA", "[ZIRU_V11_PLAYERDATA_OK] id=" + str(j) + " level_limit=" + str(lim) + " base_skills=" + str(cards->length()) + " extra_skills=" + str(addSkills ? addSkills->length() : 0));
         return serveObjectAsEncryptedMsgPack(out);
       }
     }
