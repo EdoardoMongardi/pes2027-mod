@@ -1,3 +1,5 @@
+88040000002137 | Ronaldo Nazario (R9) | CF | age 25
+88040000038240 | Mesut Ozil | AMF | age 26
 1368 | ZIRU LEGENDS: FOOTBALL ROYALTY | 148 players
   88045755964133 | Fabio Cannavaro | CB | age 27
   88045755960841 | Adriano | — | age —

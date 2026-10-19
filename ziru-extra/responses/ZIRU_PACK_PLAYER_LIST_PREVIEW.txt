@@ -1,3 +1,5 @@
+88040000002137 | Ronaldo Nazario (R9) | CF | age 25
+88040000038240 | Mesut Ozil | AMF | age 26
 1368 | ZIRU LEGENDS: FOOTBALL ROYALTY | 145 players
   87963077709801 | Andrés Iniesta | CMF | age 26
   87963614580713 | Andrés Iniesta | CMF | age 24
