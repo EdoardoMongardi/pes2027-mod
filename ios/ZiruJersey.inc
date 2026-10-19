@@ -160,7 +160,7 @@ static std::string sanitizeShirtName(const char* s) {
 
 static std::string fallbackPlayerName(uint32_t baseId) {
   static const std::unordered_map<uint32_t, const char*> sMap = {
-    {133580, "Haaland"}, {38555, "Messi"}, {7511, "C. Ronaldo"}, {40352, "Neymar Jr"},
+    {133580, "Haaland"}, {7511, "Messi"}, {4522, "C. Ronaldo"}, {40352, "Neymar Jr"},
     {110718, "Mbappe"}, {44379, "De Bruyne"}, {138036, "Bellingham"}, {117047, "Vini Jr."},
     {109005, "Rodri"}, {45260, "Salah"}, {40571, "Lewandowski"}, {47287, "Kane"},
     {45023, "Son"}, {32664, "Modric"}, {36770, "Kroos"}, {33702, "Benzema"},
@@ -175,7 +175,7 @@ static std::string fallbackPlayerName(uint32_t baseId) {
     {103445, "Dimarco"}, {47000, "Dybala"}, {44378, "Morata"}, {120281, "Enzo"},
     {134907, "Mac Allister"}, {127179, "Julian Alvarez"}, {108919, "R. Dias"}, {100780, "Casemiro"},
     {100688, "Marquinhos"}, {46845, "Gabriel Jesus"}, {45129, "De Gea"}, {41571, "Ter Stegen"},
-    {100236, "Odegaard"}, {114878, "Gabriel"}, {4522, "Iniesta"}, {1082, "Xavi"},
+    {100236, "Odegaard"}, {114878, "Gabriel"}, {4073, "Iniesta"}, {1082, "Xavi"},
     {2439, "Puyol"}, {133543, "Zion Suzuki"}, {134639, "Cannavaro"}, {35496, "Mertesacker"},
     {134594, "Bonucci"}, {134632, "Suphanan"}, {137955, "Jun"}, {129961, "Tomiyasu"},
     {44840, "Jorginho"}, {30210, "Partey"}, {137957, "Trossard"}, {110815, "Havertz"},
@@ -218,7 +218,11 @@ static void sanitizeMatchPlayerNames(uint8_t* match) {
 static int resolveActorSide(void* actor, uint8_t* match) {
   if (!actor) return -1;
 
-  // 1. Check actor + 0x450 uniform path string (e.g. u0108p1, u0128p2, u0108g1, u0128g2)
+  // 1. Check actor + 0x1110 (native side flag: 0 = Home, 1 = Away)
+  int32_t actorSide = *(int32_t*)((uint8_t*)actor + 0x1110);
+  if (actorSide == 0 || actorSide == 1) return actorSide;
+
+  // 2. Check actor + 0x450 uniform path string (e.g. u0108p1, u0128p2, u0108g1, u0128g2)
   const char16_t* uStr = *(const char16_t**)((uint8_t*)actor + 0x450);
   int32_t uLen = *(int32_t*)((uint8_t*)actor + 0x458);
   if (uStr && uLen >= 6) {
@@ -245,10 +249,6 @@ static int resolveActorSide(void* actor, uint8_t* match) {
       }
     }
   }
-
-  // 2. Check actor + 0x1110 (native side flag: 0 = Home, 1 = Away)
-  int32_t actorSide = *(int32_t*)((uint8_t*)actor + 0x1110);
-  if (actorSide == 0 || actorSide == 1) return actorSide;
 
   // 3. Check actor + 0xe10 (teamId)
   int32_t actorTeamId = *(int32_t*)((uint8_t*)actor + 0xe10);
