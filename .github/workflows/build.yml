@@ -16,7 +16,7 @@ jobs:
           mkdir -p build
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           xcrun --sdk iphoneos clang++ -arch arm64 -isysroot "$SDK" -miphoneos-version-min=15.0 \
-            -std=c++17 -O2 -fobjc-arc editor/EditorApp.mm -framework Foundation -framework UIKit -framework WebKit \
+            -std=c++17 -O2 -fobjc-arc editor/EditorApp.mm -framework Foundation -framework UIKit -framework WebKit -framework CoreGraphics \
             -o build/eFootbase
           codesign -f -s - build/eFootbase
           shasum -a 256 build/eFootbase > build/eFootbase.sha256
