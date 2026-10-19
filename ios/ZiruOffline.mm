@@ -1186,8 +1186,9 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
           BOOL exists = [fm fileExistsAtPath:path];
           if (exists) {
             NSDictionary* attrs = [fm attributesOfItemAtPath:path error:nil];
-            if ([attrs[NSFileSize] unsignedLongLongValue] <= 20000000) {
-              NSData* data = [NSData dataWithContentsOfFile:path];
+            unsigned long long sz = [attrs[NSFileSize] unsignedLongLongValue];
+            if (sz > 0) {
+              NSData* data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:nil];
               if (data) {
                 unsigned char digest[CC_SHA256_DIGEST_LENGTH];
                 CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
@@ -1197,7 +1198,7 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
                   continue;
                 }
                 if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
-                  ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
+                  ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@ (%llu bytes)", path, sz);
                   continue;
                 }
               }
@@ -1210,24 +1211,27 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
           BOOL exists = [fm fileExistsAtPath:path];
           if (exists) {
             NSDictionary* attrs = [fm attributesOfItemAtPath:path.stringByResolvingSymlinksInPath error:nil];
-            if ([attrs[NSFileSize] unsignedLongLongValue] > 20000000) continue;
-            NSData* data = [NSData dataWithContentsOfFile:path];
-            if (!data) continue;
-            unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-            CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
-            NSMutableString* hash = [NSMutableString string];
-            for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
-            if ([hash isEqualToString:manifest[name][@"sha256"]]) continue;
-            if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
-              ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
-              continue;
-            }
-            if (!link) {
-              NSString* backupDir = [gDocs stringByAppendingPathComponent:@"PES2027-repair-backups"];
-              [fm createDirectoryAtPath:backupDir withIntermediateDirectories:YES attributes:nil error:nil];
-              NSString* backup = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@-%@", directory.lastPathComponent, NSUUID.UUID.UUIDString, alias]];
-              if (![fm moveItemAtPath:path toPath:backup error:nil]) continue;
-              ZLog(@"[IOS_TABLE_FIX] Backed up %@ to %@", alias, backup);
+            unsigned long long sz = [attrs[NSFileSize] unsignedLongLongValue];
+            if (sz > 0) {
+              NSData* data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:nil];
+              if (data) {
+                unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+                CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+                NSMutableString* hash = [NSMutableString string];
+                for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
+                if ([hash isEqualToString:manifest[name][@"sha256"]]) continue;
+                if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
+                  ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@ (%llu bytes)", path, sz);
+                  continue;
+                }
+                if (!link) {
+                  NSString* backupDir = [gDocs stringByAppendingPathComponent:@"PES2027-repair-backups"];
+                  [fm createDirectoryAtPath:backupDir withIntermediateDirectories:YES attributes:nil error:nil];
+                  NSString* backup = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@-%@", directory.lastPathComponent, NSUUID.UUID.UUIDString, alias]];
+                  if (![fm moveItemAtPath:path toPath:backup error:nil]) continue;
+                  ZLog(@"[IOS_TABLE_FIX] Backed up %@ to %@", alias, backup);
+                }
+              }
             }
           }
           ensureSymlink(path, source);
@@ -1432,13 +1436,44 @@ static BOOL checkDirectFolderData(NSString** why) {
     }
   }
 
-  // Ensure every _mobile_and file in Download has a corresponding _mobile_ios symlink
-  for (NSString* f in [fm contentsOfDirectoryAtPath:dlDir error:nil]) {
-    if ([f containsString:@"_mobile_and"]) {
-      NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
-      NSString* dst = [dlDir stringByAppendingPathComponent:iosName];
-      NSString* src = [dlDir stringByAppendingPathComponent:f];
-      ensureSymlink(dst, src);
+  // Ensure every _mobile_and file in pak, cpk, Download, and livedata has a corresponding _mobile_ios symlink
+  NSArray<NSString*>* allModDirs = @[pakDir, cpkDir, dlDir, [gDocs stringByAppendingPathComponent:@"livedata"], gDocs];
+  for (NSString* dir in allModDirs) {
+    for (NSString* f in [fm contentsOfDirectoryAtPath:dir error:nil]) {
+      if ([f containsString:@"_mobile_and"]) {
+        NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
+        NSString* dst = [dir stringByAppendingPathComponent:iosName];
+        NSString* src = [dir stringByAppendingPathComponent:f];
+        ensureSymlink(dst, src);
+      }
+    }
+  }
+
+  // Auto-create stub .pak if .utoc exists in pakDir or dlDir but .pak is missing
+  for (NSString* dir in @[pakDir, dlDir]) {
+    for (NSString* item in [fm contentsOfDirectoryAtPath:dir error:nil]) {
+      if ([item.pathExtension.lowercaseString isEqualToString:@"utoc"]) {
+        NSString* stem = [item stringByDeletingPathExtension];
+        NSString* pakName = [stem stringByAppendingPathExtension:@"pak"];
+        NSString* pakPath = [dir stringByAppendingPathComponent:pakName];
+        if (![fm fileExistsAtPath:pakPath]) {
+          NSString* templatePak = nil;
+          for (NSString* check in [fm contentsOfDirectoryAtPath:pakDir error:nil]) {
+            if ([check.pathExtension.lowercaseString isEqualToString:@"pak"]) {
+              NSString* cp = [pakDir stringByAppendingPathComponent:check];
+              NSDictionary* attrs = [fm attributesOfItemAtPath:cp error:nil];
+              if ([attrs[NSFileSize] unsignedLongLongValue] == 365) {
+                templatePak = cp;
+                break;
+              }
+            }
+          }
+          if (templatePak) {
+            [fm copyItemAtPath:templatePak toPath:pakPath error:nil];
+            ZLog(@"[AUTO_PAK] Auto-generated pak stub for %@", item);
+          }
+        }
+      }
     }
   }
 

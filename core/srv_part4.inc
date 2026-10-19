@@ -676,6 +676,32 @@ void patchLocalLivedataUrls(const ObjP& jo) {
         }
       }
     }
+    // Find active dt870 on the filesystem (checking Download, livedata, cpk, or assets)
+    std::string dlDir = cfg.downloadDir.empty() ? cfg.dataDir + "/Download" : cfg.downloadDir;
+    std::vector<std::string> dt870Candidates = {
+      dlDir + "/dt870_mobile_ios.cpk",
+      dlDir + "/dt870_mobile_and.cpk",
+      cfg.livedataDir.empty() ? "" : cfg.livedataDir + "/dt870_mobile_ios.cpk",
+      cfg.livedataDir.empty() ? "" : cfg.livedataDir + "/dt870_mobile_and.cpk",
+      cfg.dataDir + "/cpk/dt870_mobile_ios.cpk",
+      cfg.dataDir + "/cpk/dt870_mobile_and.cpk",
+      assets.path("livedata/dt870_mobile_ios.cpk")
+    };
+    std::string activeDt870;
+    struct stat activeDt870Stat;
+    memset(&activeDt870Stat, 0, sizeof(activeDt870Stat));
+    for (const auto& cand : dt870Candidates) {
+      if (!cand.empty() && stat(cand.c_str(), &activeDt870Stat) == 0 && S_ISREG(activeDt870Stat.st_mode) && activeDt870Stat.st_size > 0) {
+        activeDt870 = cand;
+        break;
+      }
+    }
+    std::string activeDt870Hash;
+    if (!activeDt870.empty()) {
+      activeDt870Hash = commentaryHash(activeDt870, activeDt870Stat);
+      zs::logi("OFFLINE_SERVER", "[IOS_LIVEDATA] active dt870: " + activeDt870 + " size=" + std::to_string((long long)activeDt870Stat.st_size) + " sha256=" + activeDt870Hash);
+    }
+
     for (int i = 0; i < list->length(); i++) {
       ObjP o = list->optJSONObject(i);
       if (!o) continue;
@@ -683,12 +709,17 @@ void patchLocalLivedataUrls(const ObjP& jo) {
       if (name.empty()) continue;
       if (assets.exists("livedata/" + name)) o->put("url", livedataBaseUrl + name);
       if (cfg.iosPlayerLayout) {
-        std::string path = assets.path("livedata/" + name);
-        struct stat st;
-        if (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
-          std::string hash = commentaryHash(path, st);
-          o->put("size", (long long)st.st_size);
-          if (!hash.empty()) o->put("hash", hash);
+        if (startsWith(name, "dt870") && !activeDt870Hash.empty()) {
+          o->put("size", (long long)activeDt870Stat.st_size);
+          o->put("hash", activeDt870Hash);
+        } else {
+          std::string path = assets.path("livedata/" + name);
+          struct stat st;
+          if (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+            std::string hash = commentaryHash(path, st);
+            o->put("size", (long long)st.st_size);
+            if (!hash.empty()) o->put("hash", hash);
+          }
         }
       }
     }
@@ -697,12 +728,16 @@ void patchLocalLivedataUrls(const ObjP& jo) {
     // and the repaired dt870 table on the next Live Update bind.
     if (cfg.iosPlayerLayout) {
       ObjP version = Object::parse(li->optString("version_file", "{}"));
+      version->remove("targetAppVersion");
+      if (!activeDt870Hash.empty()) {
+        version->put("dt870Hash", activeDt870Hash)->put("dt870FileSize", (long long)activeDt870Stat.st_size);
+      }
       for (int i = 0; i < list->length(); ++i) {
         ObjP item = list->optJSONObject(i);
         if (!item || !item->has("hash")) continue;
         std::string name = item->optString("name", "");
-        if (startsWith(name, "dt870")) {
-          version->put("dt870Hash", item->getString("hash"))->put("dt870FileSize", item->getLong("size"));
+        if (startsWith(name, "dt870") && !activeDt870Hash.empty()) {
+          version->put("dt870Hash", activeDt870Hash)->put("dt870FileSize", (long long)activeDt870Stat.st_size);
         }
         ArrP packs = version->optJSONArray("dt880");
         for (int j = 0; packs && j < packs->length(); ++j) {
@@ -715,6 +750,18 @@ void patchLocalLivedataUrls(const ObjP& jo) {
       }
       li->put("version_file", version->toString());
     }
+
+    // CRITICAL: Strip dt870 from livedata_list so the client does not prompt for 8.8 MB download
+    // dt870 is already installed locally, and version_file specifies its exact local hash/size.
+    ArrP keepList = newArr();
+    for (int i = 0; i < list->length(); i++) {
+      ObjP o = list->optJSONObject(i);
+      if (!o) continue;
+      std::string name = o->optString("name", "");
+      if (startsWith(name, "dt870")) continue;
+      keepList->put(o);
+    }
+    li->put("livedata_list", keepList);
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ALMANAC_V8] LiveData URL patch failed ") + e.what());
   }
