@@ -390,13 +390,12 @@ static void applyActorShirtName(void* actor, const std::string& name) {
   }
   *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
   *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
-  *(int32_t*)((uint8_t*)actor + 0xe38) = 1;
+  *(int32_t*)((uint8_t*)actor + 0xe38) = 0;
 
   void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
   if (nameTexActor) {
     auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
     if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
-    if (originalLoad) originalLoad(nameTexActor);
   }
 }
 
@@ -468,7 +467,7 @@ static void hookedBackNumberStep(void* actor) {
 
     *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
     *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
-    *(int32_t*)((uint8_t*)actor + 0xe38) = 1;
+    *(int32_t*)((uint8_t*)actor + 0xe38) = 0;
   }
 
   if (originalBackNumberStep) {
@@ -487,13 +486,11 @@ static void hookedBackNumberStep(void* actor) {
       bool theap = (int8_t)ts[23] < 0;
       uint64_t tlen = theap ? ((const uint64_t*)ts)[1] : (ts[23] & 0x7f);
       const char* tstr = theap ? *(const char**)ts : (const char*)ts;
-      void* texPtr = *(void**)((uint8_t*)nameTexActor + 0x2b0);
 
       bool mismatch = (tlen == 0 || !tstr || strncmp(tstr, curStr, len) != 0);
-      if (mismatch || !texPtr) {
+      if (mismatch) {
         auto setNameFn = (void (*)(void*, void*))(0x100851098 + gSlide);
         if (setNameFn) setNameFn(nameTexActor, (uint8_t*)actor + 0x1710);
-        if (originalLoad) originalLoad(nameTexActor);
       }
     }
   }
