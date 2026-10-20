@@ -1,5 +1,6 @@
 // Native name-atlas fallback, PESmobile 11.1.101 only. These data vtable slots
 // are validated before writing; no executable page is modified at runtime.
+#include "ZiruPlayerIdentity.hpp"
 namespace zjersey {
 using LoadFn = void (*)(void*);
 using ReadyFn = bool (*)(void*);
@@ -7,7 +8,7 @@ using DrawFn = void (*)(void*, void*);
 struct NativeString { char16_t* data; int32_t num; int32_t max; };
 using AssetFn = void (*)(void*, NativeString*, bool);
 using SetUniformNumberFn = void (*)(void* actor, int uniformNumber);
-using SetupFromPlayerIdFn = void (*)(void* actor, int64_t playerId, void* path, int uniformIndex, void* uniName);
+using SetupFromPlayerIdFn = void (*)(void* actor, int64_t playerId, void* path, int uniformNumber, uint64_t uniName);
 using BackNumberStepFn = void (*)(void* actor);
 using ReloadFaceFn = void (*)(void* actor);
 
@@ -206,120 +207,51 @@ static std::string formatPlayerShirtName(const std::string& input) {
 
 static void applyLegendRealFace(void* actor, int64_t pid, const std::string& shirtName) {
   if (!actor) return;
-  std::string upper = toUpperAscii(shirtName);
-  int32_t base_id = (int32_t)(pid & 0xFFFFFF);
-  if (upper == "ZIDANE" || upper.find("ZIDANE") != std::string::npos || base_id == 9901397 || pid == 9901397 || base_id == 1397 || pid == 1397) {
-    static const char16_t sZidaneFace[] = u"9901397";
-    *(const char16_t**)((uint8_t*)actor + 0x468) = sZidaneFace;
-    *(int32_t*)((uint8_t*)actor + 0x470) = 8;
-    *(int32_t*)((uint8_t*)actor + 0x474) = 0;
-    ZLog(@"[JERSEY] Bound 3D RealFace 9901397 for Zidane on actor %p (name='%s')", actor, shirtName.c_str());
-  } else if ((upper == "RONALDO" || (upper.find("RONALDO") != std::string::npos && upper.find("C. RONALDO") == std::string::npos && upper.find("C.RONALDO") == std::string::npos)) || base_id == 37576 || pid == 37576) {
-    static const char16_t sR9Face[] = u"37576";
-    *(const char16_t**)((uint8_t*)actor + 0x468) = sR9Face;
-    *(int32_t*)((uint8_t*)actor + 0x470) = 6;
-    *(int32_t*)((uint8_t*)actor + 0x474) = 0;
-    ZLog(@"[JERSEY] Bound 3D RealFace 37576 for Ronaldo on actor %p (name='%s')", actor, shirtName.c_str());
+  const std::string upper = toUpperAscii(shirtName);
+  const uint32_t faceId = zidentity::legendFace(pid, upper);
+  const char16_t* face = nullptr;
+  int32_t length = 0;
+  if (faceId == 9901397) {
+    face = u"9901397"; length = 8;
+  } else if (faceId == 37576) {
+    face = u"37576"; length = 6;
   }
+  if (!face) return;
+  auto current = (NativeString*)((uint8_t*)actor + 0x468);
+  if (current->data && current->num == length &&
+      memcmp(current->data, face, (size_t)length * sizeof(char16_t)) == 0) return;
+  // FString::operator= copies using the engine allocator. Never store a static
+  // buffer in an owning FString: ReloadFace/destruction can free that buffer.
+  NativeString borrowed{const_cast<char16_t*>(face), length, length};
+  auto assign = (void* (*)(void*, const NativeString*))(0x102e14b64 + gSlide);
+  assign(current, &borrowed);
+  ZLog(@"[JERSEY] Set legend face asset name for pid=%lld; asset load still needs verification", (long long)pid);
 }
 
 static std::mutex sActorLock;
 static std::unordered_map<void*, int64_t> sActorPlayerId;
-static std::unordered_map<void*, int> sActorSide;
-
-static void sanitizeMatchPlayerNames(uint8_t* match) {
-  if (!match) return;
-  for (int side = 0; side <= 1; ++side) {
-    uint8_t* teamPlayers = match + 0x14e0 + (side * 0x5dc0);
-    for (int i = 0; i < 40; ++i) {
-      uint8_t* p = teamPlayers + (i * 0x258);
-      char* name = (char*)(p + 0x89);
-      if (name && name[0] != '\0') {
-        std::string uc = sanitizeShirtName(name);
-        std::string tc = formatPlayerShirtName(uc);
-        if (!tc.empty() && tc.size() < 60 && tc != name) {
-          strncpy(name, tc.c_str(), 60);
-          name[59] = '\0';
-        }
-      }
-      char* shirtName = (char*)(p + 0xc6);
-      if (shirtName && shirtName[0] != '\0') {
-        std::string uc = sanitizeShirtName(shirtName);
-        std::string tc = formatPlayerShirtName(uc);
-        if (!tc.empty() && tc.size() < 60 && tc != shirtName) {
-          strncpy(shirtName, tc.c_str(), 60);
-          shirtName[59] = '\0';
-        }
-      }
-    }
-  }
-}
 
 static int resolveActorSide(void* actor, uint8_t* match) {
-  if (!actor) return -1;
+  if (!actor || !match) return -1;
+  int64_t pid = 0;
   {
     std::lock_guard<std::mutex> lk(sActorLock);
-    auto it = sActorSide.find(actor);
-    if (it != sActorSide.end()) return it->second;
+    auto it = sActorPlayerId.find(actor);
+    if (it != sActorPlayerId.end()) pid = it->second;
   }
-
-  // 1. Check actor + 0x1100 (native uniformIndex: 0=Home Outfield, 1=Away Outfield, 2=Home GK, 3=Away GK)
-  int32_t uIdx = *(int32_t*)((uint8_t*)actor + 0x1100);
-  if (uIdx >= 0 && uIdx <= 10) {
-    return (uIdx % 2 == 0) ? 0 : 1;
-  }
-
-  // 2. Check nameTexActor + 0x2c0 texture asset string (e.g. T_u0108p1_FontName_D, T_u0122p2_FontName_D)
-  void* nameTexActor = *(void**)((uint8_t*)actor + 0x1918);
-  if (nameTexActor) {
-    auto s = (NativeString*)((uint8_t*)nameTexActor + 0x2c0);
-    if (s && s->data && s->num >= 6) {
-      for (int i = 0; i < s->num - 1; ++i) {
-        if ((s->data[i] == u'p' || s->data[i] == u'g') && s->data[i+1] == u'1') return 0;
-        if ((s->data[i] == u'p' || s->data[i] == u'g') && s->data[i+1] == u'2') return 1;
+  if (pid <= 0) return -1;
+  int found = -1;
+  for (int side = 0; side < 2; ++side) {
+    uint8_t* players = match + 0x14e0 + side * 0x5dc0;
+    for (int i = 0; i < 40; ++i) {
+      uint64_t candidate = *(uint64_t*)(players + i * 0x258 + 0x38);
+      if (candidate == (uint64_t)pid || (candidate & 0xFFFFFF) == ((uint64_t)pid & 0xFFFFFF)) {
+        if (found >= 0 && found != side) return -1;
+        found = side;
       }
     }
   }
-
-  // 3. Check actor + 0x450 uniform path string
-  const char16_t* uStr = *(const char16_t**)((uint8_t*)actor + 0x450);
-  int32_t uLen = *(int32_t*)((uint8_t*)actor + 0x458);
-  if (uStr && uLen >= 6) {
-    for (int i = 0; i < uLen - 1; ++i) {
-      if ((uStr[i] == u'p' || uStr[i] == u'g') && uStr[i+1] == u'1') return 0;
-      if ((uStr[i] == u'p' || uStr[i] == u'g') && uStr[i+1] == u'2') return 1;
-    }
-    // Check 4-digit team ID after 'u' or 'g'
-    if ((uStr[0] == u'u' || uStr[0] == u'g') && uLen >= 5) {
-      int32_t kitTeamId = 0;
-      for (int i = 1; i <= 4 && i < uLen; ++i) {
-        if (uStr[i] >= u'0' && uStr[i] <= u'9') {
-          kitTeamId = kitTeamId * 10 + (uStr[i] - u'0');
-        }
-      }
-      if (kitTeamId > 0 && match) {
-        uint32_t homeTeamId = *(uint32_t*)(match + 0x11d0 + 0x10);
-        uint32_t awayTeamId = *(uint32_t*)(match + 0x11d0 + 0x188 + 0x10);
-        if (homeTeamId == 0 && gZiruHomeTeamId > 0) homeTeamId = (uint32_t)gZiruHomeTeamId;
-        if (awayTeamId == 0 && gZiruAwayTeamId > 0) awayTeamId = (uint32_t)gZiruAwayTeamId;
-        if ((uint32_t)kitTeamId == homeTeamId) return 0;
-        if ((uint32_t)kitTeamId == awayTeamId) return 1;
-      }
-    }
-  }
-
-  // 4. Check actor + 0xe10 (teamId)
-  int32_t actorTeamId = *(int32_t*)((uint8_t*)actor + 0xe10);
-  if (actorTeamId > 0 && match) {
-    uint32_t homeTeamId = *(uint32_t*)(match + 0x11d0 + 0x10);
-    uint32_t awayTeamId = *(uint32_t*)(match + 0x11d0 + 0x188 + 0x10);
-    if (homeTeamId == 0 && gZiruHomeTeamId > 0) homeTeamId = (uint32_t)gZiruHomeTeamId;
-    if (awayTeamId == 0 && gZiruAwayTeamId > 0) awayTeamId = (uint32_t)gZiruAwayTeamId;
-    if ((uint32_t)actorTeamId == homeTeamId) return 0;
-    if ((uint32_t)actorTeamId == awayTeamId) return 1;
-  }
-
-  return -1;
+  return found;
 }
 
 static std::string lookupShirtName(void* actor, int uniformNumber) {
@@ -333,7 +265,6 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   if (!base) return "";
 
   uint8_t* match = base + 0x6c4c0;
-  sanitizeMatchPlayerNames(match);
 
   int preferredSide = resolveActorSide(actor, match);
 
@@ -386,7 +317,8 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   std::string res1 = checkSide(1);
   if (!res0.empty() && res1.empty()) return res0;
   if (!res1.empty() && res0.empty()) return res1;
-  return res0;
+  if (res0 == res1) return res0;
+  return ""; // Same shirt number on both teams is not a player identity.
 }
 
 static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
@@ -401,7 +333,6 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
   if (!base) return fallbackPlayerName(targetBaseId);
 
   uint8_t* match = base + 0x6c4c0;
-  sanitizeMatchPlayerNames(match);
 
   int preferredSide = resolveActorSide(actor, match);
 
@@ -437,15 +368,13 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
 }
 
 static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int uniformNumber) {
-  // 1. Try match roster lookup by uniform number (most accurate for on-field actor)
-  if (uniformNumber > 0 && uniformNumber <= 99) {
-    std::string n = lookupShirtName(actor, uniformNumber);
-    if (!n.empty()) return n;
-  }
-
-  // 2. Try match roster lookup by player ID
+  // Player identity takes priority over a number reused by both teams.
   if (playerId > 0) {
     std::string n = lookupShirtNameByPlayerId(actor, playerId);
+    if (!n.empty()) return n;
+  }
+  if (uniformNumber > 0 && uniformNumber <= 99) {
+    std::string n = lookupShirtName(actor, uniformNumber);
     if (!n.empty()) return n;
   }
 
@@ -547,17 +476,15 @@ static void hookedReloadFace(void* actor) {
     originalReloadFace(actor);
   }
 }
-static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, int uniformIndex, void* uniName) {
-  if (originalSetupFromPlayerId) {
-    originalSetupFromPlayerId(actor, playerId, path, uniformIndex, uniName);
-  }
+static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, int uniformNumber, uint64_t uniName) {
   if (!actor) return;
   {
     std::lock_guard<std::mutex> lk(sActorLock);
-    if (sActorPlayerId.size() > 512) { sActorPlayerId.clear(); sActorSide.clear(); }
+    if (sActorPlayerId.size() > 512) { sActorPlayerId.clear(); }
     sActorPlayerId[actor] = playerId;
-    sActorSide[actor] = (uniformIndex % 2 == 0) ? 0 : 1;
+    // The fourth argument is UniNo (shirt number), not a home/away index.
   }
+  if (originalSetupFromPlayerId) originalSetupFromPlayerId(actor, playerId, path, uniformNumber, uniName);
   int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
   std::string name = lookupPlayerNameUniversal(actor, playerId, num);
   applyLegendRealFace(actor, playerId, name);

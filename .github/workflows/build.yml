@@ -20,6 +20,8 @@ jobs:
         run: ./build/gameplaytest
       - name: native iOS database table conversion
         run: python3 -m unittest discover -s test -p 'ios_tables_test.py' -v
+      - name: legend identity regression
+        run: g++ -std=c++17 test/player_identity_test.cpp -o /tmp/player-identity-test && /tmp/player-identity-test
       - name: online encrypted two-client integration tests
         run: |
           python3 -m pip install -r online/requirements.txt
@@ -70,6 +72,10 @@ jobs:
             build/ZiruOffline.dylib
             build/ZiruOffline.dylib.sha256
             tools/build_ipa.py
+      - name: resource preservation regression
+        run: |
+          clang++ -std=c++17 -fobjc-arc test/resource_repair_test.mm -framework Foundation -o /tmp/resource-repair-test
+          /tmp/resource-repair-test
       - name: release
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

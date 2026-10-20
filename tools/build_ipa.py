@@ -442,6 +442,7 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=N
         # Extra UI container (tools/make_extra_pak.py): card photos, emblems and kit thumbnails that Ziru's Android
         # data has and the iOS data lacks. The dylib links ziru/pak_extra/* into Documents/pak at launch.
         if extra_pak and os.path.isdir(extra_pak):
+            repair_manifest = {"pak_extra": {}}
             for fn in sorted(os.listdir(extra_pak)):
                 if not fn.endswith((".pak", ".utoc", ".ucas")):
                     continue
@@ -449,8 +450,11 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=N
                 zi.external_attr = 0o100644 << 16
                 zi.compress_type = zipfile.ZIP_STORED
                 z.writestr(zi, open(os.path.join(extra_pak, fn), "rb").read())
+                repair_manifest["pak_extra"][fn] = {"sha256": sha256_file(os.path.join(extra_pak, fn))}
                 report.setdefault("extra_pak", []).append(fn)
                 n += 1
+            z.writestr(root + "ziru/resource-repairs.json", json.dumps(repair_manifest))
+            n += 1
         # Online (1.1): default server for Friend Match; players can override it in Documents/PES2027-online.json
         if online_server:
             zi = zipfile.ZipInfo(root + "ziru/online.json", time.localtime()[:6])

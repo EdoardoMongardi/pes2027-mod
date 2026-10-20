@@ -1042,44 +1042,10 @@ static void startFpsMeter() {
   dispatch_resume(t);
 }
 
-// ---------------------------------------------------------------- UE4 Graphics Enhancements (Phase 1)
-typedef void (*FCommandLineSetFn)(const char16_t*);
-typedef void (*FCommandLineAppendFn)(const char16_t*);
+// Preserve the engine's original command line and renderer defaults. Rendering
+// CVars and launch options cannot be safely reset with FCommandLine::Set.
 static void setupGraphicsEnhancements() {
-  intptr_t slide = _dyld_get_image_vmaddr_slide(0);
-  FCommandLineSetFn setFn = nullptr;
-  FCommandLineAppendFn appendFn = nullptr;
-  if (slide != 0) {
-    setFn = (FCommandLineSetFn)(0x101825828 + slide);
-    appendFn = (FCommandLineAppendFn)(0x101825d60 + slide);
-  }
-  if (!setFn) setFn = (FCommandLineSetFn)dlsym(RTLD_DEFAULT, "_ZN12FCommandLine3SetEPKDs");
-  if (!appendFn) appendFn = (FCommandLineAppendFn)dlsym(RTLD_DEFAULT, "_ZN12FCommandLine6AppendEPKDs");
-
-  // Check if user has a custom commandline override in Documents/ue4commandline.txt
-  NSString* userCmdPath = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
-  NSString* targetCmd = @"-t.MaxFPS=120";
-  if ([NSFileManager.defaultManager fileExistsAtPath:userCmdPath]) {
-    NSString* customArgs = [NSString stringWithContentsOfFile:userCmdPath encoding:NSUTF8StringEncoding error:nil];
-    if (customArgs && customArgs.length > 0) targetCmd = customArgs;
-  }
-  targetCmd = [targetCmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if (![targetCmd hasPrefix:@" "]) targetCmd = [@" " stringByAppendingString:targetCmd];
-
-  std::u16string u16(targetCmd.length + 1, u'\0');
-  for (NSUInteger i = 0; i < targetCmd.length; i++) {
-    u16[i] = (char16_t)[targetCmd characterAtIndex:i];
-  }
-
-  if (setFn) {
-    setFn(u16.data());
-    ZLog(@"[GRAPHICS] FCommandLine::Set replaced commandline with: '%@'", targetCmd);
-  } else if (appendFn) {
-    appendFn(u16.data());
-    ZLog(@"[GRAPHICS] FCommandLine::Append applied commandline: '%@'", targetCmd);
-  } else {
-    ZLog(@"[GRAPHICS] FCommandLine functions could not be resolved");
-  }
+  ZLog(@"[GRAPHICS] Keeping native engine command line and color settings");
 }
 
 // ---------------------------------------------------------------- launch gating
@@ -1097,6 +1063,12 @@ static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
       [fm fileExistsAtPath:linkPath] && [linkPath.stringByResolvingSymlinksInPath containsString:@"_mobile_ios"]) return;
   if ([linkPath.stringByStandardizingPath isEqualToString:targetPath.stringByStandardizingPath]) return;
   if (![fm fileExistsAtPath:targetPath]) return;
+  NSString* extension = targetPath.pathExtension.lowercaseString;
+  if ([targetPath containsString:@"_mobile_and"] &&
+      [@[@"pak", @"utoc", @"ucas"] containsObject:extension]) {
+    ZLog(@"[DATA_PLATFORM] Android container needs asset conversion, not an iOS alias: %@", targetPath.lastPathComponent);
+    return;
+  }
   // Download/download can be the same directory on iOS. Never delete a file
   // in order to create a link back to itself, or replace genuine iOS data
   // with an Android alias of the same name.
@@ -1112,12 +1084,8 @@ static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
     if (!isDir && curDest == nil) {
       NSDictionary* attrs = [fm attributesOfItemAtPath:linkPath error:nil];
       unsigned long long sz = [attrs fileSize];
-      if (sz > 1024) {
-        ZLog(@"[DATA_PRESERVE] keeping existing file %@", linkPath.lastPathComponent);
-        return;
-      }
-      // Remove tiny dummy/stub files (<= 1024 bytes) so real symlinks can take over
-      [fm removeItemAtPath:linkPath error:nil];
+      ZLog(@"[DATA_PRESERVE] keeping existing file %@ (%llu bytes)", linkPath.lastPathComponent, sz);
+      return;
     }
     if (isDir && curDest == nil) {
       NSArray* contents = [fm contentsOfDirectoryAtPath:linkPath error:nil];
@@ -1162,99 +1130,33 @@ static NSString* findFolderNamed(NSString* root, NSString* targetName, int maxDe
   return nil;
 }
 
+#include "ZiruResources.inc"
+
 static void installBundledTableFixes(NSArray<NSString*>* directories) {
-  NSFileManager* fm = NSFileManager.defaultManager;
   NSString* bundle = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru"];
-  NSData* manifestData = [NSData dataWithContentsOfFile:[bundle stringByAppendingPathComponent:@"table-fixes.json"]];
-  NSMutableDictionary* manifest = manifestData ? [[NSJSONSerialization JSONObjectWithData:manifestData options:0 error:nil] mutableCopy] : [NSMutableDictionary dictionary];
-  if (![manifest isKindOfClass:NSDictionary.class]) return;
-  NSData* nativeData = [NSData dataWithContentsOfFile:[bundle stringByAppendingPathComponent:@"native-livedata.json"]];
-  NSArray* native = nativeData ? [NSJSONSerialization JSONObjectWithData:nativeData options:0 error:nil] : nil;
+  NSString* sourceDir = [bundle stringByAppendingPathComponent:@"livedata"];
+  NSData* data = [NSData dataWithContentsOfFile:[bundle stringByAppendingPathComponent:@"table-fixes.json"]];
+  id parsed = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+  NSMutableDictionary* manifest = [parsed isKindOfClass:NSDictionary.class] ? [parsed mutableCopy] : [NSMutableDictionary dictionary];
+  data = [NSData dataWithContentsOfFile:[bundle stringByAppendingPathComponent:@"native-livedata.json"]];
+  id native = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
   if ([native isKindOfClass:NSArray.class]) for (NSDictionary* entry in native) {
     NSString* name = entry[@"name"];
-    if ([name hasPrefix:@"pc92"] && [name isEqualToString:name.lastPathComponent] && entry[@"android_sha256"]) {
-      manifest[name] = @{@"original_sha256": entry[@"android_sha256"], @"sha256": entry[@"sha256"]};
+    if ([name hasPrefix:@"pc92"] && [name isEqualToString:name.lastPathComponent] && entry[@"sha256"]) {
+      manifest[name] = @{@"sha256": entry[@"sha256"], @"original_sha256": entry[@"android_sha256"] ?: @""};
     }
   }
   for (NSString* name in manifest) {
     BOOL cpk = [name isEqualToString:@"dt870_mobile_and.cpk"];
-    if (!cpk && ![name hasPrefix:@"pc92"]) continue;
-    NSString* source = [[bundle stringByAppendingPathComponent:@"livedata"] stringByAppendingPathComponent:name];
+    if (!cpk && ![name hasSuffix:@".utoc"]) continue;
+    NSArray* group = cpk ? @[name] : @[[name.stringByDeletingPathExtension stringByAppendingString:@".pak"],
+        name, [name.stringByDeletingPathExtension stringByAppendingString:@".ucas"]];
     for (NSString* directory in directories) {
       if (!cpk && [directory.lastPathComponent isEqualToString:@"cpk"]) continue;
-      NSArray* aliases = cpk ? @[name, [name stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"]] : @[name];
-      for (NSString* alias in aliases) {
-        NSString* path = [directory stringByAppendingPathComponent:alias];
-        BOOL isDownload = [directory.lastPathComponent isEqualToString:@"Download"];
-        NSString* link = [fm destinationOfSymbolicLinkAtPath:path error:nil];
-
-        if (isDownload) {
-          if (link) {
-            unlink(path.fileSystemRepresentation);
-            link = nil;
-          }
-          BOOL exists = [fm fileExistsAtPath:path];
-          if (exists) {
-            NSDictionary* attrs = [fm attributesOfItemAtPath:path error:nil];
-            unsigned long long sz = [attrs[NSFileSize] unsignedLongLongValue];
-            if (sz > 0) {
-              NSData* data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:nil];
-              if (data) {
-                unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-                CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
-                NSMutableString* hash = [NSMutableString string];
-                for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
-                if ([hash isEqualToString:manifest[name][@"sha256"]]) {
-                  continue;
-                }
-                if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
-                  if (cpk && sz != 9312212) {
-                    ZLog(@"[IOS_TABLE_FIX] Replacing corrupted Android dt870 (%llu bytes) with clean iOS stock CPK", sz);
-                  } else {
-                    ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@ (%llu bytes)", path, sz);
-                    continue;
-                  }
-                }
-              }
-            }
-            [fm removeItemAtPath:path error:nil];
-          }
-          [fm copyItemAtPath:source toPath:path error:nil];
-          ZLog(@"[IOS_TABLE_FIX] Copied real file %@ to Download/", alias);
-        } else {
-          BOOL exists = [fm fileExistsAtPath:path];
-          if (exists) {
-            NSDictionary* attrs = [fm attributesOfItemAtPath:path.stringByResolvingSymlinksInPath error:nil];
-            unsigned long long sz = [attrs[NSFileSize] unsignedLongLongValue];
-            if (sz > 0) {
-              NSData* data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:nil];
-              if (data) {
-                unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-                CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
-                NSMutableString* hash = [NSMutableString string];
-                for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
-                if ([hash isEqualToString:manifest[name][@"sha256"]]) continue;
-                if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
-                  if (cpk && sz != 9312212) {
-                    ZLog(@"[IOS_TABLE_FIX] Replacing corrupted Android dt870 (%llu bytes) with clean iOS stock CPK", sz);
-                  } else {
-                    ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@ (%llu bytes)", path, sz);
-                    continue;
-                  }
-                }
-                if (!link) {
-                  NSString* backupDir = [gDocs stringByAppendingPathComponent:@"PES2027-repair-backups"];
-                  [fm createDirectoryAtPath:backupDir withIntermediateDirectories:YES attributes:nil error:nil];
-                  NSString* backup = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@-%@", directory.lastPathComponent, NSUUID.UUID.UUIDString, alias]];
-                  if (![fm moveItemAtPath:path toPath:backup error:nil]) continue;
-                  ZLog(@"[IOS_TABLE_FIX] Backed up %@ to %@", alias, backup);
-                }
-              }
-            }
-          }
-          ensureSymlink(path, source);
-        }
-      }
+      installResourceGroup(group, sourceDir, directory, manifest);
+      // The compatibility alias never replaces a real custom CPK.
+      if (cpk) ensureSymlink([directory stringByAppendingPathComponent:@"dt870_mobile_ios.cpk"],
+                            [directory stringByAppendingPathComponent:name]);
     }
   }
 }
@@ -1341,18 +1243,7 @@ static BOOL checkDirectFolderData(NSString** why) {
   // Extra UI container bundled in the IPA (tools/make_extra_pak.py): standard card photos, emblems, kit thumbnails that
   // exist only in Ziru's Android data. Linked into Documents/pak so the engine mounts it with the other containers.
   NSString* bundleExtra = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru/pak_extra"];
-  if ([fm fileExistsAtPath:bundleExtra]) {
-    [fm createDirectoryAtPath:pakDir withIntermediateDirectories:YES attributes:nil error:nil];
-    for (NSString* f in [fm contentsOfDirectoryAtPath:bundleExtra error:nil]) {
-      NSString* bFile = [bundleExtra stringByAppendingPathComponent:f];
-      NSString* dFile = [pakDir stringByAppendingPathComponent:f];
-      if ([fm destinationOfSymbolicLinkAtPath:dFile error:nil] || [fm fileExistsAtPath:dFile]) {
-        unlink(dFile.fileSystemRepresentation);
-      }
-      [fm copyItemAtPath:bFile toPath:dFile error:nil];
-      ZLog(@"[PAK_EXTRA] Copied real file %@ to Documents/pak", f);
-    }
-  }
+  if ([fm fileExistsAtPath:bundleExtra]) installExtraResourceGroups(bundleExtra, pakDir);
 
   // Create _mobile_ios symlinks for livedata files, and mount all epic paks/ucas/utoc into pak/ and cpk into cpk/
   // CRITICAL: Also link into Documents/Download/ because onlinemode::UtilityLiveData::GetLiveDataSaveDirPath()
@@ -1371,47 +1262,12 @@ static BOOL checkDirectFolderData(NSString** why) {
     }
   }
 
-  // Purge Android Vulkan stadiums and broken crowd meshes from both pak/ and Download/
-  for (NSString* sf in @[@"pc3001", @"pc3002", @"pc3011", @"pc3012", @"pc3700", @"pc3611", @"pc3611_mobile_ios_optional"]) {
-    for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
-      NSString* p1 = [dlDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@_mobile_ios%@", sf, ext]];
-      if ([fm fileExistsAtPath:p1] || [fm destinationOfSymbolicLinkAtPath:p1 error:nil]) {
-        unlink(p1.fileSystemRepresentation);
-        ZLog(@"[STADIUM_FIX] Purged %@ from Download", p1.lastPathComponent);
-      }
-      NSString* p2 = [pakDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@_mobile_ios%@", sf, ext]];
-      if ([fm fileExistsAtPath:p2] || [fm destinationOfSymbolicLinkAtPath:p2 error:nil]) {
-        unlink(p2.fileSystemRepresentation);
-        ZLog(@"[STADIUM_FIX] Purged %@ from pak", p2.lastPathComponent);
-      }
-    }
-  }
-  NSString* vsBin = [dlDir stringByAppendingPathComponent:@"version_stadium.bin"];
-  if ([fm fileExistsAtPath:vsBin] || [fm destinationOfSymbolicLinkAtPath:vsBin error:nil]) {
-    unlink(vsBin.fileSystemRepresentation);
-  }
-  // Enforce clean 120 FPS without washed-out tonemapper settings
-  NSString* docCmd = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
-  [@"-t.MaxFPS=120\n" writeToFile:docCmd atomically:YES encoding:NSUTF8StringEncoding error:nil];
+  // Do not purge packs or version metadata by filename. In particular pc3611
+  // contains native face textures, and removing it breaks thousands of faces.
+  // Do not overwrite the user's command line on each launch.
 
-  // Ensure pc7999 is copied as real files to Documents/pak
-  if ([fm fileExistsAtPath:[bundleExtra stringByAppendingPathComponent:@"pc7999_mobile_ios.ucas"]]) {
-    for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
-      NSString* bFile = [bundleExtra stringByAppendingPathComponent:[NSString stringWithFormat:@"pc7999_mobile_ios%@", ext]];
-      NSString* dFile = [pakDir stringByAppendingPathComponent:[NSString stringWithFormat:@"pc7999_mobile_ios%@", ext]];
-      NSString* dest = [fm destinationOfSymbolicLinkAtPath:dFile error:nil];
-      if (dest && ![fm fileExistsAtPath:dest]) {
-        unlink(dFile.fileSystemRepresentation);
-      }
-      if (![fm fileExistsAtPath:dFile]) {
-        [fm copyItemAtPath:bFile toPath:dFile error:nil];
-        ZLog(@"[PC7999_COPY] Copied real pc7999 to pak: %@", dFile.lastPathComponent);
-      }
-    }
-  }
-
-  // Safety guard: ensure base engine paks (pc3600) stay in pakDir, never in dlDir!
-  for (NSString* core in @[@"pc3600"]) {
+  // Native character containers belong in pak/, including the face textures.
+  for (NSString* core in @[@"pc3600", @"pc3611"]) {
     for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
       NSString* name = [NSString stringWithFormat:@"%@_mobile_ios%@", core, ext];
       NSString* wrong = [dlDir stringByAppendingPathComponent:name];
