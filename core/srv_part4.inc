@@ -731,28 +731,16 @@ void patchLocalLivedataUrls(const ObjP& jo) {
     if (cfg.iosPlayerLayout) {
       ObjP version = Object::parse(li->optString("version_file", "{}"));
       version->remove("targetAppVersion");
+      version->put("dt880", newArr());
       if (!activeDt870Hash.empty()) {
         version->put("dt870Hash", activeDt870Hash)->put("dt870FileSize", (long long)activeDt870Stat.st_size);
-      }
-      for (int i = 0; i < list->length(); ++i) {
-        ObjP item = list->optJSONObject(i);
-        if (!item || !item->has("hash")) continue;
-        std::string name = item->optString("name", "");
-        if (startsWith(name, "dt870") && !activeDt870Hash.empty()) {
-          version->put("dt870Hash", activeDt870Hash)->put("dt870FileSize", (long long)activeDt870Stat.st_size);
-        }
-        ArrP packs = version->optJSONArray("dt880");
-        for (int j = 0; packs && j < packs->length(); ++j) {
-          ObjP pack = packs->optJSONObject(j);
-          if (!pack || !startsWith(name, pack->optString("name", "") + "_")) continue;
-          const char* hashKey = endsWith(name, ".pak") ? "hash" : endsWith(name, ".ucas") ? "ucas" : "utoc";
-          const char* sizeKey = endsWith(name, ".pak") ? "hashFileSize" : endsWith(name, ".ucas") ? "ucasFileSize" : "utocFileSize";
-          pack->put(hashKey, item->getString("hash"))->put(sizeKey, item->getLong("size"));
-        }
       }
       li->put("version_file", version->toString());
     }
 
+    // Ensure livedata_list is empty so the game client never prompts for live update downloads.
+    // All packages (dt870, pc9242..pc9259) are already provided locally in the offline mod.
+    li->put("livedata_list", newArr());
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ALMANAC_V8] LiveData URL patch failed ") + e.what());
   }
