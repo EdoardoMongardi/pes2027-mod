@@ -1272,6 +1272,30 @@ static BOOL checkDirectFolderData(NSString** why) {
   // contains native face textures, and removing it breaks thousands of faces.
   // Do not overwrite the user's command line on each launch.
 
+  // Purge any invalid Android containers masquerading as iOS
+  for (NSString* fake in @[@"pc9258_mobile_ios", @"pc9259_mobile_ios"]) {
+    for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
+      NSString* fn = [fake stringByAppendingString:ext];
+      for (NSString* dir in @[pakDir, dlDir, [gDocs stringByAppendingPathComponent:@"livedata"]]) {
+        NSString* p = [dir stringByAppendingPathComponent:fn];
+        if ([fm fileExistsAtPath:p] || [fm destinationOfSymbolicLinkAtPath:p error:nil]) {
+          unlink(p.fileSystemRepresentation);
+          ZLog(@"[PURGE_FAKE_IOS] Removed invalid Android container: %@", p);
+        }
+      }
+    }
+  }
+
+  // Sanitize lingering Tonemapper overrides in ue4commandline.txt
+  NSString* docCmd = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
+  if ([fm fileExistsAtPath:docCmd]) {
+    NSString* cmdContent = [NSString stringWithContentsOfFile:docCmd encoding:NSUTF8StringEncoding error:nil];
+    if ([cmdContent containsString:@"Tonemapper"] || [cmdContent containsString:@"Gamma"]) {
+      [@"-t.MaxFPS=120\n" writeToFile:docCmd atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      ZLog(@"[GRAPHICS] Reset lingering ue4commandline.txt tonemapper to -t.MaxFPS=120");
+    }
+  }
+
   // Native character containers belong in pak/, including the face textures.
   for (NSString* core in @[@"pc3600", @"pc3611"]) {
     for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {

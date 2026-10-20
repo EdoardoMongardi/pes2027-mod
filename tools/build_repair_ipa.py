@@ -64,15 +64,7 @@ def build(args):
             replacements[ROOT + 'ziru/livedata/' + name] = cpk
         replacements[ROOT + 'ziru/table-fixes.json'] = json.dumps(tables, indent=2).encode()
 
-        # Ensure pc9258 and pc9259 have native iOS containers in ziru/livedata
-        for pack in ('pc9258', 'pc9259'):
-            for ext in ('.pak', '.utoc', '.ucas'):
-                and_name = f'{pack}_mobile_and{ext}'
-                ios_name = f'{pack}_mobile_ios{ext}'
-                ios_dest = ROOT + 'ziru/livedata/' + ios_name
-                and_dest = ROOT + 'ziru/livedata/' + and_name
-                if and_dest in names and ios_dest not in names:
-                    replacements[ios_dest] = source.read(and_dest)
+        # Android containers (pc9258, pc9259) must NEVER be aliased to _mobile_ios on Metal
 
         # Enforce clean commandline without tonemapper distortion
         for cl in ('ue4commandline.txt', 'uecommandline.txt'):
@@ -97,6 +89,8 @@ def build(args):
             for info in source.infolist():
                 if '/_CodeSignature/' in info.filename or info.filename.endswith('/embedded.mobileprovision'):
                     continue
+                if 'pc9258_mobile_ios' in info.filename or 'pc9259_mobile_ios' in info.filename:
+                    continue  # Purge invalid Android containers renamed to iOS
                 target.writestr(info, replacements.pop(info.filename, source.read(info.filename)))
             for name, data in replacements.items():
                 info = zipfile.ZipInfo(name)
