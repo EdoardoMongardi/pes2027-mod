@@ -1043,33 +1043,43 @@ static void startFpsMeter() {
 }
 
 // ---------------------------------------------------------------- UE4 Graphics Enhancements (Phase 1)
+typedef void (*FCommandLineSetFn)(const char16_t*);
 typedef void (*FCommandLineAppendFn)(const char16_t*);
 static void setupGraphicsEnhancements() {
-  FCommandLineAppendFn appendFn = (FCommandLineAppendFn)dlsym(RTLD_DEFAULT, "_ZN12FCommandLine6AppendEPKDs");
-  if (!appendFn) {
-    ZLog(@"[GRAPHICS] FCommandLine::Append symbol not resolved — using bundle ue4commandline.txt preset");
-    return;
+  intptr_t slide = _dyld_get_image_vmaddr_slide(0);
+  FCommandLineSetFn setFn = nullptr;
+  FCommandLineAppendFn appendFn = nullptr;
+  if (slide != 0) {
+    setFn = (FCommandLineSetFn)(0x101825828 + slide);
+    appendFn = (FCommandLineAppendFn)(0x101825d60 + slide);
   }
+  if (!setFn) setFn = (FCommandLineSetFn)dlsym(RTLD_DEFAULT, "_ZN12FCommandLine3SetEPKDs");
+  if (!appendFn) appendFn = (FCommandLineAppendFn)dlsym(RTLD_DEFAULT, "_ZN12FCommandLine6AppendEPKDs");
 
   // Check if user has a custom commandline override in Documents/ue4commandline.txt
   NSString* userCmdPath = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
+  NSString* targetCmd = @"-t.MaxFPS=120";
   if ([NSFileManager.defaultManager fileExistsAtPath:userCmdPath]) {
     NSString* customArgs = [NSString stringWithContentsOfFile:userCmdPath encoding:NSUTF8StringEncoding error:nil];
-    if (customArgs.length > 0) {
-      std::u16string u16(customArgs.length + 2, u' ');
-      u16[0] = u' ';
-      for (NSUInteger i = 0; i < customArgs.length; i++) {
-        u16[i + 1] = (char16_t)[customArgs characterAtIndex:i];
-      }
-      u16[customArgs.length + 1] = u'\0';
-      appendFn(u16.data());
-      ZLog(@"[GRAPHICS] Injected custom commandline from Documents/ue4commandline.txt (%lu chars)", (unsigned long)customArgs.length);
-      return;
-    }
+    if (customArgs && customArgs.length > 0) targetCmd = customArgs;
+  }
+  targetCmd = [targetCmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if (![targetCmd hasPrefix:@" "]) targetCmd = [@" " stringByAppendingString:targetCmd];
+
+  std::u16string u16(targetCmd.length + 1, u'\0');
+  for (NSUInteger i = 0; i < targetCmd.length; i++) {
+    u16[i] = (char16_t)[targetCmd characterAtIndex:i];
   }
 
-  appendFn(u" -t.MaxFPS=120 -r.TonemapperGamma=2.1");
-  ZLog(@"[GRAPHICS] Unlocked engine tick cap to 120 FPS and warmed tonemapper (-t.MaxFPS=120 -r.TonemapperGamma=2.1)");
+  if (setFn) {
+    setFn(u16.data());
+    ZLog(@"[GRAPHICS] FCommandLine::Set replaced commandline with: '%@'", targetCmd);
+  } else if (appendFn) {
+    appendFn(u16.data());
+    ZLog(@"[GRAPHICS] FCommandLine::Append applied commandline: '%@'", targetCmd);
+  } else {
+    ZLog(@"[GRAPHICS] FCommandLine functions could not be resolved");
+  }
 }
 
 // ---------------------------------------------------------------- launch gating
@@ -1353,8 +1363,8 @@ static BOOL checkDirectFolderData(NSString** why) {
     }
   }
 
-  // Purge Android Vulkan stadiums (pc3001, pc3002, pc3011, pc3012) from both pak/ and Download/
-  for (NSString* sf in @[@"pc3001", @"pc3002", @"pc3011", @"pc3012"]) {
+  // Purge Android Vulkan stadiums (pc3001, pc3002, pc3011, pc3012, pc3700) from both pak/ and Download/
+  for (NSString* sf in @[@"pc3001", @"pc3002", @"pc3011", @"pc3012", @"pc3700"]) {
     for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
       NSString* p1 = [dlDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@_mobile_ios%@", sf, ext]];
       if ([fm fileExistsAtPath:p1] || [fm destinationOfSymbolicLinkAtPath:p1 error:nil]) {
@@ -1392,8 +1402,8 @@ static BOOL checkDirectFolderData(NSString** why) {
     }
   }
 
-  // Safety guard: ensure base engine paks (pc3001, pc3011, pc3600, pc3611) stay in pakDir, never in dlDir!
-  for (NSString* core in @[@"pc3001", @"pc3011", @"pc3600", @"pc3611"]) {
+  // Safety guard: ensure base engine paks (pc3600, pc3611) stay in pakDir, never in dlDir!
+  for (NSString* core in @[@"pc3600", @"pc3611"]) {
     for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
       NSString* name = [NSString stringWithFormat:@"%@_mobile_ios%@", core, ext];
       NSString* wrong = [dlDir stringByAppendingPathComponent:name];

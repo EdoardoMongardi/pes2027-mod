@@ -172,6 +172,57 @@ static std::string fallbackPlayerName(uint32_t baseId) {
   return (it != sMap.end()) ? it->second : "";
 }
 
+static std::string toUpperAscii(const std::string& s) {
+  std::string r;
+  r.reserve(s.size());
+  for (char c : s) {
+    if (c >= 'a' && c <= 'z') r += (char)(c - 'a' + 'A');
+    else r += c;
+  }
+  return r;
+}
+
+static std::string formatPlayerShirtName(const std::string& input) {
+  if (input.empty()) return "";
+  std::string out;
+  out.reserve(input.size());
+  bool capitalizeNext = true;
+  for (size_t i = 0; i < input.size(); ++i) {
+    unsigned char c = (unsigned char)input[i];
+    if (c == ' ' || c == '.' || c == '-' || c == 0x27) {
+      out += (char)c;
+      capitalizeNext = true;
+    } else if (capitalizeNext) {
+      if (c >= 'a' && c <= 'z') out += (char)(c - 'a' + 'A');
+      else out += (char)c;
+      capitalizeNext = false;
+    } else {
+      if (c >= 'A' && c <= 'Z') out += (char)(c - 'A' + 'a');
+      else out += (char)c;
+    }
+  }
+  return out;
+}
+
+static void applyLegendRealFace(void* actor, int64_t pid, const std::string& shirtName) {
+  if (!actor) return;
+  std::string upper = toUpperAscii(shirtName);
+  int32_t base_id = (int32_t)(pid & 0xFFFFFF);
+  if (upper == "ZIDANE" || upper.find("ZIDANE") != std::string::npos || base_id == 9901397 || pid == 9901397 || base_id == 1397 || pid == 1397) {
+    static const char16_t sZidaneFace[] = u"9901397";
+    *(const char16_t**)((uint8_t*)actor + 0x468) = sZidaneFace;
+    *(int32_t*)((uint8_t*)actor + 0x470) = 8;
+    *(int32_t*)((uint8_t*)actor + 0x474) = 0;
+    ZLog(@"[JERSEY] Bound 3D RealFace 9901397 for Zidane on actor %p (name='%s')", actor, shirtName.c_str());
+  } else if ((upper == "RONALDO" || (upper.find("RONALDO") != std::string::npos && upper.find("C. RONALDO") == std::string::npos && upper.find("C.RONALDO") == std::string::npos)) || base_id == 37576 || pid == 37576) {
+    static const char16_t sR9Face[] = u"37576";
+    *(const char16_t**)((uint8_t*)actor + 0x468) = sR9Face;
+    *(int32_t*)((uint8_t*)actor + 0x470) = 6;
+    *(int32_t*)((uint8_t*)actor + 0x474) = 0;
+    ZLog(@"[JERSEY] Bound 3D RealFace 37576 for Ronaldo on actor %p (name='%s')", actor, shirtName.c_str());
+  }
+}
+
 static std::mutex sActorLock;
 static std::unordered_map<void*, int64_t> sActorPlayerId;
 static std::unordered_map<void*, int> sActorSide;
@@ -185,16 +236,18 @@ static void sanitizeMatchPlayerNames(uint8_t* match) {
       char* name = (char*)(p + 0x89);
       if (name && name[0] != '\0') {
         std::string uc = sanitizeShirtName(name);
-        if (!uc.empty() && uc.size() < 60 && uc != name) {
-          strncpy(name, uc.c_str(), 60);
+        std::string tc = formatPlayerShirtName(uc);
+        if (!tc.empty() && tc.size() < 60 && tc != name) {
+          strncpy(name, tc.c_str(), 60);
           name[59] = '\0';
         }
       }
       char* shirtName = (char*)(p + 0xc6);
       if (shirtName && shirtName[0] != '\0') {
         std::string uc = sanitizeShirtName(shirtName);
-        if (!uc.empty() && uc.size() < 60 && uc != shirtName) {
-          strncpy(shirtName, uc.c_str(), 60);
+        std::string tc = formatPlayerShirtName(uc);
+        if (!tc.empty() && tc.size() < 60 && tc != shirtName) {
+          strncpy(shirtName, tc.c_str(), 60);
           shirtName[59] = '\0';
         }
       }
@@ -437,9 +490,10 @@ static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int 
 
 static void applyActorShirtName(void* actor, const std::string& name) {
   if (!actor || name.empty()) return;
+  std::string formatted = formatPlayerShirtName(name);
   auto setShirt = (void (*)(void*, const char*))(0x10090ef34 + gSlide);
   if (setShirt) {
-    setShirt(actor, name.c_str());
+    setShirt(actor, formatted.c_str());
   }
   *(uint8_t*)((uint8_t*)actor + 0xf10) = 1;
   *(uint8_t*)((uint8_t*)actor + 0x1aaf) = 1;
@@ -469,28 +523,13 @@ static void hookedSetUniformNumber(void* actor, int uniformNumber) {
   }
   std::string name = lookupPlayerNameUniversal(actor, pid, uniformNumber);
   if (!name.empty()) {
+    applyLegendRealFace(actor, pid, name);
     applyActorShirtName(actor, name);
-    ZLog(@"[JERSEY] SetUniformNumber #%d pid=%lld -> '%s'", uniformNumber, (long long)pid, name.c_str());
+    ZLog(@"[JERSEY] SetUniformNumber #%d pid=%lld -> '%s'", uniformNumber, (long long)pid, formatPlayerShirtName(name).c_str());
   }
 }
 
-static void applyLegendRealFace(void* actor, int64_t pid) {
-  if (!actor || pid <= 0) return;
-  int32_t base_id = (int32_t)(pid & 0xFFFFFF);
-  if (base_id == 9901397 || pid == 9901397 || base_id == 1397 || pid == 1397) {
-    static const char16_t sZidaneFace[] = u"9901397";
-    *(const char16_t**)((uint8_t*)actor + 0x468) = sZidaneFace;
-    *(int32_t*)((uint8_t*)actor + 0x470) = 8;
-    *(int32_t*)((uint8_t*)actor + 0x474) = 0;
-    ZLog(@"[JERSEY] Bound 3D RealFace 9901397 for Zidane on actor %p", actor);
-  } else if (base_id == 37576 || pid == 37576) {
-    static const char16_t sR9Face[] = u"37576";
-    *(const char16_t**)((uint8_t*)actor + 0x468) = sR9Face;
-    *(int32_t*)((uint8_t*)actor + 0x470) = 6;
-    *(int32_t*)((uint8_t*)actor + 0x474) = 0;
-    ZLog(@"[JERSEY] Bound 3D RealFace 37576 for Ronaldo on actor %p", actor);
-  }
-}
+
 
 static void hookedReloadFace(void* actor) {
   if (actor) {
@@ -500,7 +539,9 @@ static void hookedReloadFace(void* actor) {
       auto it = sActorPlayerId.find(actor);
       if (it != sActorPlayerId.end()) pid = it->second;
     }
-    applyLegendRealFace(actor, pid);
+    int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
+    std::string name = lookupPlayerNameUniversal(actor, pid, num);
+    applyLegendRealFace(actor, pid, name);
   }
   if (originalReloadFace) {
     originalReloadFace(actor);
@@ -510,7 +551,6 @@ static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, i
   if (originalSetupFromPlayerId) {
     originalSetupFromPlayerId(actor, playerId, path, uniformIndex, uniName);
   }
-  applyLegendRealFace(actor, playerId);
   if (!actor) return;
   {
     std::lock_guard<std::mutex> lk(sActorLock);
@@ -520,9 +560,10 @@ static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, i
   }
   int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
   std::string name = lookupPlayerNameUniversal(actor, playerId, num);
+  applyLegendRealFace(actor, playerId, name);
   if (!name.empty()) {
     applyActorShirtName(actor, name);
-    ZLog(@"[JERSEY] SetupFromPlayerId pid=%lld num=%d -> '%s'", (long long)playerId, num, name.c_str());
+    ZLog(@"[JERSEY] SetupFromPlayerId pid=%lld num=%d -> '%s'", (long long)playerId, num, formatPlayerShirtName(name).c_str());
   }
 }
 
@@ -548,14 +589,15 @@ static void hookedBackNumberStep(void* actor) {
     std::string neededName;
     std::string correctName = lookupPlayerNameUniversal(actor, pid, num);
     if (!correctName.empty()) {
-      if (!curStr || len == 0 || len != correctName.size() || strncmp(curStr, correctName.c_str(), len) != 0) {
-        neededName = correctName;
+      std::string formatted = formatPlayerShirtName(correctName);
+      if (!curStr || len == 0 || len != formatted.size() || strncmp(curStr, formatted.c_str(), len) != 0) {
+        neededName = formatted;
       }
     } else if (curStr && len > 0) {
       std::string raw(curStr, len);
-      std::string uc = sanitizeShirtName(raw.c_str());
-      if (!uc.empty() && uc != raw) {
-        neededName = uc;
+      std::string formatted = formatPlayerShirtName(raw);
+      if (!formatted.empty() && formatted != raw) {
+        neededName = formatted;
       }
     }
 
