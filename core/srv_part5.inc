@@ -101,10 +101,14 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
   }
 
   // 2. Fix skin tone parameter 49 if 0 (chalk-white albino bug)
+  auto isRealFaceModel = [](int32_t bId) {
+    return bId == 133543 || bId == 133580 || bId == 40352 ||
+           bId == 9901397 || bId == 1397 || bId == 37576;
+  };
   auto restoreAppearance = [&](const ArrP& values) {
     if (!values || values->length() < 61) return;
-    if (base_id == 133543 || base_id == 133580 || base_id == 40352) {
-      // Licensed models (Neymar, Haaland): parameters 49..60 must remain 0 so native 3D face/braids load properly
+    if (isRealFaceModel(base_id)) {
+      // Licensed models (Neymar, Haaland, Zidane, Ronaldo): parameters 49..60 must remain 0 so native 3D face/braids load properly
       for (int i = 0; i < 12; ++i) values->put(49 + i, 0);
       return;
     }
@@ -127,7 +131,7 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
   };
   restoreAppearance(params);
   if (params && params->length() >= 65) {
-    if (base_id != 133543 && base_id != 133580 && base_id != 40352 && params->optInt(49, 0) <= 0) params->put(49, 3);
+    if (!isRealFaceModel(base_id) && params->optInt(49, 0) <= 0) params->put(49, 3);
   }
 
   // 3. Synchronize parameters[61] (Offensive PlayStyle), parameters[62] (Defensive PlayStyle), and COM styles 63..69
@@ -149,7 +153,7 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     ArrP origParams = cur->optJSONArray("original_parameters");
     restoreAppearance(origParams);
     if (origParams && origParams->length() >= 70) {
-      if (base_id != 133543 && origParams->optInt(49, 0) <= 0) origParams->put(49, 3);
+      if (!isRealFaceModel(base_id) && origParams->optInt(49, 0) <= 0) origParams->put(49, 3);
       if (st1 > 0) origParams->put(61, st1);
       origParams->put(62, st2);
       z27ApplyComPlayStyles(origParams, origParams->optInt(0, 0), st1);
