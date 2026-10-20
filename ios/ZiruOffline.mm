@@ -377,14 +377,20 @@ static int hook_remove(const char *path) {
 
 // ---------------------------------------------------------------- pak / cpk / Download file redirection
 static void resolveAltName(char* buffer, size_t bufSize) {
-  if (access(buffer, F_OK) == 0) return;
+  // Calls inside a rebound access() must use the original function, otherwise
+  // missing resources recursively enter hook_access until the stack overflows.
+  if (!orig_access || orig_access(buffer, F_OK) == 0) return;
+  // CPK tables are shared only where the table repair has validated them.
+  // IoStore assets need actual target-platform payloads, never a renamed file.
+  const char* extension = strrchr(buffer, '.');
+  if (!extension || strcmp(extension, ".cpk") != 0) return;
   char alt[1024];
   strncpy(alt, buffer, sizeof(alt) - 1);
   alt[sizeof(alt) - 1] = '\0';
   char* iosPtr = strstr(alt, "_mobile_ios");
   if (iosPtr) {
     memcpy(iosPtr, "_mobile_and", 11);
-    if (access(alt, F_OK) == 0) {
+    if (orig_access(alt, F_OK) == 0) {
       strncpy(buffer, alt, bufSize - 1);
       buffer[bufSize - 1] = '\0';
       return;
@@ -393,7 +399,7 @@ static void resolveAltName(char* buffer, size_t bufSize) {
   char* andPtr = strstr(alt, "_mobile_and");
   if (andPtr) {
     memcpy(andPtr, "_mobile_ios", 11);
-    if (access(alt, F_OK) == 0) {
+    if (orig_access(alt, F_OK) == 0) {
       strncpy(buffer, alt, bufSize - 1);
       buffer[bufSize - 1] = '\0';
       return;
