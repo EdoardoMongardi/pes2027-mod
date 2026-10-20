@@ -1208,8 +1208,12 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
                   continue;
                 }
                 if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
-                  ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@ (%llu bytes)", path, sz);
-                  continue;
+                  if (cpk && sz != 9312212) {
+                    ZLog(@"[IOS_TABLE_FIX] Replacing corrupted Android dt870 (%llu bytes) with clean iOS stock CPK", sz);
+                  } else {
+                    ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@ (%llu bytes)", path, sz);
+                    continue;
+                  }
                 }
               }
             }
@@ -1231,8 +1235,12 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
                 for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
                 if ([hash isEqualToString:manifest[name][@"sha256"]]) continue;
                 if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
-                  ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@ (%llu bytes)", path, sz);
-                  continue;
+                  if (cpk && sz != 9312212) {
+                    ZLog(@"[IOS_TABLE_FIX] Replacing corrupted Android dt870 (%llu bytes) with clean iOS stock CPK", sz);
+                  } else {
+                    ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@ (%llu bytes)", path, sz);
+                    continue;
+                  }
                 }
                 if (!link) {
                   NSString* backupDir = [gDocs stringByAppendingPathComponent:@"PES2027-repair-backups"];
@@ -1363,8 +1371,8 @@ static BOOL checkDirectFolderData(NSString** why) {
     }
   }
 
-  // Purge Android Vulkan stadiums (pc3001, pc3002, pc3011, pc3012, pc3700) from both pak/ and Download/
-  for (NSString* sf in @[@"pc3001", @"pc3002", @"pc3011", @"pc3012", @"pc3700"]) {
+  // Purge Android Vulkan stadiums and broken crowd meshes from both pak/ and Download/
+  for (NSString* sf in @[@"pc3001", @"pc3002", @"pc3011", @"pc3012", @"pc3700", @"pc3611", @"pc3611_mobile_ios_optional"]) {
     for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
       NSString* p1 = [dlDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@_mobile_ios%@", sf, ext]];
       if ([fm fileExistsAtPath:p1] || [fm destinationOfSymbolicLinkAtPath:p1 error:nil]) {
@@ -1402,8 +1410,8 @@ static BOOL checkDirectFolderData(NSString** why) {
     }
   }
 
-  // Safety guard: ensure base engine paks (pc3600, pc3611) stay in pakDir, never in dlDir!
-  for (NSString* core in @[@"pc3600", @"pc3611"]) {
+  // Safety guard: ensure base engine paks (pc3600) stay in pakDir, never in dlDir!
+  for (NSString* core in @[@"pc3600"]) {
     for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
       NSString* name = [NSString stringWithFormat:@"%@_mobile_ios%@", core, ext];
       NSString* wrong = [dlDir stringByAppendingPathComponent:name];
