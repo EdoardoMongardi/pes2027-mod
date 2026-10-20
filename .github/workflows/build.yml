@@ -19,7 +19,9 @@ jobs:
       - name: offline gameplay regression tests
         run: ./build/gameplaytest
       - name: native iOS database table conversion
-        run: python3 -m unittest discover -s test -p 'ios_tables_test.py' -v
+        run: |
+          python3 -m unittest discover -s test -p 'ios_tables_test.py' -v
+          python3 -m unittest discover -s test -p 'cpk_merge_test.py' -v
       - name: legend identity regression
         run: g++ -std=c++17 test/player_identity_test.cpp -o /tmp/player-identity-test && /tmp/player-identity-test
       - name: online encrypted two-client integration tests

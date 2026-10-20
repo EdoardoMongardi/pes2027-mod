@@ -1153,7 +1153,7 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
     }
   }
   for (NSString* name in manifest) {
-    BOOL cpk = [name isEqualToString:@"dt870_mobile_and.cpk"];
+    BOOL cpk = [name isEqualToString:@"dt870_mobile_and.cpk"] || [name isEqualToString:@"dt870_mobile_ios.cpk"];
     if (!cpk && ![name hasSuffix:@".utoc"]) continue;
     NSArray* group = cpk ? @[name] : @[[name.stringByDeletingPathExtension stringByAppendingString:@".pak"],
         name, [name.stringByDeletingPathExtension stringByAppendingString:@".ucas"]];
