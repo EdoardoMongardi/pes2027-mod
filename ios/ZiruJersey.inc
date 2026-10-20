@@ -9,6 +9,7 @@ using AssetFn = void (*)(void*, NativeString*, bool);
 using SetUniformNumberFn = void (*)(void* actor, int uniformNumber);
 using SetupFromPlayerIdFn = void (*)(void* actor, int64_t playerId, void* path, int uniformIndex, void* uniName);
 using BackNumberStepFn = void (*)(void* actor);
+using ReloadFaceFn = void (*)(void* actor);
 
 static LoadFn originalLoad;
 static ReadyFn originalReady;
@@ -17,6 +18,7 @@ static AssetFn originalAsset;
 static SetUniformNumberFn originalSetUniformNumber;
 static SetupFromPlayerIdFn originalSetupFromPlayerId;
 static BackNumberStepFn originalBackNumberStep;
+static ReloadFaceFn originalReloadFace;
 
 static std::mutex mutex;
 static std::set<void*> retried, recorded;
@@ -472,10 +474,43 @@ static void hookedSetUniformNumber(void* actor, int uniformNumber) {
   }
 }
 
+static void applyLegendRealFace(void* actor, int64_t pid) {
+  if (!actor || pid <= 0) return;
+  int32_t base_id = (int32_t)(pid & 0xFFFFFF);
+  if (base_id == 9901397 || pid == 9901397 || base_id == 1397 || pid == 1397) {
+    static const char16_t sZidaneFace[] = u"9901397";
+    *(const char16_t**)((uint8_t*)actor + 0x468) = sZidaneFace;
+    *(int32_t*)((uint8_t*)actor + 0x470) = 8;
+    *(int32_t*)((uint8_t*)actor + 0x474) = 0;
+    ZLog(@"[JERSEY] Bound 3D RealFace 9901397 for Zidane on actor %p", actor);
+  } else if (base_id == 37576 || pid == 37576) {
+    static const char16_t sR9Face[] = u"37576";
+    *(const char16_t**)((uint8_t*)actor + 0x468) = sR9Face;
+    *(int32_t*)((uint8_t*)actor + 0x470) = 6;
+    *(int32_t*)((uint8_t*)actor + 0x474) = 0;
+    ZLog(@"[JERSEY] Bound 3D RealFace 37576 for Ronaldo on actor %p", actor);
+  }
+}
+
+static void hookedReloadFace(void* actor) {
+  if (actor) {
+    int64_t pid = 0;
+    {
+      std::lock_guard<std::mutex> lk(sActorLock);
+      auto it = sActorPlayerId.find(actor);
+      if (it != sActorPlayerId.end()) pid = it->second;
+    }
+    applyLegendRealFace(actor, pid);
+  }
+  if (originalReloadFace) {
+    originalReloadFace(actor);
+  }
+}
 static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, int uniformIndex, void* uniName) {
   if (originalSetupFromPlayerId) {
     originalSetupFromPlayerId(actor, playerId, path, uniformIndex, uniName);
   }
+  applyLegendRealFace(actor, playerId);
   if (!actor) return;
   {
     std::lock_guard<std::mutex> lk(sActorLock);
@@ -594,34 +629,36 @@ static void install() {
   ZLog(@"[JERSEY] native name atlas fallback and diagnostics installed");
 
   const uintptr_t actorSlots[] = {
-    0x105f286c0, 0x105f287a0, 0x105f28800,
-    0x105f29098, 0x105f29178, 0x105f291d8
+    0x105f286c0, 0x105f287a0, 0x105f28800, 0x105f28830,
+    0x105f29098, 0x105f29178, 0x105f291d8, 0x105f29208
   };
   const uintptr_t actorFuncs[] = {
-    0x10089f2e8, 0x1008a02f0, 0x10089f3ec,
-    0x10089f2e8, 0x1008a02f0, 0x10089f3ec
+    0x10089f2e8, 0x1008a02f0, 0x10089f3ec, 0x10089cfa4,
+    0x10089f2e8, 0x1008a02f0, 0x10089f3ec, 0x10089cfa4
   };
 
-  // Hook Mobile vtable (slots 0, 1, 2)
+  // Hook Mobile vtable (slots 0, 1, 2, 3)
   bool mobMatch = true;
-  for (int i = 0; i < 3; ++i) {
+  for (int i = 0; i < 4; ++i) {
     if (*(uintptr_t*)(actorSlots[i] + slide) != actorFuncs[i] + slide) {
       mobMatch = false; break;
     }
   }
   if (mobMatch) {
     vm_address_t actorPage = (actorSlots[0] + slide) & ~(vm_address_t)(vm_page_size - 1);
-    vm_size_t actorLength = ((actorSlots[2] + slide + 8 - actorPage + vm_page_size - 1) & ~(vm_page_size - 1));
+    vm_size_t actorLength = ((actorSlots[3] + slide + 8 - actorPage + vm_page_size - 1) & ~(vm_page_size - 1));
     if (vm_protect(mach_task_self(), actorPage, actorLength, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS) {
       originalSetUniformNumber = (SetUniformNumberFn)*(uintptr_t*)(actorSlots[0] + slide);
       originalSetupFromPlayerId = (SetupFromPlayerIdFn)*(uintptr_t*)(actorSlots[1] + slide);
       originalBackNumberStep = (BackNumberStepFn)*(uintptr_t*)(actorSlots[2] + slide);
+      originalReloadFace = (ReloadFaceFn)*(uintptr_t*)(actorSlots[3] + slide);
 
       *(uintptr_t*)(actorSlots[0] + slide) = (uintptr_t)hookedSetUniformNumber;
       *(uintptr_t*)(actorSlots[1] + slide) = (uintptr_t)hookedSetupFromPlayerId;
       *(uintptr_t*)(actorSlots[2] + slide) = (uintptr_t)hookedBackNumberStep;
+      *(uintptr_t*)(actorSlots[3] + slide) = (uintptr_t)hookedReloadFace;
       vm_protect(mach_task_self(), actorPage, actorLength, false, VM_PROT_READ);
-      ZLog(@"[JERSEY] player actor shirt name hooks installed for Mobile");
+      ZLog(@"[JERSEY] player actor shirt name and face hooks installed for Mobile");
     } else {
       ZLog(@"[JERSEY] vm_protect failed for Mobile vtable");
     }
@@ -629,22 +666,23 @@ static void install() {
     ZLog(@"[JERSEY] Mobile vtable mismatch; skipped");
   }
 
-  // Hook MobileHigh vtable (slots 3, 4, 5)
+  // Hook MobileHigh vtable (slots 4, 5, 6, 7)
   bool highMatch = true;
-  for (int i = 3; i < 6; ++i) {
+  for (int i = 4; i < 8; ++i) {
     if (*(uintptr_t*)(actorSlots[i] + slide) != actorFuncs[i] + slide) {
       highMatch = false; break;
     }
   }
   if (highMatch) {
-    vm_address_t actorPage = (actorSlots[3] + slide) & ~(vm_address_t)(vm_page_size - 1);
-    vm_size_t actorLength = ((actorSlots[5] + slide + 8 - actorPage + vm_page_size - 1) & ~(vm_page_size - 1));
+    vm_address_t actorPage = (actorSlots[4] + slide) & ~(vm_address_t)(vm_page_size - 1);
+    vm_size_t actorLength = ((actorSlots[7] + slide + 8 - actorPage + vm_page_size - 1) & ~(vm_page_size - 1));
     if (vm_protect(mach_task_self(), actorPage, actorLength, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS) {
-      *(uintptr_t*)(actorSlots[3] + slide) = (uintptr_t)hookedSetUniformNumber;
-      *(uintptr_t*)(actorSlots[4] + slide) = (uintptr_t)hookedSetupFromPlayerId;
-      *(uintptr_t*)(actorSlots[5] + slide) = (uintptr_t)hookedBackNumberStep;
+      *(uintptr_t*)(actorSlots[4] + slide) = (uintptr_t)hookedSetUniformNumber;
+      *(uintptr_t*)(actorSlots[5] + slide) = (uintptr_t)hookedSetupFromPlayerId;
+      *(uintptr_t*)(actorSlots[6] + slide) = (uintptr_t)hookedBackNumberStep;
+      *(uintptr_t*)(actorSlots[7] + slide) = (uintptr_t)hookedReloadFace;
       vm_protect(mach_task_self(), actorPage, actorLength, false, VM_PROT_READ);
-      ZLog(@"[JERSEY] player actor shirt name hooks installed for MobileHigh");
+      ZLog(@"[JERSEY] player actor shirt name and face hooks installed for MobileHigh");
     } else {
       ZLog(@"[JERSEY] vm_protect failed for MobileHigh vtable");
     }

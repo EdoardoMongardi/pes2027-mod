@@ -1329,19 +1329,10 @@ static BOOL checkDirectFolderData(NSString** why) {
       NSString* bFile = [bundleExtra stringByAppendingPathComponent:f];
       NSString* dFile = [pakDir stringByAppendingPathComponent:f];
       if ([fm destinationOfSymbolicLinkAtPath:dFile error:nil] || [fm fileExistsAtPath:dFile]) {
-        NSDictionary* bAttrs = [fm attributesOfItemAtPath:bFile error:nil];
-        NSDictionary* dAttrs = [fm attributesOfItemAtPath:dFile error:nil];
-        if ([fm destinationOfSymbolicLinkAtPath:dFile error:nil] || [dAttrs fileSize] < [bAttrs fileSize]) {
-          unlink(dFile.fileSystemRepresentation);
-          [fm copyItemAtPath:bFile toPath:dFile error:nil];
-          ZLog(@"[PAK_EXTRA] Upgraded %@ to real bundle file (%llu bytes)", f, [bAttrs fileSize]);
-          continue;
-        }
+        unlink(dFile.fileSystemRepresentation);
       }
-      if (![fm fileExistsAtPath:dFile]) {
-        [fm copyItemAtPath:bFile toPath:dFile error:nil];
-        ZLog(@"[PAK_EXTRA] Copied real file %@ to Documents/pak", f);
-      }
+      [fm copyItemAtPath:bFile toPath:dFile error:nil];
+      ZLog(@"[PAK_EXTRA] Copied real file %@ to Documents/pak", f);
     }
   }
 
@@ -1362,13 +1353,18 @@ static BOOL checkDirectFolderData(NSString** why) {
     }
   }
 
-  // Purge Android Vulkan stadiums (pc3002/pc3012) from Download/ so UE4 uses native iOS Metal stadiums (no black screen)
-  for (NSString* sf in @[@"pc3002", @"pc3012"]) {
+  // Purge Android Vulkan stadiums (pc3001, pc3002, pc3011, pc3012) from both pak/ and Download/
+  for (NSString* sf in @[@"pc3001", @"pc3002", @"pc3011", @"pc3012"]) {
     for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
-      NSString* p = [dlDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@_mobile_ios%@", sf, ext]];
-      if ([fm fileExistsAtPath:p] || [fm destinationOfSymbolicLinkAtPath:p error:nil]) {
-        unlink(p.fileSystemRepresentation);
-        ZLog(@"[STADIUM_FIX] Purged Android Vulkan stadium file %@", p.lastPathComponent);
+      NSString* p1 = [dlDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@_mobile_ios%@", sf, ext]];
+      if ([fm fileExistsAtPath:p1] || [fm destinationOfSymbolicLinkAtPath:p1 error:nil]) {
+        unlink(p1.fileSystemRepresentation);
+        ZLog(@"[STADIUM_FIX] Purged %@ from Download", p1.lastPathComponent);
+      }
+      NSString* p2 = [pakDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@_mobile_ios%@", sf, ext]];
+      if ([fm fileExistsAtPath:p2] || [fm destinationOfSymbolicLinkAtPath:p2 error:nil]) {
+        unlink(p2.fileSystemRepresentation);
+        ZLog(@"[STADIUM_FIX] Purged %@ from pak", p2.lastPathComponent);
       }
     }
   }
@@ -1376,17 +1372,9 @@ static BOOL checkDirectFolderData(NSString** why) {
   if ([fm fileExistsAtPath:vsBin] || [fm destinationOfSymbolicLinkAtPath:vsBin error:nil]) {
     unlink(vsBin.fileSystemRepresentation);
   }
-
-  // Activate 424MB legend pack (pad_ff_09) if named pc3700_stock_mobile_ios
-  for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
-    NSString* stock = [pakDir stringByAppendingPathComponent:[NSString stringWithFormat:@"pc3700_stock_mobile_ios%@", ext]];
-    NSString* live = [pakDir stringByAppendingPathComponent:[NSString stringWithFormat:@"pc3700_mobile_ios%@", ext]];
-    if ([fm fileExistsAtPath:stock]) {
-      unlink(live.fileSystemRepresentation);
-      [fm moveItemAtPath:stock toPath:live error:nil];
-      ZLog(@"[PACK_ACTIVATE] Activated 424MB pack %@", live.lastPathComponent);
-    }
-  }
+  // Enforce clean 120 FPS without washed-out tonemapper settings
+  NSString* docCmd = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
+  [@"-t.MaxFPS=120\n" writeToFile:docCmd atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
   // Ensure pc7999 is copied as real files to Documents/pak
   if ([fm fileExistsAtPath:[bundleExtra stringByAppendingPathComponent:@"pc7999_mobile_ios.ucas"]]) {

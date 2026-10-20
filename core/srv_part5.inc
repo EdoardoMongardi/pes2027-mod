@@ -102,8 +102,7 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
 
   // 2. Fix skin tone parameter 49 if 0 (chalk-white albino bug)
   auto isRealFaceModel = [](int32_t bId) {
-    return bId == 133543 || bId == 133580 || bId == 40352 ||
-           bId == 9901397 || bId == 1397 || bId == 37576;
+    return bId == 133543 || bId == 133580 || bId == 40352;
   };
   auto restoreAppearance = [&](const ArrP& values) {
     if (!values || values->length() < 61) return;
