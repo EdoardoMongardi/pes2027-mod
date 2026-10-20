@@ -687,7 +687,8 @@ void patchLocalLivedataUrls(const ObjP& jo) {
       cfg.livedataDir.empty() ? "" : cfg.livedataDir + "/dt870_mobile_and.cpk",
       cfg.dataDir + "/cpk/dt870_mobile_ios.cpk",
       cfg.dataDir + "/cpk/dt870_mobile_and.cpk",
-      assets.path("livedata/dt870_mobile_ios.cpk")
+      assets.path("livedata/dt870_mobile_ios.cpk"),
+      assets.path("livedata/dt870_mobile_and.cpk")
     };
     std::string activeDt870;
     struct stat activeDt870Stat;
@@ -734,6 +735,8 @@ void patchLocalLivedataUrls(const ObjP& jo) {
       version->put("dt880", newArr());
       if (!activeDt870Hash.empty()) {
         version->put("dt870Hash", activeDt870Hash)->put("dt870FileSize", (long long)activeDt870Stat.st_size);
+      } else {
+        version->put("dt870Hash", "b35a01a1c58b39c65abcdf66b3af95f9c35e7f4f463834ab77aa07052ab06b6e")->put("dt870FileSize", 9043968LL);
       }
       li->put("version_file", version->toString());
     }

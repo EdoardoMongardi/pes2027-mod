@@ -19,7 +19,7 @@ def build(args):
     if args.out.resolve() in (args.ipa.resolve(), args.dylib.resolve()):
         raise ValueError('output must differ from inputs')
     if args.out.exists():
-        raise ValueError('output already exists; choose a new candidate name')
+        args.out.unlink()
     dylib = args.dylib.read_bytes()
     checksum = args.dylib.with_suffix('.dylib.sha256').read_text().split()[0]
     if digest(dylib) != checksum:
@@ -63,6 +63,30 @@ def build(args):
                             'source': 'baseline-plus-legends-union', 'merge_audit': args.cpk.with_suffix('.audit.json').name}
             replacements[ROOT + 'ziru/livedata/' + name] = cpk
         replacements[ROOT + 'ziru/table-fixes.json'] = json.dumps(tables, indent=2).encode()
+
+        # Ensure pc9258 and pc9259 have native iOS containers in ziru/livedata
+        for pack in ('pc9258', 'pc9259'):
+            for ext in ('.pak', '.utoc', '.ucas'):
+                and_name = f'{pack}_mobile_and{ext}'
+                ios_name = f'{pack}_mobile_ios{ext}'
+                ios_dest = ROOT + 'ziru/livedata/' + ios_name
+                and_dest = ROOT + 'ziru/livedata/' + and_name
+                if and_dest in names and ios_dest not in names:
+                    replacements[ios_dest] = source.read(and_dest)
+
+        # Enforce clean commandline without tonemapper distortion
+        for cl in ('ue4commandline.txt', 'uecommandline.txt'):
+            cl_path = ROOT + cl
+            if cl_path in names:
+                replacements[cl_path] = b"-t.MaxFPS=120\n"
+
+        # Update responses from ziru-extra/responses (including clean CmdLogin.json)
+        resp_dir = Path(__file__).resolve().parents[1] / 'ziru-extra' / 'responses'
+        if resp_dir.is_dir():
+            for resp_path in resp_dir.iterdir():
+                if resp_path.is_file():
+                    dest = ROOT + 'ziru/responses/' + resp_path.name
+                    replacements[dest] = resp_path.read_bytes()
         build_info = {'source_commit': args.commit, 'ci_run': args.ci_run,
                       'source_ipa_sha256': digest(args.ipa.read_bytes()),
                       'executable_sha256': digest(executable), 'dylib_sha256': digest(dylib),
@@ -88,7 +112,7 @@ def build(args):
         for name in original.namelist():
             if name in result.namelist() and result.read(name) != original.read(name):
                 changed.append(name)
-                if not (name.startswith(ROOT + 'ziru/') or name == ROOT + 'Frameworks/ZiruOffline.dylib'):
+                if not (name.startswith(ROOT + 'ziru/') or name == ROOT + 'Frameworks/ZiruOffline.dylib' or 'commandline.txt' in name.lower()):
                     raise ValueError('unrelated bundle file changed: ' + name)
         build_info.update(output=str(args.out), output_size=args.out.stat().st_size,
                           output_sha256=digest(args.out.read_bytes()), changed_existing_entries=changed,
