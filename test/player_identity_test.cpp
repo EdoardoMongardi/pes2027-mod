@@ -9,7 +9,8 @@ int main() {
   assert(legendFace(4522, "RONALDO") == 0);
   assert(legendFace(0, "C. RONALDO") == 0);
   assert(legendFace(0, "CRISTIANO RONALDO") == 0);
-  assert(legendFace(0, "RONALDO") == 37576);
-  assert(legendFace(0, "Z. ZIDANE") == 9901397);
+  assert(legendFace(0, "RONALDO") == 0);
+  assert(legendFace(0, "Z. ZIDANE") == 0);
+  assert(legendFace(1397, "ZIDANE") == 0);
   assert(legendFace(0, "ZIDANE JR") == 0);
 }

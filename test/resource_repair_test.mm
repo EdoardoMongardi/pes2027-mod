@@ -38,7 +38,9 @@ int main() {
     NSCAssert([oldToc isEqualToString:resourceSHA256([dest stringByAppendingPathComponent:names[1]])], @"no mixed-version triple");
     // An interrupted/incomplete bundle never removes the existing group.
     [fm removeItemAtPath:[source stringByAppendingPathComponent:names[2]] error:nil];
-    NSCAssert(!installResourceGroup(names, source, dest, manifest), @"missing UCAS rejected");
+    NSString* emptyDest = [gDocs stringByAppendingPathComponent:@"missing-source-destination"];
+    NSCAssert(!installResourceGroup(names, source, emptyDest, manifest), @"missing UCAS rejected");
+    NSCAssert(![fm fileExistsAtPath:emptyDest], @"incomplete source never starts installation");
     NSString* cpkDir = [gDocs stringByAppendingPathComponent:@"cpk"];
     NSString* cpk = @"dt870_mobile_and.cpk";
     write(source, cpk, @"known repair"); write(cpkDir, cpk, @"unknown custom database");
