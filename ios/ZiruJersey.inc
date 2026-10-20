@@ -172,6 +172,7 @@ static std::string fallbackPlayerName(uint32_t baseId) {
 
 static std::mutex sActorLock;
 static std::unordered_map<void*, int64_t> sActorPlayerId;
+static std::unordered_map<void*, int> sActorSide;
 
 static void sanitizeMatchPlayerNames(uint8_t* match) {
   if (!match) return;
@@ -201,6 +202,11 @@ static void sanitizeMatchPlayerNames(uint8_t* match) {
 
 static int resolveActorSide(void* actor, uint8_t* match) {
   if (!actor) return -1;
+  {
+    std::lock_guard<std::mutex> lk(sActorLock);
+    auto it = sActorSide.find(actor);
+    if (it != sActorSide.end()) return it->second;
+  }
 
   // 1. Check actor + 0x1100 (native uniformIndex: 0=Home Outfield, 1=Away Outfield, 2=Home GK, 3=Away GK)
   int32_t uIdx = *(int32_t*)((uint8_t*)actor + 0x1100);
@@ -473,8 +479,9 @@ static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, i
   if (!actor) return;
   {
     std::lock_guard<std::mutex> lk(sActorLock);
-    if (sActorPlayerId.size() > 512) sActorPlayerId.clear();
+    if (sActorPlayerId.size() > 512) { sActorPlayerId.clear(); sActorSide.clear(); }
     sActorPlayerId[actor] = playerId;
+    sActorSide[actor] = (uniformIndex % 2 == 0) ? 0 : 1;
   }
   int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
   std::string name = lookupPlayerNameUniversal(actor, playerId, num);

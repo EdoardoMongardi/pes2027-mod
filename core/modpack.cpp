@@ -148,7 +148,9 @@ bool activatePending(const std::string& pending, const std::string& docs, std::s
       // Preserve the old link/file, including a custom user's existing mod.
       if (exists && rename(dst.c_str(), old.c_str()) != 0) { ok = false; break; }
       if (rename((stage + "/" + rel).c_str(), dst.c_str()) != 0) {
-        if (exists) rename(old.c_str(), dst.c_str()); ok = false; break;
+        if (exists) { rename(old.c_str(), dst.c_str()); }
+        ok = false;
+        break;
       }
       done.push_back({rel, exists});
     }

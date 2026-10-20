@@ -751,17 +751,6 @@ void patchLocalLivedataUrls(const ObjP& jo) {
       li->put("version_file", version->toString());
     }
 
-    // CRITICAL: Strip dt870 from livedata_list so the client does not prompt for 8.8 MB download
-    // dt870 is already installed locally, and version_file specifies its exact local hash/size.
-    ArrP keepList = newArr();
-    for (int i = 0; i < list->length(); i++) {
-      ObjP o = list->optJSONObject(i);
-      if (!o) continue;
-      std::string name = o->optString("name", "");
-      if (startsWith(name, "dt870")) continue;
-      keepList->put(o);
-    }
-    li->put("livedata_list", keepList);
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ALMANAC_V8] LiveData URL patch failed ") + e.what());
   }

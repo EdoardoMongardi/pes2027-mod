@@ -1302,18 +1302,7 @@ static BOOL checkDirectFolderData(NSString** why) {
   NSString* dlDir = [gDocs stringByAppendingPathComponent:@"Download"];
   [fm createDirectoryAtPath:dlDir withIntermediateDirectories:YES attributes:nil error:nil];
 
-  // Auto-import stadium files if user placed them directly in Documents root
-  for (NSString* f in [fm contentsOfDirectoryAtPath:gDocs error:nil]) {
-    if (zm::stadiumName(f.UTF8String) || [f containsString:@"stadium"]) {
-      NSString* src = [gDocs stringByAppendingPathComponent:f];
-      NSString* dst = [dlDir stringByAppendingPathComponent:f];
-      if (![fm fileExistsAtPath:dst]) {
-        NSError* err = nil;
-        [fm copyItemAtPath:src toPath:dst error:&err];
-        ZLog(@"[STADIUM] Auto-imported stadium file %@ from Documents to Download/: %@", f, err ? err.localizedDescription : @"OK");
-      }
-    }
-  }
+  // Stadium auto-import disabled to prevent Android Vulkan shaders from breaking iOS Metal render
 
   installBundledTableFixes(@[[gDocs stringByAppendingPathComponent:@"livedata"], cpkDir, dlDir]);
 
@@ -1359,6 +1348,48 @@ static BOOL checkDirectFolderData(NSString** why) {
     }
   }
 
+  // Purge Android Vulkan stadiums (pc3002/pc3012) from Download/ so UE4 uses native iOS Metal stadiums (no black screen)
+  for (NSString* sf in @[@"pc3002", @"pc3012"]) {
+    for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
+      NSString* p = [dlDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@_mobile_ios%@", sf, ext]];
+      if ([fm fileExistsAtPath:p] || [fm destinationOfSymbolicLinkAtPath:p error:nil]) {
+        unlink(p.fileSystemRepresentation);
+        ZLog(@"[STADIUM_FIX] Purged Android Vulkan stadium file %@", p.lastPathComponent);
+      }
+    }
+  }
+  NSString* vsBin = [dlDir stringByAppendingPathComponent:@"version_stadium.bin"];
+  if ([fm fileExistsAtPath:vsBin] || [fm destinationOfSymbolicLinkAtPath:vsBin error:nil]) {
+    unlink(vsBin.fileSystemRepresentation);
+  }
+
+  // Activate 424MB legend pack (pad_ff_09) if named pc3700_stock_mobile_ios
+  for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
+    NSString* stock = [pakDir stringByAppendingPathComponent:[NSString stringWithFormat:@"pc3700_stock_mobile_ios%@", ext]];
+    NSString* live = [pakDir stringByAppendingPathComponent:[NSString stringWithFormat:@"pc3700_mobile_ios%@", ext]];
+    if ([fm fileExistsAtPath:stock]) {
+      unlink(live.fileSystemRepresentation);
+      [fm moveItemAtPath:stock toPath:live error:nil];
+      ZLog(@"[PACK_ACTIVATE] Activated 424MB pack %@", live.lastPathComponent);
+    }
+  }
+
+  // Ensure pc7999 is copied as real files to Documents/pak
+  if ([fm fileExistsAtPath:[bundleExtra stringByAppendingPathComponent:@"pc7999_mobile_ios.ucas"]]) {
+    for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
+      NSString* bFile = [bundleExtra stringByAppendingPathComponent:[NSString stringWithFormat:@"pc7999_mobile_ios%@", ext]];
+      NSString* dFile = [pakDir stringByAppendingPathComponent:[NSString stringWithFormat:@"pc7999_mobile_ios%@", ext]];
+      NSString* dest = [fm destinationOfSymbolicLinkAtPath:dFile error:nil];
+      if (dest && ![fm fileExistsAtPath:dest]) {
+        unlink(dFile.fileSystemRepresentation);
+      }
+      if (![fm fileExistsAtPath:dFile]) {
+        [fm copyItemAtPath:bFile toPath:dFile error:nil];
+        ZLog(@"[PC7999_COPY] Copied real pc7999 to pak: %@", dFile.lastPathComponent);
+      }
+    }
+  }
+
   // Safety guard: ensure base engine paks (pc3001, pc3011, pc3600, pc3611) stay in pakDir, never in dlDir!
   for (NSString* core in @[@"pc3001", @"pc3011", @"pc3600", @"pc3611"]) {
     for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
@@ -1388,14 +1419,8 @@ static BOOL checkDirectFolderData(NSString** why) {
           continue; // retain the Android original in livedata; mount the native iOS package below
         }
       }
-      // Stadium paks/ucas/utoc and version_stadium.bin must be in Download/ for AddStadiumDlTask
       if (zm::stadiumName(f.UTF8String) || [f containsString:@"stadium"]) {
-        ensureSymlink([dlDir stringByAppendingPathComponent:f], target);
-        if ([f containsString:@"_mobile_and"]) {
-          NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
-          ensureSymlink([dlDir stringByAppendingPathComponent:iosName], target);
-        }
-        ZLog(@"[STADIUM] Linked stadium mod file %@ to Download/", f);
+        // Skip linking Vulkan stadiums to prevent black screen
         continue;
       }
       if ([f containsString:@"_mobile_and"]) {

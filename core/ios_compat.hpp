@@ -72,9 +72,12 @@ inline bool adaptIosPlayerData(zj::Value& value, bool outgoing) {
           auto activateSkill = [&](int sv) {
             if (sv == 73 || sv == 68) dst->put(142, 1);
             else if (sv == 72 || sv == 25) dst->put(143, 1);
-            else if (isZiruSkillId(sv)) {
-              int pIdx = kZiruSkillParameters[sv];
-              if (pIdx >= 70 && pIdx < 142) dst->put(pIdx, 1);
+            else {
+              int zid = (sv > 25 && sv != 68 && sv != 72 && sv != 73) ? iosSkillId(sv, false) : sv;
+              if (isZiruSkillId(zid)) {
+                int pIdx = kZiruSkillParameters[zid];
+                if (pIdx >= 70 && pIdx < 142) dst->put(pIdx, 1);
+              }
             }
           };
 
