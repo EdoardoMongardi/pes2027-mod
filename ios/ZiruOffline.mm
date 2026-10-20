@@ -1326,9 +1326,23 @@ static BOOL checkDirectFolderData(NSString** why) {
   if ([fm fileExistsAtPath:bundleExtra]) {
     [fm createDirectoryAtPath:pakDir withIntermediateDirectories:YES attributes:nil error:nil];
     for (NSString* f in [fm contentsOfDirectoryAtPath:bundleExtra error:nil]) {
-      ensureSymlink([pakDir stringByAppendingPathComponent:f], [bundleExtra stringByAppendingPathComponent:f]);
+      NSString* bFile = [bundleExtra stringByAppendingPathComponent:f];
+      NSString* dFile = [pakDir stringByAppendingPathComponent:f];
+      if ([fm destinationOfSymbolicLinkAtPath:dFile error:nil] || [fm fileExistsAtPath:dFile]) {
+        NSDictionary* bAttrs = [fm attributesOfItemAtPath:bFile error:nil];
+        NSDictionary* dAttrs = [fm attributesOfItemAtPath:dFile error:nil];
+        if ([fm destinationOfSymbolicLinkAtPath:dFile error:nil] || [dAttrs fileSize] < [bAttrs fileSize]) {
+          unlink(dFile.fileSystemRepresentation);
+          [fm copyItemAtPath:bFile toPath:dFile error:nil];
+          ZLog(@"[PAK_EXTRA] Upgraded %@ to real bundle file (%llu bytes)", f, [bAttrs fileSize]);
+          continue;
+        }
+      }
+      if (![fm fileExistsAtPath:dFile]) {
+        [fm copyItemAtPath:bFile toPath:dFile error:nil];
+        ZLog(@"[PAK_EXTRA] Copied real file %@ to Documents/pak", f);
+      }
     }
-    ZLog(@"[PAK_EXTRA] linked %lu files from ziru/pak_extra", (unsigned long)[fm contentsOfDirectoryAtPath:bundleExtra error:nil].count);
   }
 
   // Create _mobile_ios symlinks for livedata files, and mount all epic paks/ucas/utoc into pak/ and cpk into cpk/

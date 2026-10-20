@@ -1304,6 +1304,8 @@ Response z27Start() {
         ->put("uniform_list_away", z27Copy(act->getJSONObject("away_uniform")));
     ObjP awaySquad = z27AwaySquad(act);
     out->put("squad_data_away", awaySquad);
+    out->put("custom_stadium_user_id", (long long)0);
+    out->put("custom_stadium_list", newArr());
     ObjP ci = out->optJSONObject("commentary_info");
     if (ci) ci->put("pre_division", act->getInt("division"));
     logRequest("ZIRU_MATCH_START", "game=" + str(gid) + " squad=" + str(mainId) + " coach=" +

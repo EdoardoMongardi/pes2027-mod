@@ -161,6 +161,8 @@ Response handleZiruMyLeagueSpecialSquadV71() {
 Response handleZiruMyLeagueStartGameV71() {
   try {
     ObjP jo = loadZiruJsonAssetObject("responses/ZIRU_ML_START_GAME.json");
+    jo->put("custom_stadium_user_id", (long long)0);
+    jo->put("custom_stadium_list", newArr());
     ObjP templateAiSquad = jo->optJSONObject("squad_data_home") ? z27Copy(jo->optJSONObject("squad_data_home")) : nullptr;
     patchZiruMyLeagueCommonState(jo);
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
