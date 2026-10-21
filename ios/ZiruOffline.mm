@@ -63,6 +63,7 @@ static NSString* gFileIoLogPath;
 static NSString* gCrashLogPath;
 static NSString* gBundleAssets;
 static std::mutex gLogMu;
+static thread_local bool gDiagnosticIO = false;
 
 static void ZLog(NSString* fmt, ...) NS_FORMAT_FUNCTION(1, 2);
 static void ZLog(NSString* fmt, ...) {
@@ -76,13 +77,18 @@ static void ZLog(NSString* fmt, ...) {
   static NSDateFormatter* df;
   if (!df) { df = [NSDateFormatter new]; df.dateFormat = @"HH:mm:ss.SSS"; }
   NSString* line = [NSString stringWithFormat:@"%@ %@\n", [df stringFromDate:[NSDate date]], s];
+  bool previous = gDiagnosticIO; gDiagnosticIO = true;
   FILE* f = fopen(gLogPath.fileSystemRepresentation, "a");
   if (f) { fputs(line.UTF8String, f); fclose(f); }
+  gDiagnosticIO = previous;
 }
 
 static void logSink(int level, const char* tag, const char* msg) {
-  if (level >= 2) ZLog(@"%s %s", tag, msg);
+  ZLog(@"[level=%d] %s %s", level, tag, msg);
 }
+
+#include "SessionDiagnostics.inc"
+#include "EfootxiPython.inc"
 
 static zd::Layout layout() {
   zd::Layout L;
@@ -105,21 +111,21 @@ static void initPaths() {
   [[NSURL fileURLWithPath:gSupport] setResourceValue:@NO forKey:NSURLIsExcludedFromBackupKey error:nil];
   [[NSURL fileURLWithPath:[gSupport stringByAppendingPathComponent:@"GameData"]]
       setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
-  NSString* logDir = [gDocs stringByAppendingPathComponent:@"PES2027-logs"];
-  [fm createDirectoryAtPath:logDir withIntermediateDirectories:YES attributes:nil error:nil];
-  gLogPath = [logDir stringByAppendingPathComponent:@"ziru.log"];
-  gFileIoLogPath = [logDir stringByAppendingPathComponent:@"fileio.log"];
-  gCrashLogPath = [logDir stringByAppendingPathComponent:@"crash.log"];
-
-  // Log rotation (> 8MB)
-  for (NSString* p in @[gLogPath, gFileIoLogPath]) {
-    NSDictionary* a = [fm attributesOfItemAtPath:p error:nil];
-    if (a && [a fileSize] > (8u << 20)) {
-      NSString* old = [p stringByAppendingString:@".old"];
-      [fm removeItemAtPath:old error:nil];
-      [fm moveItemAtPath:p toPath:old error:nil];
-    }
-  }
+#ifdef EFOOTXI_IOS
+  gSessionRoot = [gDocs stringByAppendingPathComponent:@"Efootxi-logs"];
+#else
+  gSessionRoot = [gDocs stringByAppendingPathComponent:@"PES2027-logs"];
+#endif
+  NSDateFormatter* date = [NSDateFormatter new];
+  date.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+  date.dateFormat = @"yyyyMMdd-HHmmss-SSS";
+  NSString* session = [NSString stringWithFormat:@"%@-%@", [date stringFromDate:NSDate.date], NSUUID.UUID.UUIDString];
+  gSessionDir = [gSessionRoot stringByAppendingPathComponent:session];
+  [fm createDirectoryAtPath:gSessionDir withIntermediateDirectories:YES attributes:nil error:nil];
+  gLogPath = [gSessionDir stringByAppendingPathComponent:@"adapter.log"];
+  gFileIoLogPath = [gSessionDir stringByAppendingPathComponent:@"fileio.log"];
+  gCrashLogPath = [gSessionDir stringByAppendingPathComponent:@"crash.log"];
+  [session writeToFile:[gSessionRoot stringByAppendingPathComponent:@"latest.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
   gBundleAssets = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru"];
   zs::setLogSink(logSink);
@@ -409,6 +415,8 @@ static void resolveAltName(char* buffer, size_t bufSize) {
 
 static const char* redirectPath(const char* path, char* buffer, size_t bufSize) {
   if (!path || !path[0] || !gDocsUTF8[0]) return path;
+  // The verified bundled iOS resources must not be redirected into an older cache.
+  if (strstr(path, ".app/efootxi/") || strstr(path, ".app/python/")) return path;
 
   // 1. Check for pak: /pak/ or pak/ or path ending with /pak or path == "pak"
   const char* p = strstr(path, "/pak/");
@@ -488,37 +496,43 @@ static int hook_open(const char *path, int oflag, ...) {
     va_start(args, oflag);
     mode_t mode = (mode_t)va_arg(args, int);
     va_end(args);
-    return orig_open ? orig_open(actual, oflag, mode) : -1;
+    int result = orig_open ? orig_open(actual, oflag, mode) : -1;
+    int code = errno; diagnosticIO("open", path, actual, result, result<0 ? code : 0); errno=code; return result;
   }
-  return orig_open ? orig_open(actual, oflag) : -1;
+  int result = orig_open ? orig_open(actual, oflag) : -1;
+  int code=errno; diagnosticIO("open", path, actual, result, result<0 ? code : 0); errno=code; return result;
 }
 
 static int hook_stat(const char *path, struct stat *buf) {
   if (!orig_stat) orig_stat = (int (*)(const char*, struct stat*))dlsym(RTLD_DEFAULT, "stat");
   char rpath[1024];
   const char* actual = redirectPath(path, rpath, sizeof(rpath));
-  return orig_stat ? orig_stat(actual, buf) : -1;
+  int result = orig_stat ? orig_stat(actual, buf) : -1;
+  int code=errno; diagnosticIO("stat", path, actual, result, result<0 ? code : 0); errno=code; return result;
 }
 
 static int hook_access(const char *path, int amode) {
   if (!orig_access) orig_access = (int (*)(const char*, int))dlsym(RTLD_DEFAULT, "access");
   char rpath[1024];
   const char* actual = redirectPath(path, rpath, sizeof(rpath));
-  return orig_access ? orig_access(actual, amode) : -1;
+  int result = orig_access ? orig_access(actual, amode) : -1;
+  int code=errno; diagnosticIO("access", path, actual, result, result<0 ? code : 0); errno=code; return result;
 }
 
 static FILE* hook_fopen(const char *filename, const char *mode) {
   if (!orig_fopen) orig_fopen = (FILE* (*)(const char*, const char*))dlsym(RTLD_DEFAULT, "fopen");
   char rpath[1024];
   const char* actual = redirectPath(filename, rpath, sizeof(rpath));
-  return orig_fopen ? orig_fopen(actual, mode) : NULL;
+  FILE* result = orig_fopen ? orig_fopen(actual, mode) : NULL;
+  int code=errno; diagnosticIO("fopen", filename, actual, result ? 0 : -1, result ? 0 : code); errno=code; return result;
 }
 
 static DIR* hook_opendir(const char *name) {
   if (!orig_opendir) orig_opendir = (DIR* (*)(const char*))dlsym(RTLD_DEFAULT, "opendir");
   char rpath[1024];
   const char* actual = redirectPath(name, rpath, sizeof(rpath));
-  return orig_opendir ? orig_opendir(actual) : NULL;
+  DIR* result = orig_opendir ? orig_opendir(actual) : NULL;
+  int code=errno; diagnosticIO("opendir", name, actual, result ? 0 : -1, result ? 0 : code); errno=code; return result;
 }
 
 // ---------------------------------------------------------------- NSFileManager swizzling
@@ -568,7 +582,7 @@ static zsv::OfflineServer& server() {
     cfg.livedataDir = livedataDir;
     cfg.dataDir = std::string(gSupport.fileSystemRepresentation) + "/Save";
     cfg.iosPlayerLayout = true;
-    cfg.logFile = std::string([gDocs stringByAppendingPathComponent:@"PES2027-logs/offline_server.log"].fileSystemRepresentation);
+    cfg.logFile = std::string([gSessionDir stringByAppendingPathComponent:@"offline_server.log"].fileSystemRepresentation);
     gServer.reset(new zsv::OfflineServer(cfg));
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ gServer->prewarmIosCommentary(); });
     gServer->startupAudit();
@@ -764,6 +778,8 @@ static NSData* bodyOf(NSURLRequest* r) {
   [self.client URLProtocol:self didReceiveResponse:hr cacheStoragePolicy:NSURLCacheStorageNotAllowed];
   if (data.length) [self.client URLProtocol:self didLoadData:data];
   [self.client URLProtocolDidFinishLoading:self];
+  gLastNetwork=CFAbsoluteTimeGetCurrent();
+  diagnosticEvent(@"native-network.jsonl", @{@"event":@"callbacks_done", @"path":self.request.URL.path ?: @"", @"status":@(status), @"bytes":@(data.length)});
   ZLog(@"[NET_DONE] %@ status=%ld bytes=%lu", self.request.URL.path, (long)status, (unsigned long)data.length);
 }
 
@@ -850,6 +866,23 @@ static NSData* bodyOf(NSURLRequest* r) {
 - (void)startLoading {
   NSURLRequest* rq = self.request;
   NSURL* url = rq.URL;
+  gLastNetwork = CFAbsoluteTimeGetCurrent();
+  diagnosticEvent(@"native-network.jsonl", @{@"event":@"begin", @"url":url.absoluteString ?: @"", @"method":rq.HTTPMethod ?: @"GET"});
+#ifdef EFOOTXI_IOS
+  if (!isCdnAssetURL(url)) {
+    NSString* path = url.path.length ? url.path : @"/";
+    if ([url.host.lowercaseString isEqualToString:@"d1ln4m3c7n87ju.cloudfront.net"])
+      path = [@"/livedata/" stringByAppendingString:url.lastPathComponent ?: @""];
+    NSData* body = bodyOf(rq) ?: [NSData data];
+    gRequestsActive.fetch_add(1);
+    NSInteger status=500; NSString* mime=@"application/octet-stream";
+    NSData* data = efootxiServe(rq.HTTPMethod ?: @"GET", path, body, &status, &mime);
+    gRequestsActive.fetch_sub(1); gLastNetwork=CFAbsoluteTimeGetCurrent();
+    [self finishWithStatus:status headers:@{@"Content-Type":mime, @"Content-Length":@(data.length).stringValue,
+      @"pes-custom-encrypt":@"AES256", @"Connection":@"close"} data:data];
+    return;
+  }
+#endif
   if (isCdnAssetURL(url)) {
     [self loadCdnAsset];
     return;
@@ -1615,7 +1648,7 @@ static BOOL dataReady(NSString** why) {
 - (void)viewDidLoad {
   [super viewDidLoad];
   self.view.backgroundColor = PESNight();
-  self.logNames = @[@"ziru.log", @"fileio.log", @"crash.log", @"offline_server.log"];
+  self.logNames = @[@"adapter.log", @"stdout-stderr.log", @"crash.log", @"network.jsonl"];
 
   UIView* topBar = [UIView new];
   topBar.translatesAutoresizingMaskIntoConstraints = NO;
@@ -1688,7 +1721,7 @@ static BOOL dataReady(NSString** why) {
   NSInteger idx = self.seg.selectedSegmentIndex;
   if (idx < 0 || idx >= (NSInteger)self.logNames.count) return;
   NSString* name = self.logNames[idx];
-  NSString* path = [gDocs stringByAppendingPathComponent:[NSString stringWithFormat:@"PES2027-logs/%@", name]];
+  NSString* path = [gSessionDir stringByAppendingPathComponent:name];
   NSError* err = nil;
   NSString* content = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&err];
   if (!content || !content.length) {
@@ -1703,7 +1736,7 @@ static BOOL dataReady(NSString** why) {
 
 - (void)onShare {
   NSMutableArray* urls = [NSMutableArray array];
-  NSString* dir = [gDocs stringByAppendingPathComponent:@"PES2027-logs"];
+  NSString* dir = gSessionDir;
   for (NSString* n in self.logNames) {
     NSString* p = [dir stringByAppendingPathComponent:n];
     if ([NSFileManager.defaultManager fileExistsAtPath:p]) {
@@ -2198,6 +2231,7 @@ static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* o
 }
 
 static void hookBecomeActive(id self, SEL _cmd, UIApplication* app) {
+  diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookBecomeActive"});
   if (gOrigBecomeActive) ((void (*)(id, SEL, id))gOrigBecomeActive)(self, _cmd, app);
   if (!gGameStarted && !gActiveImportVC) {
     NSString* why = nil;
@@ -2208,12 +2242,15 @@ static void hookBecomeActive(id self, SEL _cmd, UIApplication* app) {
   }
 }
 static void hookResignActive(id self, SEL _cmd, UIApplication* app) {
+  diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookResignActive"});
   if (gOrigResignActive) ((void (*)(id, SEL, id))gOrigResignActive)(self, _cmd, app);
 }
 static void hookEnterBg(id self, SEL _cmd, UIApplication* app) {
+  diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookEnterBg"});
   if (gOrigEnterBg) ((void (*)(id, SEL, id))gOrigEnterBg)(self, _cmd, app);
 }
 static void hookEnterFg(id self, SEL _cmd, UIApplication* app) {
+  diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookEnterFg"});
   if (gOrigEnterFg) ((void (*)(id, SEL, id))gOrigEnterFg)(self, _cmd, app);
 }
 
@@ -2221,6 +2258,7 @@ static void hookEnterFg(id self, SEL _cmd, UIApplication* app) {
 __attribute__((constructor)) static void ziruInit() {
   @autoreleasepool {
     initPaths();
+    initSessionDiagnostics();
     initCrashHandler();
     zjersey::install();
     zfont::install([gBundleAssets stringByAppendingPathComponent:@"fonts"].fileSystemRepresentation,

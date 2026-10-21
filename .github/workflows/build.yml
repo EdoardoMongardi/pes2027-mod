@@ -1,7 +1,7 @@
 name: build-dylib
 on:
   push:
-    branches: [main, feature/online-1.1, community-mod-engine, codex/repair-data-loss-20261020, codex/fix-liveupdate-20261021]
+    branches: [main, feature/online-1.1, community-mod-engine, codex/repair-data-loss-20261020, codex/fix-liveupdate-20261021, codex/efootxi-ios-20261021]
     tags: ['v*']
   workflow_dispatch:
 permissions:
@@ -20,6 +20,7 @@ jobs:
         run: ./build/gameplaytest
       - name: native iOS database table conversion
         run: |
+          python3 -m unittest discover -s test -p 'efootxi_bridge_test.py' -v
           python3 -m unittest discover -s test -p 'ios_tables_test.py' -v
           python3 -m unittest discover -s test -p 'cpk_merge_test.py' -v
           python3 -m unittest discover -s test -p 'iostore_test.py' -v
@@ -51,17 +52,28 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: download pinned Python 3.12 iOS SDK for Efootxi
+        if: github.ref == 'refs/heads/codex/efootxi-ios-20261021'
+        run: |
+          curl --fail --location --retry 3 https://github.com/beeware/Python-Apple-support/releases/download/3.12-b11/Python-3.12-iOS-support.b11.tar.gz -o /tmp/python-ios.tar.gz
+          echo '795d2904fbd36e3c49eccbf456bf09fdc569248395c023220704c2cf8be8b7cd  /tmp/python-ios.tar.gz' | shasum -a 256 -c -
+          mkdir -p /tmp/python-ios
+          tar -xzf /tmp/python-ios.tar.gz -C /tmp/python-ios
       - name: build ZiruOffline.dylib (arm64, iOS 15+)
         run: |
           set -e
           mkdir -p build
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          EXTRA=()
+          if [ "$GITHUB_REF" = refs/heads/codex/efootxi-ios-20261021 ]; then
+            EXTRA=(-DEFOOTXI_IOS -F/tmp/python-ios/Python.xcframework/ios-arm64 -framework Python -Wl,-rpath,@loader_path)
+          fi
           xcrun --sdk iphoneos clang++ -arch arm64 -isysroot "$SDK" -miphoneos-version-min=15.0 \
             -std=c++17 -O2 -fobjc-arc -fvisibility=hidden -Wall -Wno-unused \
             -dynamiclib -install_name @executable_path/Frameworks/ZiruOffline.dylib \
             ios/ZiruOffline.mm ios/ZiruFontPak.mm ios/ZiruWebView.mm core/jvalue.cpp core/codec.cpp core/store.cpp core/server.cpp core/zipread.cpp core/datapack.cpp core/modpack.cpp \
             -framework Foundation -framework UIKit -framework UniformTypeIdentifiers -framework Security -framework QuartzCore -framework CoreGraphics -framework WebKit \
-            -lz -lsqlite3 -o build/ZiruOffline.dylib 2> build/clang.log || {
+            "${EXTRA[@]}" -lz -lsqlite3 -o build/ZiruOffline.dylib 2> build/clang.log || {
               cat build/clang.log
               exit 1; }
           grep -E "warning:" build/clang.log | head -30 | while IFS= read -r l; do echo "::notice::$l"; done || true
