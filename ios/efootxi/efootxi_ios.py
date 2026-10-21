@@ -82,8 +82,16 @@ def configure(bundle, support, session):
     _session.mkdir(parents=True, exist_ok=True)
     (_session / "requests").mkdir(exist_ok=True)
     # Unbuffered stderr/stdout are also captured at the native file-descriptor level.
-    sys.stdout.reconfigure(line_buffering=True)
-    sys.stderr.reconfigure(line_buffering=True)
+    if sys.stdout is not None:
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except Exception:
+            pass
+    if sys.stderr is not None:
+        try:
+            sys.stderr.reconfigure(line_buffering=True)
+        except Exception:
+            pass
     import faulthandler
     faulthandler.enable(all_threads=True)
     event("python.jsonl", event="initializing", python=sys.version, bundle=bundle)

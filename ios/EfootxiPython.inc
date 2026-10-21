@@ -48,6 +48,7 @@ static void initializeEfootxi() {
   PyConfig config; PyConfig_InitIsolatedConfig(&config);
   config.write_bytecode=0; config.install_signal_handlers=0; config.parse_argv=0; config.use_environment=0;
   config.buffered_stdio=0;
+  config.configure_c_stdio=1;
   PyStatus status = PyConfig_SetBytesString(&config, &config.home, python.fileSystemRepresentation);
   if (!PyStatus_Exception(status)) status = PyConfig_SetBytesString(&config, &config.executable, NSBundle.mainBundle.executablePath.fileSystemRepresentation);
   for (NSString* path in @[[python stringByAppendingPathComponent:@"lib/python3.12"],
@@ -68,7 +69,18 @@ static void initializeEfootxi() {
   if (result) {
     Py_DECREF(result); gPythonServe = PyObject_GetAttrString(module, "serve");
   }
-  if (!gPythonServe) { PyErr_Print(); gPythonFailure=@"Efootxi startup failed; see stdout-stderr.log"; }
+  if (!gPythonServe) {
+    PyObject *type=nullptr, *value=nullptr, *traceback=nullptr;
+    PyErr_Fetch(&type, &value, &traceback);
+    PyErr_NormalizeException(&type, &value, &traceback);
+    PyObject* message = value ? PyObject_Str(value) : nullptr;
+    NSString* errStr = message ? [NSString stringWithUTF8String:PyUnicode_AsUTF8(message)] : @"Unknown startup error";
+    Py_XDECREF(message);
+    gPythonFailure = [NSString stringWithFormat:@"Efootxi startup failed: %@", errStr];
+    ZLog(@"[EFOOTXI] Python startup error: %@", errStr);
+    PyErr_Restore(type, value, traceback);
+    PyErr_Print();
+  }
   Py_XDECREF(module);
   PyEval_SaveThread();
   ZLog(@"[EFOOTXI] Python startup %@", gPythonServe ? @"ready" : gPythonFailure);

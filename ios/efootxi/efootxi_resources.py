@@ -107,6 +107,57 @@ def install(bundle, root, emit):
             emit('already_installed', files=len(prior['files']))
             return prior
     root.mkdir(parents=True, exist_ok=True)
+    pak_dir = root / 'pak'
+    cpk_dir = root / 'cpk'
+    orig_pak = root.parent / 'pak'
+    orig_cpk = root.parent / 'cpk'
+
+    def has_game_data(p, c):
+        return (p.is_dir() and ((p / 'pc0000_mobile_and.pak').exists() or (p / 'pc0000_mobile_ios.pak').exists() or (p / 'pc1000_mobile_and.pak').exists())) or \
+               (c.is_dir() and ((c / 'dt200_mobile_all.cpk').exists() or (c / 'dt500_mobile_all.cpk').exists()))
+
+    if has_game_data(orig_pak, orig_cpk) and not has_game_data(pak_dir, cpk_dir):
+        emit('detecting_manual_data', message='Phát hiện data người dùng thêm thủ công trong Documents/pak')
+        pak_dir.mkdir(parents=True, exist_ok=True)
+        for f in orig_pak.iterdir():
+            dest = pak_dir / f.name
+            if not dest.exists():
+                try: os.link(f, dest)
+                except Exception: shutil.copy2(f, dest)
+        if orig_cpk.is_dir():
+            cpk_dir.mkdir(parents=True, exist_ok=True)
+            for f in orig_cpk.iterdir():
+                dest = cpk_dir / f.name
+                if not dest.exists():
+                    try: os.link(f, dest)
+                    except Exception: shutil.copy2(f, dest)
+
+    if has_game_data(pak_dir, cpk_dir):
+        emit('manual_data_found', message='Data đã có sẵn trong thư mục; đang kiểm tra và liên kết iOS...')
+        aliases = []
+        for group, directory in (('pak', pak_dir), ('cpk', cpk_dir)):
+            if not directory.is_dir():
+                continue
+            for source in list(directory.iterdir()):
+                if source.suffix not in ALLOWED or '_mobile_and' not in source.name:
+                    continue
+                alias = source.with_name(source.name.replace('_mobile_and', '_mobile_ios'))
+                if not alias.exists():
+                    try: os.link(source, alias)
+                    except Exception: shutil.copy2(source, alias)
+                aliases.append(dict(source=group+'/'+source.name, alias=group+'/'+alias.name,
+                                    bytes=source.stat().st_size, platform_compatibility='manual user data'))
+        files = [dict(path=str(p.relative_to(root)).replace('\\','/'), bytes=p.stat().st_size)
+                 for group in ('pak','cpk') if (root/group).is_dir() for p in sorted((root/group).iterdir()) if p.is_file()]
+        result = dict(installer_sha256=fingerprint, files=files, aliases=aliases,
+                      mode='China data experiment (manual data)',
+                      native_china_client=False, cooked_assets_converted=False)
+        temp = marker.with_suffix('.tmp')
+        temp.write_text(json.dumps(result, indent=2), encoding='utf-8')
+        os.replace(temp, marker)
+        emit('installed', files=len(files), aliases=aliases, compatibility='manual user data ready')
+        return result
+
     staging = root / '.china-staging'
     staging.mkdir(exist_ok=True)
     cache = root / '.downloads'
