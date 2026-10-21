@@ -13,6 +13,7 @@ import time
 import urllib.request
 import zipfile
 import re
+import ssl
 
 ALLOWED = {'.pak', '.ucas', '.utoc', '.cpk'}
 
@@ -29,7 +30,7 @@ def safe_name(name):
     return p.name
 
 
-def download(url, destination, expected, size, emit):
+def download(url, destination, expected, size, emit, ca_file=None):
     if destination.exists() and destination.stat().st_size == size and digest(destination) == expected:
         return
     partial = destination.with_suffix(destination.suffix + '.part')
@@ -38,7 +39,8 @@ def download(url, destination, expected, size, emit):
     if offset:
         headers['Range'] = 'bytes=%d-' % offset
     emit('download_begin', url=url, downloaded=offset, total=size)
-    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as response:
+    context = ssl.create_default_context(cafile=str(ca_file)) if ca_file else None
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60, context=context) as response:
         append = bool(offset and response.status == 206)
         if append and not response.headers.get('Content-Range', '').startswith('bytes %d-' % offset):
             raise ValueError('Unexpected resumed Content-Range')
@@ -119,7 +121,8 @@ def install(bundle, root, emit):
     extract(base, config['base']['entries'], staging, emit)
     for item in config['remote']['files']:
         destination = cache / safe_name(item['name'])
-        download(config['base_url'] + item['name'], destination, item['sha256'], item['bytes'], emit)
+        download(config['base_url'] + item['name'], destination, item['sha256'], item['bytes'], emit,
+                 ca_file=bundle / 'bridge/cacert.pem')
         extract(destination, item['entries'], staging, emit)
     aliases = []
     for group in ('pak', 'cpk'):
@@ -211,5 +214,8 @@ def install_native_live(bundle, root, emit):
                 if digest(link) == record['sha256']:
                     continue
                 os.replace(link, link.with_name(link.name + '.previous-' + str(time.time_ns())))
-            os.symlink('../livedata/' + source.name, link)
+            try:
+                os.symlink('../livedata/' + source.name, link)
+            except OSError:
+                shutil.copy2(target, link)
     emit('native_livedata_ready', files=len(records))
