@@ -1,1 +1,18 @@
-{"dt870_mobile_and.cpk": {"original_sha256": "fce1f90f65e48c4f99c5654a4ca56c917663d6033f6adc16a9014f5786a93259", "sha256": "8a2a77254d5b86f35feb2111eb24a689c5b362167eac2af8a07c24318a2136ff", "changes": [{"table": "PlayerSkill.bin", "before": 7488, "after": 288, "records": 72}, {"table": "Playstyle.bin", "before": 6048, "after": 144, "records": 36}]}}
+{
+  "dt870_mobile_and.cpk": {
+    "sha256": "8a2a77254d5b86f35feb2111eb24a689c5b362167eac2af8a07c24318a2136ff",
+    "original_sha256": [
+      "b35a01a1c58b39c65abcdf66b3af95f9c35e7f4f463834ab77aa07052ab06b6e",
+      "fce1f90f65e48c4f99c5654a4ca56c917663d6033f6adc16a9014f5786a93259",
+      "b6121f5cce4bf1c397c275a54f0fc3fcea8516850b30e114b1aec684b374069f"
+    ]
+  },
+  "dt870_mobile_ios.cpk": {
+    "sha256": "8a2a77254d5b86f35feb2111eb24a689c5b362167eac2af8a07c24318a2136ff",
+    "original_sha256": [
+      "b35a01a1c58b39c65abcdf66b3af95f9c35e7f4f463834ab77aa07052ab06b6e",
+      "fce1f90f65e48c4f99c5654a4ca56c917663d6033f6adc16a9014f5786a93259",
+      "b6121f5cce4bf1c397c275a54f0fc3fcea8516850b30e114b1aec684b374069f"
+    ]
+  }
+}

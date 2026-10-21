@@ -740,7 +740,7 @@ void patchLocalLivedataUrls(const ObjP& jo) {
       if (!activeDt870Hash.empty()) {
         version->put("dt870Hash", activeDt870Hash)->put("dt870FileSize", (long long)activeDt870Stat.st_size);
       } else {
-        version->put("dt870Hash", "b35a01a1c58b39c65abcdf66b3af95f9c35e7f4f463834ab77aa07052ab06b6e")->put("dt870FileSize", 9043968LL);
+        version->put("dt870Hash", "8a2a77254d5b86f35feb2111eb24a689c5b362167eac2af8a07c24318a2136ff")->put("dt870FileSize", 9312212LL);
       }
       if (list->length() == 0) {
         version->put("dt880", newArr());
