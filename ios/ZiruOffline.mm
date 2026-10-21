@@ -879,8 +879,11 @@ static NSData* bodyOf(NSURLRequest* r) {
     NSInteger status=500; NSString* mime=@"application/octet-stream";
     NSData* data = efootxiServe(rq.HTTPMethod ?: @"GET", path, body, &status, &mime);
     gRequestsActive.fetch_sub(1); gLastNetwork=CFAbsoluteTimeGetCurrent();
-    [self finishWithStatus:status headers:@{@"Content-Type":mime, @"Content-Length":@(data.length).stringValue,
-      @"pes-custom-encrypt":@"AES256", @"Connection":@"close"} data:data];
+    NSMutableDictionary* responseHeaders=[@{@"Content-Type":mime, @"Content-Length":@(data.length).stringValue,
+      @"Connection":@"close"} mutableCopy];
+    if (status==200 && [mime isEqualToString:@"application/x-msgpack"])
+      responseHeaders[@"pes-custom-encrypt"]=@"AES256";
+    [self finishWithStatus:status headers:responseHeaders data:data];
     return;
   }
 #endif
