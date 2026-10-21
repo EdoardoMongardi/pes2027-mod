@@ -1,4 +1,4 @@
-// ZiruOffline.dylib — loaded into eFootball iOS 11.1.1 (PESmobile).
+﻿// ZiruOffline.dylib — loaded into eFootball iOS 11.1.1 (PESmobile).
 //  * Runs the C++ port of the Ziru offline server in-process.
 //  * Redirects the game's HttpImpl* requests to https://127.0.0.1:8085 (same as Ziru's Android HttpImpl patch)
 //    and answers them through an NSURLProtocol — no sockets, no TLS.
@@ -1050,10 +1050,45 @@ static void startFpsMeter() {
   dispatch_resume(t);
 }
 
-// Preserve the engine's original command line and renderer defaults. Rendering
-// CVars and launch options cannot be safely reset with FCommandLine::Set.
+// Inject commandline into UE4 engine for 120 FPS and correct color settings.
+// FCommandLine::Set / Append are resolved via symbol or known offset.
+typedef void (*FCommandLineSetFn)(const char16_t*);
+typedef void (*FCommandLineAppendFn)(const char16_t*);
 static void setupGraphicsEnhancements() {
-  ZLog(@"[GRAPHICS] Keeping native engine command line and color settings");
+  intptr_t slide = _dyld_get_image_vmaddr_slide(0);
+  FCommandLineSetFn setFn = nullptr;
+  FCommandLineAppendFn appendFn = nullptr;
+  if (slide != 0) {
+    setFn = (FCommandLineSetFn)(0x101825828 + slide);
+    appendFn = (FCommandLineAppendFn)(0x101825d60 + slide);
+  }
+  if (!setFn) setFn = (FCommandLineSetFn)dlsym(RTLD_DEFAULT, "_ZN12FCommandLine3SetEPKDs");
+  if (!appendFn) appendFn = (FCommandLineAppendFn)dlsym(RTLD_DEFAULT, "_ZN12FCommandLine6AppendEPKDs");
+
+  // Check if user has a custom commandline override in Documents/ue4commandline.txt
+  NSString* userCmdPath = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
+  NSString* targetCmd = @"-t.MaxFPS=120";
+  if ([NSFileManager.defaultManager fileExistsAtPath:userCmdPath]) {
+    NSString* customArgs = [NSString stringWithContentsOfFile:userCmdPath encoding:NSUTF8StringEncoding error:nil];
+    if (customArgs && customArgs.length > 0) targetCmd = customArgs;
+  }
+  targetCmd = [targetCmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if (![targetCmd hasPrefix:@" "]) targetCmd = [@" " stringByAppendingString:targetCmd];
+
+  std::u16string u16(targetCmd.length + 1, u'\0');
+  for (NSUInteger i = 0; i < targetCmd.length; i++) {
+    u16[i] = (char16_t)[targetCmd characterAtIndex:i];
+  }
+
+  if (setFn) {
+    setFn(u16.data());
+    ZLog(@"[GRAPHICS] FCommandLine::Set replaced commandline with: '%@'", targetCmd);
+  } else if (appendFn) {
+    appendFn(u16.data());
+    ZLog(@"[GRAPHICS] FCommandLine::Append applied commandline: '%@'", targetCmd);
+  } else {
+    ZLog(@"[GRAPHICS] FCommandLine::Append symbol not resolved -- using bundle ue4commandline.txt preset");
+  }
 }
 
 // ---------------------------------------------------------------- launch gating
