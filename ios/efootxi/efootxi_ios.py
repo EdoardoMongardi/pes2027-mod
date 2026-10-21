@@ -54,7 +54,8 @@ def _manifest(value):
         if isinstance(result.get("livedata_list"), list) and "version_file" in result:
             version = json.loads(result["version_file"])
             version["version"] = max(int(version.get("version", 0)), 2026102102)
-            # Retain the resource compatibility target captured with this release.
+            # Native iOS IsPassAppVer rejects the Android release's 6.1.0 target.
+            version.pop("targetAppVersion", None)
             version["dt870Hash"] = _native_live["dt870_mobile_ios.cpk"]["sha256"]
             version["dt870FileSize"] = _native_live["dt870_mobile_ios.cpk"]["size"]
             version["dt880"] = []
@@ -120,7 +121,7 @@ def _resource(path):
         return 403, "text/plain", b"Invalid resource path"
     if not p.is_file():
         # The release also serves generated banners from its outputs folder.
-        for directory in ("outputs/efootball", "outputs/reference"):
+        for directory in ("livedata", "outputs/efootball", "outputs/reference"):
             candidate = (Path(_gateway._root) / directory / relative).resolve()
             if candidate.is_relative_to((Path(_gateway._root) / directory).resolve()) and candidate.is_file():
                 p = candidate

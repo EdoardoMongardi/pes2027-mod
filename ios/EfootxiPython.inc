@@ -1,7 +1,7 @@
 // CPython 3.12 embedded bridge. Runtime/assets are assembled locally from pinned inputs.
 #ifdef EFOOTXI_IOS
 #define PY_SSIZE_T_CLEAN
-#include <Python.h>
+#include <Python/Python.h>
 #include <CommonCrypto/CommonCryptor.h>
 
 static PyObject* nativeAES(PyObject*, PyObject* args) {

@@ -1,6 +1,5 @@
 // Local diagnostics. Every launch gets a new directory; no history is deleted.
 #include <mach/thread_act.h>
-#include <mach/mach_vm.h>
 #include <mach/arm/thread_status.h>
 #include <pthread.h>
 #include <errno.h>
@@ -77,8 +76,8 @@ static void diagnosticSnapshot(NSString* reason) {
           NSMutableArray* frames = [NSMutableArray arrayWithObjects:@(pc), @(lr), nil];
           // Live, unsuspended samples: frame-pointer walk is best effort, never a complete unwind.
           for (int j = 0; j < 48 && fp >= sp && fp - sp < (16ull << 20) && !(fp & 15); ++j) {
-            uint64_t frame[2] = {}; mach_vm_size_t read = 0;
-            if (mach_vm_read_overwrite(mach_task_self(), fp, sizeof(frame), (mach_vm_address_t)frame, &read) != KERN_SUCCESS || read != sizeof(frame)) break;
+            uint64_t frame[2] = {}; vm_size_t read = 0;
+            if (vm_read_overwrite(mach_task_self(), (vm_address_t)fp, sizeof(frame), (vm_address_t)frame, &read) != KERN_SUCCESS || read != sizeof(frame)) break;
             if (!frame[1] || frame[0] <= fp || frame[0] - fp > (1ull << 20)) break;
             [frames addObject:@(frame[1])]; fp = frame[0];
           }

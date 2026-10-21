@@ -59,7 +59,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(version['dt880'][0]['ucas'], '1' * 64)
         self.assertEqual(version['dt880'][0]['utocFileSize'], 102)
         self.assertEqual(version['dt870FileSize'], 999)
-        self.assertEqual(version['targetAppVersion'], '6.1.0')
+        self.assertNotIn('targetAppVersion', version)
         self.assertTrue(all('_ios.' in v['name'] for v in result['livedata_list']))
 
     def test_binary_diagnostic_json_is_lossless(self):
