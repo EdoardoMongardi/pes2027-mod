@@ -722,10 +722,14 @@ ObjP z27State() {
   }
   z27PutMeta("z27_div10_reset_v3", "1");
   int div = std::max(1, std::min(10, z27Int("ziru_league_division", 10)));
+  int best = std::min(div, z27Int("ziru_league_best_division", div));
+  int initRating = div <= 3 ? (div == 3 ? 1420 : (div == 2 ? 1550 : 1850)) : 1000 + (10 - div) * 50;
   return newObj()
       ->put("division", div)
-      ->put("best", std::max(div, z27Int("ziru_league_best_division", div)))
+      ->put("best", best)
       ->put("point", z27Int("ziru_league_point", 0))
+      ->put("rating", z27Int("ziru_league_rating", initRating))
+      ->put("pre_rating", z27Int("ziru_league_rating", initRating))
       ->put("matches", z27Int("ziru_league_matches", 0))
       ->put("win", z27Int("ziru_league_win", 0))
       ->put("draw", z27Int("ziru_league_draw", 0))
@@ -750,17 +754,23 @@ void z27InfoState(ObjP jo, const ObjP& st) {
   ObjP li = nn(jo)->optJSONObject("league_info");
   if (li) jo = li;
   int d = st->getInt("division");
+  int rating = st->optInt("rating", d <= 3 ? (d == 3 ? 1420 : (d == 2 ? 1550 : 1850)) : 1000 + (10 - d) * 50);
+  int preRating = st->optInt("pre_rating", rating);
+  int pt = (d <= 3) ? rating : st->getInt("point");
+  int ptPromoted = (d == 3) ? 1500 : ((d == 2) ? 1800 : (d == 1 ? 30 : z27Promotion(d)));
+  int ptStaying = (d <= 3) ? 1400 : std::max(0, z27Promotion(d) - 5);
+  int ptRelegated = (d <= 3) ? 0 : std::max(0, z27Promotion(d) - 6);
   jo->put("current_division", d)
       ->put("personal_best_division", st->getInt("best"))
-      ->put("current_point", st->getInt("point"))
+      ->put("current_point", pt)
       ->put("round_match_count", std::max(0, std::min(st->optInt("matches"), 10)))
-      ->put("point_promoted", d == 1 ? 30 : z27Promotion(d))
-      ->put("point_staying", std::max(0, z27Promotion(d) - 5))
-      ->put("point_relegated", std::max(0, z27Promotion(d) - 6))
+      ->put("point_promoted", ptPromoted)
+      ->put("point_staying", ptStaying)
+      ->put("point_relegated", ptRelegated)
       ->put("can_skip", "NO")
       ->put("is_com_match", "YES")
-      ->put("rating", 0)
-      ->put("pre_rating", 0)
+      ->put("rating", rating)
+      ->put("pre_rating", preRating)
       ->put("is_first_enter", "NO")
       ->put("is_first_best_division", "NO")
       ->put("simple_ranking", newArr())
@@ -1395,19 +1405,46 @@ Response z27Result() {
       st->put(k, st->getInt(k) + 1);
       ObjP hist = z27History(act, req, a, b, res);
       st->put("sequence", st->getInt("sequence") + 1);
-      // The menu advertises this point target. Do not hold an already qualified
-      // player in the same division until all ten fixtures have been played.
-      bool roundEnded = nm >= 10 || (div > 1 && np >= z27Promotion(div));
-      if (roundEnded) {
-        int nd;
-        if (np < z27Promotion(div) || div <= 1) nd = (np >= std::max(0, z27Promotion(div) + (-5)) || div >= 10) ? div : div + 1;
-        else nd = div - 1;
+      // Handle rating progression
+      int defaultRating = div <= 3 ? (div == 3 ? 1420 : (div == 2 ? 1550 : 1850)) : 1000 + (10 - div) * 50;
+      int oldRating = st->optInt("rating", defaultRating);
+      int rGain = (res == "WIN") ? 30 : ((res == "DRAW") ? 5 : -15);
+      int newRating = std::max(1000, oldRating + rGain);
+      st->put("pre_rating", oldRating);
+      st->put("rating", newRating);
+
+      // Promotion logic:
+      // Div 4-10: 10 fixtures or target points
+      // Div 3: rating >= 1500 OR 20 points OR 3 wins
+      // Div 2: rating >= 1800 OR 22 points OR 4 wins
+      bool promoted = false;
+      if (div > 1) {
+        if (div > 3 && np >= z27Promotion(div)) promoted = true;
+        else if (div == 3 && (newRating >= 1500 || np >= z27Promotion(div) || st->getInt("win") >= 3)) promoted = true;
+        else if (div == 2 && (newRating >= 1800 || np >= z27Promotion(div) || st->getInt("win") >= 4)) promoted = true;
+      }
+      bool roundEnded = nm >= 10 || promoted;
+      int nd = div;
+      if (promoted) {
+        nd = div - 1;
+        st->put("division", nd)->put("best", std::min(st->getInt("best"), nd))->put("point", 0)->put("matches", 0)->put("win", 0)->put("draw", 0)->put("lose", 0);
+        if (nd == 2 && newRating < 1550) st->put("rating", 1550);
+        if (nd == 1 && newRating < 1850) st->put("rating", 1850);
+      } else if (nm >= 10) {
+        if (np >= std::max(0, z27Promotion(div) - 5) || div >= 10 || div <= 3) {
+          nd = div;
+        } else {
+          nd = div + 1;
+        }
         st->put("division", nd)->put("best", std::min(st->getInt("best"), nd))->put("point", 0)->put("matches", 0)->put("win", 0)->put("draw", 0)->put("lose", 0);
       }
       resp = nn(loadZiruJsonAssetObject("responses/ZIRU_GET_VSCOM_GAME_RESULT_TEMPLATE.json"));
       ObjP ge = resp->getJSONObject("game_end_result");
       ObjP mres = ge->getJSONObject("match_result");
-      mres->getJSONObject("player_data")->put("team_id", act->getJSONObject("home")->getInt("base_team_id"));
+      ObjP pdata = mres->getJSONObject("player_data");
+      pdata->put("team_id", act->getJSONObject("home")->getInt("base_team_id"));
+      pdata->put("rating", newRating);
+      pdata->put("oldrating", oldRating);
       ObjP an = ge->optJSONObject("analyst_get_game_result_info");
       if (an) an->put("advice_info_match_list", newArr());
       mres->put("game_res", res)
@@ -1420,9 +1457,10 @@ Response z27Result() {
         z27InfoState(lm, st);
         ObjP li = lm->optJSONObject("league_info");
         if (!li) li = lm;
-        li->put("is_promoted", st->getInt("division") < div ? "YES" : "NO")
-            ->put("is_relegated", st->getInt("division") > div ? "YES" : "NO")
-            ->put("is_staying", (!roundEnded || st->getInt("division") != div) ? "NO" : "YES");
+        li->put("is_promoted", promoted ? "YES" : "NO")
+            ->put("is_relegated", (roundEnded && nd > div) ? "YES" : "NO")
+            ->put("is_staying", (roundEnded && !promoted && nd == div) ? "YES" : "NO")
+            ->put("is_first_best_division", (promoted && nd <= st->getInt("best")) ? "YES" : "NO");
       }
       completed->put(key, true);
       ziruDb->saveMatchState(st->toString(), "z27_result_" + key, newObj()->put("history", hist)->put("response", z27Copy(resp))->toString());

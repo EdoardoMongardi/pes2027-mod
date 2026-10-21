@@ -52,7 +52,10 @@ Response handleZiruMyLeagueResultV71() {
           }
           int f = ziruLeagueLoadInt("ziru_myleague_fixture", 1) + 1;
           int mx = ziruMyLeagueMaxFixtureV80();
-          if (f > mx) f = mx;
+          if (f > mx) {
+            ziruDb->saveMeta("ziru_myleague_season_ended", "1");
+            f = mx + 1;
+          }
           ziruLeagueSaveInt("ziru_myleague_fixture", f);
         }
       }
@@ -899,6 +902,25 @@ void patchZiruMyLeaguePostMatchSeasonV82(const ObjP& jo) {
   ObjP em, sm;
   if (!ge || !(em = ge->optJSONObject("extra_match_result")) || !(sm = em->optJSONObject("season_match_result"))) return;
   patchZiruMyLeagueRankingV79(sm);
+  int f = ziruLeagueLoadInt("ziru_myleague_fixture", 1);
+  int mx = ziruMyLeagueMaxFixtureV80();
+  bool ended = (f > mx) || (loadMeta("ziru_myleague_season_ended") && *loadMeta("ziru_myleague_season_ended") == "1");
+  if (ended) {
+    sm->put("is_end_season", "YES");
+    int user = ziruLeagueLoadInt("ziru_myleague_team_id", 100);
+    ArrP rk = sm->optJSONArray("ranking");
+    bool champion = false;
+    if (rk && rk->length() > 0) {
+      ObjP top = rk->optJSONObject(0);
+      if (top && top->optInt("team_id") == user) champion = true;
+    }
+    sm->put("is_champion", champion ? "YES" : "NO");
+    sm->put("is_promote", "NO");
+    sm->put("is_relegate", "NO");
+  } else {
+    sm->put("is_end_season", "NO");
+    sm->put("is_champion", "NO");
+  }
 }
 
 void patchZiruMyLeagueRankingV79(const ObjP& jo) {
@@ -950,10 +972,18 @@ void patchZiruMyLeagueSeasonStateV74(const ObjP& jo) {
   if (!jo) return;
   try {
     int f = ziruLeagueLoadInt("ziru_myleague_fixture", 1);
+    int mx = ziruMyLeagueMaxFixtureV80();
     int team = ziruLeagueLoadInt("ziru_myleague_team_id", 100);
+    bool ended = (f > mx) || (loadMeta("ziru_myleague_season_ended") && *loadMeta("ziru_myleague_season_ended") == "1");
+    if (ended) {
+      jo->put("is_end_season", "YES");
+      jo->put("is_end_season_first_access", "YES");
+      jo->put("fixture", mx);
+    }
     ArrP sl = nn(loadZiruMyLeagueScheduleV79())->optJSONArray("schedule_list");
     ObjP fx;
-    if (sl && (fx = sl->optJSONObject(f - 1))) {
+    int fxIdx = std::max(0, std::min(f - 1, mx - 1));
+    if (sl && (fx = sl->optJSONObject(fxIdx))) {
       jo->put("is_boss_match", fx->optString("is_boss_match", "NO"));
       ArrP ml = fx->optJSONArray("match_list");
       if (ml) {

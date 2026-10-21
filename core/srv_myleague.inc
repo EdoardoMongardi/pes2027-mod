@@ -139,33 +139,40 @@ Response handleZiruMyLeagueEnterV71() {
   ziruMyLeagueSetActive(1);
   try {
     ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    int f = ziruLeagueLoadInt("ziru_myleague_fixture", 1);
+    int mx = ziruMyLeagueMaxFixtureV80();
+    bool ended = (f > mx) || (loadMeta("ziru_myleague_season_ended") && *loadMeta("ziru_myleague_season_ended") == "1");
+    int team = 0;
+    int compe = 0;
     if (req) {
-      int team = req->optInt("select_team_id", 0);
+      team = req->optInt("select_team_id", 0);
       if (team <= 0) team = req->optInt("team_id", 0);
-      int compe = req->optInt("select_compe_unit_id", 0);
+      compe = req->optInt("select_compe_unit_id", 0);
       if (compe <= 0) compe = req->optInt("league_compe_unit_id", 0);
-      if (team > 0) {
-        if (compe <= 0) compe = ziruMyLeagueInferCompetitionV80(team);
-        if (compe <= 0) compe = 113;
-        ziruLeagueSaveInt("ziru_myleague_team_id", team);
-        ziruLeagueSaveInt("ziru_myleague_compe_unit_id", compe);
-        ziruLeagueSaveInt("ziru_myleague_initialized", 1);
-        ziruLeagueSaveInt("ziru_myleague_fixture", 1);
-        ziruLeagueSaveInt("ziru_myleague_table_points", 0);
-        ziruLeagueSaveInt("ziru_myleague_table_wins", 0);
-        ziruLeagueSaveInt("ziru_myleague_table_draws", 0);
-        ziruLeagueSaveInt("ziru_myleague_table_losses", 0);
-        ziruLeagueSaveInt("ziru_myleague_table_gf", 0);
-        ziruLeagueSaveInt("ziru_myleague_table_ga", 0);
-        ziruDb->saveMeta("ziru_myleague_history_json", "[]");
-        ziruDb->saveMeta("ziru_myleague_last_result_rqid", "");
-        ziruDb->saveMeta("ziru_myleague_last_result", "");
-        ziruDb->saveMeta("ziru_myleague_last_gameend_reason", "");
-        ziruLeagueSaveInt("ziru_myleague_last_added_point", 0);
-        ziruMlResetTableV83();
-        ziruMlResetPlayerStatsV85();
-        zs::logi("OFFLINE_SERVER", "[ZIRU_V81_1_TEAM_SELECTED] team=" + str(team) + " compe=" + str(compe));
-      }
+    }
+    if (team > 0 || ended) {
+      if (team <= 0) team = ziruLeagueLoadInt("ziru_myleague_team_id", 100);
+      if (compe <= 0) compe = ziruMyLeagueInferCompetitionV80(team);
+      if (compe <= 0) compe = 113;
+      ziruLeagueSaveInt("ziru_myleague_team_id", team);
+      ziruLeagueSaveInt("ziru_myleague_compe_unit_id", compe);
+      ziruLeagueSaveInt("ziru_myleague_initialized", 1);
+      ziruLeagueSaveInt("ziru_myleague_fixture", 1);
+      ziruLeagueSaveInt("ziru_myleague_table_points", 0);
+      ziruLeagueSaveInt("ziru_myleague_table_wins", 0);
+      ziruLeagueSaveInt("ziru_myleague_table_draws", 0);
+      ziruLeagueSaveInt("ziru_myleague_table_losses", 0);
+      ziruLeagueSaveInt("ziru_myleague_table_gf", 0);
+      ziruLeagueSaveInt("ziru_myleague_table_ga", 0);
+      ziruDb->saveMeta("ziru_myleague_history_json", "[]");
+      ziruDb->saveMeta("ziru_myleague_last_result_rqid", "");
+      ziruDb->saveMeta("ziru_myleague_last_result", "");
+      ziruDb->saveMeta("ziru_myleague_last_gameend_reason", "");
+      ziruLeagueSaveInt("ziru_myleague_last_added_point", 0);
+      ziruDb->saveMeta("ziru_myleague_season_ended", "0");
+      ziruMlResetTableV83();
+      ziruMlResetPlayerStatsV85();
+      zs::logi("OFFLINE_SERVER", "[ZIRU_V81_1_SEASON_RESET] team=" + str(team) + " compe=" + str(compe));
     }
     if (!loadMeta("ziru_myleague_fixture")) ziruLeagueSaveInt("ziru_myleague_fixture", 1);
     if (!loadMeta("ziru_myleague_point")) ziruLeagueSaveInt("ziru_myleague_point", 9760);
@@ -266,7 +273,9 @@ Response handleZiruMyLeagueInfoV71() {
     nn(jo)->put("team_id", ziruLeagueLoadInt("ziru_myleague_team_id", 100));
     patchZiruMyLeagueAddedPointV83(jo);
     jo->put("expired_item_list", newArr());
-    ObjP sch = nn(nn(loadZiruMyLeagueScheduleV79())->optJSONArray("schedule_list"))->optJSONObject(f - 1);
+    int mx_info = ziruMyLeagueMaxFixtureV80();
+    int idx_info = std::max(0, std::min(f - 1, mx_info - 1));
+    ObjP sch = nn(nn(loadZiruMyLeagueScheduleV79())->optJSONArray("schedule_list"))->optJSONObject(idx_info);
     if (sch) {
       ArrP ml = sch->optJSONArray("match_list");
       int team = ziruLeagueLoadInt("ziru_myleague_team_id", 100);

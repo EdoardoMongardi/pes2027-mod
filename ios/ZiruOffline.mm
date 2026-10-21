@@ -1270,6 +1270,21 @@ static BOOL checkDirectFolderData(NSString** why) {
     }
   }
 
+  // Purge corrupt Android Vulkan stadium containers mistakenly copied or symlinked as iOS
+  for (NSString* stem in @[@"pc3001_mobile_ios", @"pc3011_mobile_ios"]) {
+    NSString* ucas = [pakDir stringByAppendingPathComponent:[stem stringByAppendingPathExtension:@"ucas"]];
+    NSDictionary* attrs = [fm attributesOfItemAtPath:ucas error:nil];
+    if (attrs) {
+      unsigned long long sz = [attrs fileSize];
+      if (sz == 257503552ULL || sz == 117250880ULL) {
+        ZLog(@"[STADIUM] Purging Android Vulkan stadium container %@ (size %llu) to prevent black screen", stem, sz);
+        unlink(ucas.fileSystemRepresentation);
+        unlink([pakDir stringByAppendingPathComponent:[stem stringByAppendingPathExtension:@"utoc"]].fileSystemRepresentation);
+        unlink([pakDir stringByAppendingPathComponent:[stem stringByAppendingPathExtension:@"pak"]].fileSystemRepresentation);
+      }
+    }
+  }
+
   // Do not purge packs or version metadata by filename. In particular pc3611
   // contains native face textures, and removing it breaks thousands of faces.
   // Do not overwrite the user's command line on each launch.
@@ -1363,6 +1378,8 @@ static BOOL checkDirectFolderData(NSString** why) {
   for (NSString* dir in allModDirs) {
     for (NSString* f in [fm contentsOfDirectoryAtPath:dir error:nil]) {
       if ([f containsString:@"_mobile_and"]) {
+        // NEVER symlink Android Vulkan stadiums to iOS Metal!
+        if ([f hasPrefix:@"pc3001"] || [f hasPrefix:@"pc3011"]) continue;
         NSString* iosName = [f stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"];
         NSString* dst = [dir stringByAppendingPathComponent:iosName];
         NSString* src = [dir stringByAppendingPathComponent:f];
