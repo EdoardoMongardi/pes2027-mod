@@ -1,4 +1,4 @@
-// Local diagnostics. Every launch gets a new directory; no history is deleted.
+// Local diagnostics. Keep the current run and one preceding run in the log folder.
 #include <mach/thread_act.h>
 #include <mach/arm/thread_status.h>
 #include <pthread.h>
@@ -9,6 +9,31 @@ static NSString* gSessionRoot;
 static char gCrashPathUTF8[2048];
 static std::atomic<double> gMainPulse{0}, gLastNetwork{0};
 static std::atomic<int> gRequestsActive{0};
+
+static NSString* rotateDiagnostics(NSString* root) {
+  NSFileManager* fm = NSFileManager.defaultManager;
+  NSString* previous = [root stringByAppendingPathComponent:@"previous-run"];
+  NSString* staging = [gSupport stringByAppendingPathComponent:@"PreviousDiagnostics"];
+  // Recover a rotation interrupted between the two renames.
+  if ([fm fileExistsAtPath:staging]) {
+    if (![fm fileExistsAtPath:root]) {
+      [fm createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
+      [fm moveItemAtPath:staging toPath:previous error:nil];
+    }
+    if ([fm fileExistsAtPath:staging]) {
+      // Preserve both sets if recovery cannot be completed; never truncate them.
+      return [root stringByAppendingPathComponent:[NSString stringWithFormat:@"recovery-%d-%.0f", getpid(), NSDate.date.timeIntervalSince1970]];
+    }
+  }
+  if ([fm contentsOfDirectoryAtPath:root error:nil].count) {
+    [fm removeItemAtPath:previous error:nil];
+    if (![fm moveItemAtPath:root toPath:staging error:nil])
+      return [root stringByAppendingPathComponent:[NSString stringWithFormat:@"launch-%d-%.0f", getpid(), NSDate.date.timeIntervalSince1970]];
+    [fm createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm moveItemAtPath:staging toPath:previous error:nil];
+  }
+  return root;
+}
 
 static void diagnosticEvent(NSString* name, NSDictionary* value) {
   if (!gSessionDir || gDiagnosticIO) return;
@@ -154,6 +179,7 @@ static void initSessionDiagnostics() {
   diagnosticEvent(@"session.jsonl", @{@"event":@"start", @"app":NSBundle.mainBundle.bundleIdentifier ?: @"",
     @"build":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"",
     @"os":NSProcessInfo.processInfo.operatingSystemVersionString, @"session":gSessionDir,
+    @"pid":@(getpid()), @"retention":@"current run plus previous-run; background events do not establish termination cause",
     @"coverage":@"adapter, in-process requests, Python, rebound file operations, stdout/stderr, self-process stack samples; OS unified logs and jetsam reports are external"});
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ diagnosticInventory(); collectEngineLogs(); diagnosticSnapshot(@"startup"); });
   dispatch_async(dispatch_get_main_queue(), ^{

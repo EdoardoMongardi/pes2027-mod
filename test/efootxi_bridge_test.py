@@ -68,6 +68,34 @@ class BridgeTests(unittest.TestCase):
         value = json.loads((self.bridge._session / 'binary.jsonl').read_text())
         self.assertEqual(base64.b64decode(value['payload']['$bytes_base64']), b'\x00\xff')
 
+    def test_countries_keep_identifiers_policy_and_use_readable_labels(self):
+        original = dict(country_list=[dict(country_code='MAC', country_name='澳门', privacy_action='AGREE', has_area='NO'),
+                                     dict(country_code='JPN', country_name='日本', privacy_action='AGREE')],
+                        age_verify_country_code_list=['JPN'], rqid=123)
+        result = self.bridge._manifest(original)
+        self.assertEqual(result['country_list'][0]['country_name'], 'Macao')
+        self.assertEqual(result['country_list'][1]['country_name'], 'Japan')
+        self.assertEqual(result['age_verify_country_code_list'], ['JPN'])
+        self.assertEqual(result['rqid'], 123)
+        for before, after in zip(original['country_list'], result['country_list']):
+            self.assertEqual({k:v for k,v in before.items() if k != 'country_name'},
+                             {k:v for k,v in after.items() if k != 'country_name'})
+        self.assertEqual(original['country_list'][0]['country_name'], '澳门')
+
+    def test_native_concatenated_banner_routes_serve_image_without_crypto(self):
+        image = b'\xff\xd8\xff\xe0JPEG'
+        self.bridge._gateway = type('Gateway', (), {'_root': self.bridge._bundle})()
+        (self.bridge._bundle / 'livedata/efootxi-home-players.jpg').write_bytes(image)
+        value = self.bridge._manifest({'banner_file_name': 'http://127.0.0.1:8085/livedata/efootxi-home-players.jpg?rev=123'})
+        self.assertEqual(value['banner_file_name'], '/efootxi/efootxi-home-players.jpg?rev=123')
+        for path in ('/prd' + value['banner_file_name'],
+                     '/prdhttp://127.0.0.1:8085/livedata/efootxi-home-players.jpg?rev=123',
+                     '/livedata/efootxi-home-players.jpg'):
+            self.assertEqual(self.bridge.serve('GET', path, b''), (200, 'image/jpeg', image))
+        self.assertEqual(self.bridge.serve('GET', '/prd/efootxi/unrecognized.jpg', b'')[0], 404)
+        self.assertEqual(self.bridge.serve('GET', '/missing', b'')[0], 404)
+        self.assertFalse(list((self.bridge._session / 'requests').glob('*.exception.txt')))
+
 
 if __name__ == '__main__':
     unittest.main()

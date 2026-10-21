@@ -22,6 +22,21 @@ _session = None
 _serial = 0
 _lock = threading.RLock()
 _native_live = None
+_country_names = json.loads(Path(__file__).with_name("country_names.json").read_text(encoding="utf-8"))
+_banner_names = frozenset(("efootxi-home-players.jpg", "efootxi-home-coaches.jpg"))
+
+
+def _resource_path(path):
+    """Accept native CDN-relative banners and the old malformed CDN + URL form."""
+    path = unquote(urlsplit(path).path)
+    if path.startswith("/livedata/"):
+        return path
+    name = path.rsplit("/", 1)[-1]
+    if name in _banner_names and (path.startswith("/prd/efootxi/") or
+            path.startswith("/efootxi/") or
+            path.startswith("/prdhttp://127.0.0.1:8085/livedata/")):
+        return "/livedata/" + name
+    return None
 
 
 def _json(value):
@@ -51,6 +66,21 @@ def _manifest(value):
     """Use genuine iOS CDN containers and hashes of the bytes we actually serve."""
     if isinstance(value, dict):
         result = {k: _manifest(v) for k, v in value.items()}
+        if isinstance(result.get("country_list"), list):
+            # The Android release supplies CJK labels; the installed iOS font
+            # replacement only covers Latin/Vietnamese. Preserve codes/policy.
+            for country in result["country_list"]:
+                if isinstance(country, dict):
+                    code = country.get("country_code")
+                    country["country_name"] = _country_names.get(code, code or country.get("country_name", ""))
+        banner = result.get("banner_file_name")
+        if isinstance(banner, str):
+            name = urlsplit(banner).path.rsplit("/", 1)[-1]
+            if name in _banner_names:
+                # iOS prepends its CDN root and /prd. Absolute URLs here are
+                # concatenated literally, not resolved as a URL.
+                query = urlsplit(banner).query
+                result["banner_file_name"] = "/efootxi/" + name + ("?" + query if query else "")
         if isinstance(result.get("livedata_list"), list) and "version_file" in result:
             version = json.loads(result["version_file"])
             version["version"] = max(int(version.get("version", 0)), 2026102102)
@@ -161,7 +191,7 @@ def prepare_data(mode, root, original_documents):
 
 
 def _resource(path):
-    relative = unquote(urlsplit(path).path).removeprefix("/livedata/")
+    relative = path.removeprefix("/livedata/")
     root = (_bundle / "livedata").resolve()
     p = (root / relative).resolve()
     if not p.is_relative_to(root):
@@ -178,7 +208,8 @@ def _resource(path):
         return 404, "text/plain", ("Missing resource: " + relative).encode()
     data = p.read_bytes()
     event("livedata.jsonl", event="served", path=path, actual=str(p), size=len(data), sha256=hashlib.sha256(data).hexdigest())
-    return 200, "application/octet-stream", data
+    mime = "image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else "application/octet-stream"
+    return 200, mime, data
 
 
 def serve(method, path, body):
@@ -190,8 +221,11 @@ def serve(method, path, body):
         start = time.monotonic()
         event("network.jsonl", event="begin", id=_serial, method=method, path=path, bytes=len(body))
         try:
-            if path.startswith("/livedata/"):
-                status, mime, response = _resource(path)
+            resource = _resource_path(path)
+            if resource is not None:
+                status, mime, response = _resource(resource)
+            elif method.upper() in ("GET", "HEAD") and "GateInfo" not in path:
+                status, mime, response = 404, "text/plain", b"Unknown local resource"
             else:
                 import pes_msg
                 if "GateInfo" in path:

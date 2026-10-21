@@ -28,6 +28,8 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <execinfo.h>
+#include <ctime>
 
 #import <dirent.h>
 
@@ -39,6 +41,9 @@ static int (*orig_stat)(const char *path, struct stat *buf);
 static int (*orig_access)(const char *path, int amode);
 static FILE* (*orig_fopen)(const char *filename, const char *mode);
 static DIR* (*orig_opendir)(const char *name);
+static void (*orig_exit)(int);
+static void (*orig__exit)(int);
+static void (*orig_abort)(void);
 
 #include "../core/datapack.hpp"
 #include "../core/modpack.hpp"
@@ -60,6 +65,7 @@ static NSString* gOriginalDocuments;
 static NSString* gEfootxiDataMode;
 static bool gEfootxiPrepared = false;
 static char gDocsUTF8[1024] = {0};
+static char gTerminationPathUTF8[2048] = {0};
 static NSString* gSupport;   // Library/Application Support/PES2027
 static NSString* gLogPath;
 static NSString* gFileIoLogPath;
@@ -134,16 +140,14 @@ static void initPaths() {
 #else
   gSessionRoot = [gDocs stringByAppendingPathComponent:@"PES2027-logs"];
 #endif
-  // Tu dong xoa log cu, chi giu 1 bo log duy nhat ghi de
-  NSArray* oldItems = [fm contentsOfDirectoryAtPath:gSessionRoot error:nil];
-  for (NSString* item in oldItems) {
-    [fm removeItemAtPath:[gSessionRoot stringByAppendingPathComponent:item] error:nil];
-  }
-  gSessionDir = gSessionRoot;
+  // A relaunch after a crash must not erase the request/stack that explains it.
+  gSessionDir = rotateDiagnostics(gSessionRoot);
   [fm createDirectoryAtPath:gSessionDir withIntermediateDirectories:YES attributes:nil error:nil];
   gLogPath = [gSessionDir stringByAppendingPathComponent:@"adapter.log"];
   gFileIoLogPath = [gSessionDir stringByAppendingPathComponent:@"fileio.log"];
   gCrashLogPath = [gSessionDir stringByAppendingPathComponent:@"crash.log"];
+  strncpy(gTerminationPathUTF8, [gSessionDir stringByAppendingPathComponent:@"termination.log"].fileSystemRepresentation,
+    sizeof(gTerminationPathUTF8)-1);
 
   gBundleAssets = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru"];
   zs::setLogSink(logSink);
@@ -195,6 +199,35 @@ static void initCrashHandler() {
   sigaction(SIGILL, &sa, NULL);
   sigaction(SIGFPE, &sa, NULL);
   sigaction(SIGTRAP, &sa, NULL);
+}
+
+// UE can terminate explicitly without producing an iOS exception report. Record
+// those calls separately from signals; neither establishes a user swipe gesture.
+// Only the main executable's imported symbols are rebound below.
+static void recordTermination(const char* operation, int status) {
+  int fd = gTerminationPathUTF8[0] ? open(gTerminationPathUTF8, O_CREAT|O_WRONLY|O_APPEND, 0644) : -1;
+  if (fd < 0) return;
+  (void)write(fd, operation, strlen(operation)); (void)write(fd, "\n", 1);
+  crashHex(fd, "unix_time=", (uint64_t)time(nullptr));
+  crashHex(fd, "status=", (uint64_t)status);
+  void* frames[64]; int count=backtrace(frames, 64);
+  for (int i=0; i<count; ++i) crashHex(fd, "frame=", (uintptr_t)frames[i]);
+  (void)fsync(fd); close(fd);
+}
+__attribute__((noreturn)) static void hook_exit(int status) {
+  recordTermination("main executable called exit", status);
+  if (orig_exit) orig_exit(status);
+  _exit(status);
+}
+__attribute__((noreturn)) static void hook__exit(int status) {
+  recordTermination("main executable called _exit", status);
+  if (orig__exit) orig__exit(status);
+  _exit(status);
+}
+__attribute__((noreturn)) static void hook_abort() {
+  recordTermination("main executable called abort", SIGABRT);
+  if (orig_abort) orig_abort();
+  abort();
 }
 
 // ---------------------------------------------------------------- fishhook (Mach-O symbol rebinding)
@@ -962,9 +995,12 @@ static NSData* bodyOf(NSURLRequest* r) {
   gLastNetwork = CFAbsoluteTimeGetCurrent();
   diagnosticEvent(@"native-network.jsonl", @{@"event":@"begin", @"url":url.absoluteString ?: @"", @"method":rq.HTTPMethod ?: @"GET"});
 #ifdef EFOOTXI_IOS
-  if (!isCdnAssetURL(url)) {
+  BOOL localBanner = [@[@"efootxi-home-players.jpg", @"efootxi-home-coaches.jpg"] containsObject:url.lastPathComponent] &&
+    ([url.path hasPrefix:@"/prd/efootxi/"] || [url.path hasPrefix:@"/efootxi/"] ||
+     [url.path hasPrefix:@"/prdhttp://127.0.0.1:8085/livedata/"]);
+  if (localBanner || !isCdnAssetURL(url)) {
     NSString* path = url.path.length ? url.path : @"/";
-    if ([url.host.lowercaseString isEqualToString:@"d1ln4m3c7n87ju.cloudfront.net"])
+    if (localBanner || [url.host.lowercaseString isEqualToString:@"d1ln4m3c7n87ju.cloudfront.net"])
       path = [@"/livedata/" stringByAppendingString:url.lastPathComponent ?: @""];
     NSData* body = bodyOf(rq) ?: [NSData data];
     gRequestsActive.fetch_add(1);
@@ -1179,39 +1215,30 @@ static void startFpsMeter() {
   dispatch_resume(t);
 }
 
-// Inject commandline into UE4 engine for 120 FPS and correct color settings.
+// Keep the frame limit; let the game's cooked shaders select their color path.
 // Primary strategy: write Documents/ue4commandline.txt early (before engine reads it).
 // Fallback: FCommandLine::Set / Append via symbol or known offset.
 typedef void (*FCommandLineSetFn)(const char16_t*);
 typedef void (*FCommandLineAppendFn)(const char16_t*);
 
-// Default commandline with Filmic tonemapper and vivid colors.
-// -r.TonemapperFilm=1         -> Filmic tonemapper (rich, saturated)
-// -r.MobileHDR=1              -> Enable HDR rendering path on mobile
-// -r.Color.Saturation=1.3     -> +30% saturation vs flat default
-// -r.Color.Contrast=1.05      -> Slight contrast boost
-// -r.Color.Mid=0.5            -> Neutral midtones
-// -r.TonemapperGamma=2.2      -> Correct gamma
-static NSString* const kDefaultCommandLine = @"-t.MaxFPS=120 -r.TonemapperFilm=1 -r.MobileHDR=1 -r.Color.Saturation=1.3 -r.Color.Contrast=1.05 -r.Color.Mid=0.5 -r.TonemapperGamma=2.2";
+static NSString* const kDefaultCommandLine = @"-t.MaxFPS=120";
 
 static void setupGraphicsEnhancements() {
   NSString* userCmdPath = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
   NSFileManager* fm = NSFileManager.defaultManager;
   
-  // Build target commandline: use user's custom file if it contains Tonemapper flags;
-  // otherwise write our defaults so the engine reads vivid color settings naturally.
-  NSString* targetCmd = kDefaultCommandLine;
-  if ([fm fileExistsAtPath:userCmdPath]) {
-    NSString* existing = [NSString stringWithContentsOfFile:userCmdPath encoding:NSUTF8StringEncoding error:nil];
-    NSString* trimmed = [existing stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    // User has customised — keep their settings as-is
-    if (trimmed.length > 0 && [trimmed containsString:@"-r.TonemapperFilm"]) {
-      targetCmd = trimmed;
-      ZLog(@"[GRAPHICS] Keeping user commandline: '%@'", targetCmd);
-    } else if (trimmed.length > 0 && [trimmed hasPrefix:@"-t."]) {
-      // Old file only has MaxFPS — upgrade it with color flags
-      targetCmd = [NSString stringWithFormat:@"%@ -r.TonemapperFilm=1 -r.MobileHDR=1 -r.Color.Saturation=1.3 -r.Color.Contrast=1.05 -r.Color.Mid=0.5 -r.TonemapperGamma=2.2", trimmed];
-    }
+  NSString* existing = [NSString stringWithContentsOfFile:userCmdPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
+  // Migrate the previous adapter's forced Film/HDR/gamma settings. Preserve
+  // unrelated switches rather than replacing the whole user's command line.
+  NSRegularExpression* forced = [NSRegularExpression regularExpressionWithPattern:
+    @"(?i)(?<!\\S)-r\\.(?:TonemapperFilm|MobileHDR|Color\\.(?:Saturation|Contrast|Mid)|TonemapperGamma)=[^\\s]+"
+    options:0 error:nil];
+  NSString* cleaned = [forced stringByReplacingMatchesInString:existing options:0 range:NSMakeRange(0, existing.length) withTemplate:@""];
+  NSString* targetCmd = [cleaned stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+  if (!targetCmd.length) targetCmd = kDefaultCommandLine;
+  if (![existing isEqualToString:cleaned]) {
+    [existing writeToFile:[gSessionDir stringByAppendingPathComponent:@"previous-ue4commandline.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    ZLog(@"[GRAPHICS] Removed adapter color overrides; using the game's native color/shader defaults");
   }
   // Write file — engine reads this on next applicationDidFinishLaunching
   NSError* writeErr = nil;
@@ -1246,7 +1273,7 @@ static void setupGraphicsEnhancements() {
     appendFn(u16.data());
     ZLog(@"[GRAPHICS] FCommandLine::Append injected: '%@'", injectCmd);
   } else {
-    ZLog(@"[GRAPHICS] FCommandLine::Set not resolved — color settings applied via ue4commandline.txt only");
+    ZLog(@"[GRAPHICS] FCommandLine::Set not resolved; using ue4commandline.txt");
   }
 }
 
@@ -1486,8 +1513,7 @@ static BOOL checkDirectFolderData(NSString** why) {
   // Resource repair is hash-authorized above. Pack IDs alone do not authorize
   // deleting user data, including additional player packs.
 
-  // ue4commandline.txt color settings are managed by setupGraphicsEnhancements() early
-  // in the constructor. Do NOT strip Tonemapper/Gamma flags here — they are intentional.
+  // setupGraphicsEnhancements migrates old forced color settings before startup.
 
   // Native character containers belong in pak/, including the face textures.
   for (NSString* core in @[@"pc3600", @"pc3611"]) {
@@ -2390,6 +2416,9 @@ __attribute__((constructor)) static void ziruInit() {
     orig_access = (int (*)(const char*, int))dlsym(RTLD_DEFAULT, "access");
     orig_fopen = (FILE* (*)(const char*, const char*))dlsym(RTLD_DEFAULT, "fopen");
     orig_opendir = (DIR* (*)(const char*))dlsym(RTLD_DEFAULT, "opendir");
+    orig_exit = (void (*)(int))dlsym(RTLD_DEFAULT, "exit");
+    orig__exit = (void (*)(int))dlsym(RTLD_DEFAULT, "_exit");
+    orig_abort = (void (*)(void))dlsym(RTLD_DEFAULT, "abort");
 
     // Register commentary protection & pak/cpk file redirection hooks via fishhook
     struct z_rebinding rebindings[] = {
@@ -2401,6 +2430,9 @@ __attribute__((constructor)) static void ziruInit() {
       {"access", (void*)hook_access, (void**)&orig_access},
       {"fopen", (void*)hook_fopen, (void**)&orig_fopen},
       {"opendir", (void*)hook_opendir, (void**)&orig_opendir},
+      {"exit", (void*)hook_exit, (void**)&orig_exit},
+      {"_exit", (void*)hook__exit, (void**)&orig__exit},
+      {"abort", (void*)hook_abort, (void**)&orig_abort},
     };
     z_rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
 
