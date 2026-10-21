@@ -3,6 +3,14 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python/Python.h>
 #include <CommonCrypto/CommonCryptor.h>
+static void (^gEfootxiProgress)(NSString*, double);
+static PyObject* nativeProgress(PyObject*, PyObject* args) {
+  const char* message; double fraction;
+  if (!PyArg_ParseTuple(args, "sd", &message, &fraction)) return nullptr;
+  NSString* text = [NSString stringWithUTF8String:message];
+  dispatch_async(dispatch_get_main_queue(), ^{ if (gEfootxiProgress) gEfootxiProgress(text, fraction); });
+  Py_RETURN_NONE;
+}
 
 static PyObject* nativeAES(PyObject*, PyObject* args) {
   int encrypt; const char *key, *iv, *input; Py_ssize_t keySize, ivSize, size;
@@ -17,7 +25,8 @@ static PyObject* nativeAES(PyObject*, PyObject* args) {
   if (_PyBytes_Resize(&output, written) < 0) return nullptr;
   return output;
 }
-static PyMethodDef efootxiMethods[] = {{"aes_cbc", nativeAES, METH_VARARGS, nullptr}, {nullptr,nullptr,0,nullptr}};
+static PyMethodDef efootxiMethods[] = {{"aes_cbc", nativeAES, METH_VARARGS, nullptr},
+  {"progress", nativeProgress, METH_VARARGS, nullptr}, {nullptr,nullptr,0,nullptr}};
 static struct PyModuleDef efootxiModule = {PyModuleDef_HEAD_INIT, "_efootxi_native", nullptr, -1, efootxiMethods};
 PyMODINIT_FUNC PyInit__efootxi_native() { return PyModule_Create(&efootxiModule); }
 
@@ -31,7 +40,8 @@ static void initializeEfootxi() {
   NSString* bundle = NSBundle.mainBundle.bundlePath;
   NSString* python = [bundle stringByAppendingPathComponent:@"python"];
   NSString* resources = [bundle stringByAppendingPathComponent:@"efootxi"];
-  NSString* support = [[gSupport stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Efootxi2027"];
+  NSString* support = [[gSupport stringByDeletingLastPathComponent] stringByAppendingPathComponent:
+    [gEfootxiDataMode isEqualToString:@"china-data"] ? @"Efootxi2027-China" : @"Efootxi2027-Global"];
   [NSFileManager.defaultManager createDirectoryAtPath:support withIntermediateDirectories:YES attributes:nil error:nil];
   if (PyImport_AppendInittab("_efootxi_native", PyInit__efootxi_native) < 0) { gPythonFailure=@"Cannot register native Python module"; return; }
   PyConfig config; PyConfig_InitIsolatedConfig(&config);
@@ -61,6 +71,26 @@ static void initializeEfootxi() {
   Py_XDECREF(module);
   PyEval_SaveThread();
   ZLog(@"[EFOOTXI] Python startup %@", gPythonServe ? @"ready" : gPythonFailure);
+}
+
+static NSString* efootxiPrepareResources() {
+  std::lock_guard<std::mutex> lock(gPythonMu);
+  if (!gPythonAttempted) initializeEfootxi();
+  if (!gPythonServe) return gPythonFailure ?: @"Python unavailable";
+  PyGILState_STATE gil = PyGILState_Ensure();
+  PyObject* module = PyImport_ImportModule("efootxi_ios");
+  PyObject* result = module ? PyObject_CallMethod(module, "prepare_data", "sss", gEfootxiDataMode.UTF8String,
+      gDocs.fileSystemRepresentation, gOriginalDocuments.fileSystemRepresentation) : nullptr;
+  NSString* error = nil;
+  if (!result) {
+    PyObject *type=nullptr, *value=nullptr, *traceback=nullptr;
+    PyErr_Fetch(&type, &value, &traceback); PyErr_NormalizeException(&type, &value, &traceback);
+    PyObject* message = value ? PyObject_Str(value) : nullptr;
+    error = message ? [NSString stringWithUTF8String:PyUnicode_AsUTF8(message)] : @"Resource preparation failed";
+    Py_XDECREF(message); PyErr_Restore(type, value, traceback); PyErr_Print();
+  }
+  Py_XDECREF(result); Py_XDECREF(module); PyGILState_Release(gil);
+  return error;
 }
 
 static NSData* efootxiServe(NSString* method, NSString* path, NSData* body, NSInteger* status, NSString** mime) {

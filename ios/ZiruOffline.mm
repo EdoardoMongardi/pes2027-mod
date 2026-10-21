@@ -56,6 +56,9 @@ static inline UIColor* PESMuted() { return [UIColor colorWithRed:0.65 green:0.73
 
 // ---------------------------------------------------------------- paths & logs
 static NSString* gDocs;
+static NSString* gOriginalDocuments;
+static NSString* gEfootxiDataMode;
+static bool gEfootxiPrepared = false;
 static char gDocsUTF8[1024] = {0};
 static NSString* gSupport;   // Library/Application Support/PES2027
 static NSString* gLogPath;
@@ -99,11 +102,20 @@ static zd::Layout layout() {
 
 static void initPaths() {
   gDocs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+  gOriginalDocuments = gDocs;
+#ifdef EFOOTXI_IOS
+  gEfootxiDataMode = [NSBundle.mainBundle objectForInfoDictionaryKey:@"EfootxiDataMode"] ?: @"global";
+  gDocs = [gOriginalDocuments stringByAppendingPathComponent:[gEfootxiDataMode isEqualToString:@"china-data"] ? @"Efootxi-China-Data" : @"Efootxi-Global-Data"];
+  [NSFileManager.defaultManager createDirectoryAtPath:gDocs withIntermediateDirectories:YES attributes:nil error:nil];
+#endif
   if (gDocs) {
     strncpy(gDocsUTF8, gDocs.fileSystemRepresentation, sizeof(gDocsUTF8) - 1);
   }
   NSString* lib = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
   gSupport = [lib stringByAppendingPathComponent:@"PES2027"];
+#ifdef EFOOTXI_IOS
+  gSupport = [lib stringByAppendingPathComponent:[gEfootxiDataMode isEqualToString:@"china-data"] ? @"Efootxi2027-China-Adapter" : @"Efootxi2027-Global-Adapter"];
+#endif
   NSFileManager* fm = NSFileManager.defaultManager;
   [fm createDirectoryAtPath:[gSupport stringByAppendingPathComponent:@"GameData"] withIntermediateDirectories:YES attributes:nil error:nil];
   [fm createDirectoryAtPath:[gSupport stringByAppendingPathComponent:@"Save"] withIntermediateDirectories:YES attributes:nil error:nil];
@@ -112,7 +124,7 @@ static void initPaths() {
   [[NSURL fileURLWithPath:[gSupport stringByAppendingPathComponent:@"GameData"]]
       setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
 #ifdef EFOOTXI_IOS
-  gSessionRoot = [gDocs stringByAppendingPathComponent:@"Efootxi-logs"];
+  gSessionRoot = [gOriginalDocuments stringByAppendingPathComponent:[gEfootxiDataMode isEqualToString:@"china-data"] ? @"Efootxi-China-logs" : @"Efootxi-Global-logs"];
 #else
   gSessionRoot = [gDocs stringByAppendingPathComponent:@"PES2027-logs"];
 #endif
@@ -397,7 +409,7 @@ static const char* redirectPath(const char* path, char* buffer, size_t bufSize) 
   if (!path || !path[0] || !gDocsUTF8[0]) return path;
   // The verified bundled iOS resources must not be redirected into an older cache.
   if (strstr(path, ".app/efootxi/") || strstr(path, ".app/python/") ||
-      strstr(path, "/Application Support/Efootxi2027/")) return path;
+      strstr(path, "/Application Support/Efootxi2027/") || strstr(path, "/Application Support/Efootxi2027-")) return path;
 
   // 1. Check for pak: /pak/ or pak/ or path ending with /pak or path == "pak"
   const char* p = strstr(path, "/pak/");
@@ -1527,6 +1539,11 @@ static BOOL checkDirectFolderData(NSString** why) {
 }
 
 static BOOL dataReady(NSString** why) {
+#ifdef EFOOTXI_IOS
+  BOOL exists = [NSFileManager.defaultManager fileExistsAtPath:[gDocs stringByAppendingPathComponent:@"pak"]];
+  if (why) *why = gEfootxiPrepared && exists ? @"Efootxi data prepared" : @"Đang chuẩn bị dữ liệu Efootxi";
+  return gEfootxiPrepared && exists;
+#endif
   if (checkDirectFolderData(why)) return YES;
   std::string err;
   zd::Layout L = layout();
@@ -2164,11 +2181,22 @@ static void startGame() {
 
 #include "ZiruMods.inc"
 #include "ZiruJersey.inc"
+#include "EfootxiBootstrap.inc"
 
 static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* opts) {
   gDelegate = self;
   gLaunchApp = app;
   gLaunchOptions = opts;
+#ifdef EFOOTXI_IOS
+  if (!gEfootxiPrepared) {
+    startEfootxiBootstrap(^{
+      hookDidFinish(self, _cmd, app, opts);
+      if (app.applicationState == UIApplicationStateActive && gOrigBecomeActive)
+        ((void(*)(id,SEL,id))gOrigBecomeActive)(self, @selector(applicationDidBecomeActive:), app);
+    });
+    return YES;
+  }
+#endif
 
   // Complete mod batches are activated before Unreal opens any containers.
   std::string modSummary, modError;
@@ -2213,6 +2241,9 @@ static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* o
 
 static void hookBecomeActive(id self, SEL _cmd, UIApplication* app) {
   diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookBecomeActive"});
+#ifdef EFOOTXI_IOS
+  if (!gEfootxiPrepared) return;
+#endif
   if (gOrigBecomeActive) ((void (*)(id, SEL, id))gOrigBecomeActive)(self, _cmd, app);
   if (!gGameStarted && !gActiveImportVC) {
     NSString* why = nil;
@@ -2224,14 +2255,23 @@ static void hookBecomeActive(id self, SEL _cmd, UIApplication* app) {
 }
 static void hookResignActive(id self, SEL _cmd, UIApplication* app) {
   diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookResignActive"});
+#ifdef EFOOTXI_IOS
+  if (!gEfootxiPrepared) return;
+#endif
   if (gOrigResignActive) ((void (*)(id, SEL, id))gOrigResignActive)(self, _cmd, app);
 }
 static void hookEnterBg(id self, SEL _cmd, UIApplication* app) {
   diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookEnterBg"});
+#ifdef EFOOTXI_IOS
+  if (!gEfootxiPrepared) return;
+#endif
   if (gOrigEnterBg) ((void (*)(id, SEL, id))gOrigEnterBg)(self, _cmd, app);
 }
 static void hookEnterFg(id self, SEL _cmd, UIApplication* app) {
   diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookEnterFg"});
+#ifdef EFOOTXI_IOS
+  if (!gEfootxiPrepared) return;
+#endif
   if (gOrigEnterFg) ((void (*)(id, SEL, id))gOrigEnterFg)(self, _cmd, app);
 }
 

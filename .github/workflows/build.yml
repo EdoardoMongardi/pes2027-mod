@@ -21,6 +21,7 @@ jobs:
       - name: native iOS database table conversion
         run: |
           python3 -m unittest discover -s test -p 'efootxi_bridge_test.py' -v
+          python3 -m unittest discover -s test -p 'efootxi_resources_test.py' -v
           python3 -m unittest discover -s test -p 'ios_tables_test.py' -v
           python3 -m unittest discover -s test -p 'cpk_merge_test.py' -v
           python3 -m unittest discover -s test -p 'iostore_test.py' -v

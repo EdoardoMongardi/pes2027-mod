@@ -113,6 +113,42 @@ def configure(bundle, support, session):
     return status
 
 
+def prepare_data(mode, root, original_documents):
+    from efootxi_resources import install, prepare_global, install_native_live
+    def emit(kind, **value):
+        event('resource-install.jsonl', event=kind, **value)
+        print('EFOOTXI_DATA', kind, json.dumps(value, ensure_ascii=False), flush=True)
+        try:
+            import _efootxi_native
+            total = value.get('total') or value.get('count') or 0
+            done = value.get('downloaded') or value.get('index') or 0
+            descriptions = {'download_begin': 'Đang kết nối tải data China', 'download_progress': 'Đang tải data China',
+                'download_verified': 'Đã kiểm tra gói tải', 'extract_verified': 'Đang cài tài nguyên',
+                'checking_base': 'Đang kiểm tra dữ liệu có sẵn', 'global_copy': 'Đang chuẩn bị data quốc tế',
+                'installed': 'Đã cài data China; đang thử khả năng tương thích iOS', 'already_installed': 'Data đã sẵn sàng'}
+            detail = descriptions.get(kind, kind)
+            if value.get('file'):
+                detail += '\n' + value['file']
+            if total and kind.startswith('download'):
+                detail += '\n%.1f / %.1f MB' % (done / 1e6, total / 1e6)
+            _efootxi_native.progress(detail, done / total if total else 0.0)
+        except ImportError:
+            pass
+    try:
+        if mode == 'china-data':
+            result = install(_bundle, root, emit)
+        else:
+            result = prepare_global(original_documents, root, emit)
+        install_native_live(_bundle, Path(root), emit)
+        event('resource-install.jsonl', event='ready', mode=mode, result=result)
+        return True
+    except BaseException:
+        details = traceback.format_exc()
+        event('resource-install.jsonl', event='failed', mode=mode, traceback=details)
+        print(details, file=sys.stderr, flush=True)
+        raise
+
+
 def _resource(path):
     relative = unquote(urlsplit(path).path).removeprefix("/livedata/")
     root = (_bundle / "livedata").resolve()
