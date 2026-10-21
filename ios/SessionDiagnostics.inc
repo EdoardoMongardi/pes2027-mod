@@ -118,8 +118,8 @@ static void diagnosticException(NSException* exception) {
 
 static void collectEngineLogs() {
   NSFileManager* fm = NSFileManager.defaultManager;
-  NSArray* roots = @[[gDocs stringByAppendingPathComponent:@"UE4Game"],
-    [gDocs stringByAppendingPathComponent:@"PESmobile/Saved/Logs"],
+  NSArray* roots = @[[gOriginalDocuments stringByAppendingPathComponent:@"UE4Game"],
+    [gOriginalDocuments stringByAppendingPathComponent:@"PESmobile/Saved/Logs"],
     [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs"]];
   for (NSUInteger i=0; i<roots.count; ++i) {
     NSString* root=roots[i];

@@ -36,6 +36,7 @@ static bool gPythonAttempted = false;
 static NSString* gPythonFailure;
 
 static void initializeEfootxi() {
+  BackendIOScope backendIO;
   gPythonAttempted = true;
   NSString* bundle = NSBundle.mainBundle.bundlePath;
   NSString* python = [bundle stringByAppendingPathComponent:@"python"];
@@ -74,6 +75,7 @@ static void initializeEfootxi() {
 }
 
 static NSString* efootxiPrepareResources() {
+  BackendIOScope backendIO;
   std::lock_guard<std::mutex> lock(gPythonMu);
   if (!gPythonAttempted) initializeEfootxi();
   if (!gPythonServe) return gPythonFailure ?: @"Python unavailable";
@@ -94,6 +96,7 @@ static NSString* efootxiPrepareResources() {
 }
 
 static NSData* efootxiServe(NSString* method, NSString* path, NSData* body, NSInteger* status, NSString** mime) {
+  BackendIOScope backendIO;
   std::lock_guard<std::mutex> lock(gPythonMu);
   if (!gPythonAttempted) initializeEfootxi();
   if (!gPythonServe) { *status=500; *mime=@"text/plain"; return [(gPythonFailure ?: @"Python unavailable") dataUsingEncoding:NSUTF8StringEncoding]; }

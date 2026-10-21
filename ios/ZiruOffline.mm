@@ -67,6 +67,12 @@ static NSString* gCrashLogPath;
 static NSString* gBundleAssets;
 static std::mutex gLogMu;
 static thread_local bool gDiagnosticIO = false;
+static thread_local bool gBackendIO = false;
+struct BackendIOScope {
+  bool previous;
+  BackendIOScope() : previous(gBackendIO) { gBackendIO = true; }
+  ~BackendIOScope() { gBackendIO = previous; }
+};
 
 static void ZLog(NSString* fmt, ...) NS_FORMAT_FUNCTION(1, 2);
 static void ZLog(NSString* fmt, ...) {
@@ -406,6 +412,8 @@ static void resolveAltName(char* buffer, size_t bufSize) {
 }
 
 static const char* redirectPath(const char* path, char* buffer, size_t bufSize) {
+  // Backend/installers already use explicit paths, including staging and source data.
+  if (gBackendIO) return path;
   if (!path || !path[0] || !gDocsUTF8[0]) return path;
   // The verified bundled iOS resources must not be redirected into an older cache.
   if (strstr(path, ".app/efootxi/") || strstr(path, ".app/python/") ||
