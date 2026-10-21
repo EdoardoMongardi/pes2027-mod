@@ -132,57 +132,37 @@ static void initPaths() {
 }
 
 // ---------------------------------------------------------------- crash handler (crash.log)
+// Keep the fatal-signal path free of Objective-C, allocation and locks.
+static void crashHex(int fd, const char* label, uint64_t value) {
+  char text[96]; size_t n=0;
+  while (*label && n<64) text[n++]=*label++;
+  text[n++]='0'; text[n++]='x';
+  for (int shift=60; shift>=0; shift-=4) text[n++]="0123456789abcdef"[(value>>shift)&15];
+  text[n++]='\n'; (void)write(fd,text,n);
+}
+
 static void crashHandler(int sig, siginfo_t* info, void* ucontext) {
   static volatile sig_atomic_t crashed = 0;
-  if (crashed++) _exit(1);
-
-  uintptr_t pc = 0, lr = 0, fp = 0, faultAddr = (uintptr_t)(info ? info->si_addr : 0);
+  if (crashed++) _exit(128+sig);
+  gDiagnosticIO=true;
+  int fd = gCrashPathUTF8[0] ? open(gCrashPathUTF8,O_WRONLY|O_CREAT|O_APPEND,0644) : -1;
+  if (fd<0) fd=STDERR_FILENO;
+  static const char marker[]="\nFATAL SIGNAL (addresses match stacks.jsonl image UUID/ASLR map)\n";
+  (void)write(fd,marker,sizeof(marker)-1);
+  crashHex(fd,"signal=",sig);
+  crashHex(fd,"fault=",(uintptr_t)(info ? info->si_addr : nullptr));
 #if defined(__arm64__)
-  ucontext_t* uc = (ucontext_t*)ucontext;
+  ucontext_t* uc=(ucontext_t*)ucontext;
   if (uc && uc->uc_mcontext) {
-    pc = uc->uc_mcontext->__ss.__pc;
-    lr = uc->uc_mcontext->__ss.__lr;
-    fp = uc->uc_mcontext->__ss.__fp;
+    crashHex(fd,"pc=",uc->uc_mcontext->__ss.__pc);
+    crashHex(fd,"lr=",uc->uc_mcontext->__ss.__lr);
+    crashHex(fd,"fp=",uc->uc_mcontext->__ss.__fp);
+    crashHex(fd,"sp=",uc->uc_mcontext->__ss.__sp);
   }
 #endif
-
-  intptr_t mainSlide = _dyld_get_image_vmaddr_slide(0);
-  const char* mainName = _dyld_get_image_name(0);
-  const char* baseName = mainName ? (strrchr(mainName, '/') ? strrchr(mainName, '/') + 1 : mainName) : "PESmobile";
-  uintptr_t relPC = (pc >= (uintptr_t)mainSlide) ? (pc - (uintptr_t)mainSlide) : 0;
-  uintptr_t relLR = (lr >= (uintptr_t)mainSlide) ? (lr - (uintptr_t)mainSlide) : 0;
-
-  int fd = -1;
-  if (gCrashLogPath) {
-    fd = open(gCrashLogPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644);
-  }
-  if (fd < 0) fd = 2;
-
-  time_t now = time(nullptr);
-  char timeBuf[64];
-  strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", localtime(&now));
-
-  dprintf(fd, "\n==================== PES2027 CRASH REPORT ====================\n");
-  dprintf(fd, "Timestamp: %s\n", timeBuf);
-  dprintf(fd, "Signal: %d (%s)\n", sig, strsignal(sig));
-  dprintf(fd, "Fault Address: 0x%lx\n", (unsigned long)faultAddr);
-  dprintf(fd, "PC: 0x%lx (relative to %s: 0x%lx)\n", (unsigned long)pc, baseName, (unsigned long)relPC);
-  dprintf(fd, "LR: 0x%lx (relative: 0x%lx)\n", (unsigned long)lr, (unsigned long)relLR);
-  dprintf(fd, "FP: 0x%lx\n", (unsigned long)fp);
-  dprintf(fd, "ASLR Slide: 0x%lx\n", (unsigned long)mainSlide);
-  dprintf(fd, "\n--- Backtrace ---\n");
-
-  @try {
-    NSArray<NSString*>* syms = [NSThread callStackSymbols];
-    if (syms) {
-      for (NSUInteger i = 0; i < syms.count; ++i) {
-        dprintf(fd, "#%02lu %s\n", (unsigned long)i, syms[i].UTF8String);
-      }
-    }
-  } @catch (...) {}
-  dprintf(fd, "==============================================================\n\n");
-  if (fd > 2) close(fd);
-  _exit(128 + sig);
+  if (fd>2) close(fd);
+  // SA_RESETHAND has restored the default action. Preserve the OS crash report.
+  kill(getpid(),sig);
 }
 
 static void initCrashHandler() {
@@ -416,7 +396,8 @@ static void resolveAltName(char* buffer, size_t bufSize) {
 static const char* redirectPath(const char* path, char* buffer, size_t bufSize) {
   if (!path || !path[0] || !gDocsUTF8[0]) return path;
   // The verified bundled iOS resources must not be redirected into an older cache.
-  if (strstr(path, ".app/efootxi/") || strstr(path, ".app/python/")) return path;
+  if (strstr(path, ".app/efootxi/") || strstr(path, ".app/python/") ||
+      strstr(path, "/Application Support/Efootxi2027/")) return path;
 
   // 1. Check for pak: /pak/ or pak/ or path ending with /pak or path == "pak"
   const char* p = strstr(path, "/pak/");

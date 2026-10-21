@@ -116,6 +116,33 @@ static void diagnosticException(NSException* exception) {
     @"stack":exception.callStackSymbols ?: @[]});
 }
 
+static void collectEngineLogs() {
+  NSFileManager* fm = NSFileManager.defaultManager;
+  NSArray* roots = @[[gDocs stringByAppendingPathComponent:@"UE4Game"],
+    [gDocs stringByAppendingPathComponent:@"PESmobile/Saved/Logs"],
+    [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs"]];
+  for (NSUInteger i=0; i<roots.count; ++i) {
+    NSString* root=roots[i];
+    NSDirectoryEnumerator* names=[fm enumeratorAtPath:root];
+    for (NSString* name in names) {
+      if (![name.pathExtension.lowercaseString isEqualToString:@"log"]) continue;
+      NSString* source=[root stringByAppendingPathComponent:name];
+      NSDictionary* attributes=[fm attributesOfItemAtPath:source error:nil];
+      NSString* relative=[NSString stringWithFormat:@"engine/%lu/%@", (unsigned long)i, name];
+      NSString* target=[gSessionDir stringByAppendingPathComponent:relative];
+      NSDictionary* prior=[fm attributesOfItemAtPath:target error:nil];
+      if (prior && prior.fileSize==attributes.fileSize &&
+          [prior.fileModificationDate isEqualToDate:attributes.fileModificationDate]) continue;
+      NSData* data=[NSData dataWithContentsOfFile:source options:NSDataReadingMappedIfSafe error:nil];
+      [fm createDirectoryAtPath:target.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+      NSError* error=nil;
+      BOOL ok=data && [data writeToFile:target options:NSDataWritingAtomic error:&error];
+      if (ok) [fm setAttributes:@{NSFileModificationDate:attributes.fileModificationDate ?: NSDate.date} ofItemAtPath:target error:nil];
+      diagnosticEvent(@"engine-log-sources.jsonl", @{@"source":source, @"copy":relative, @"bytes":@(data.length), @"success":@(ok), @"error":error.description ?: @""});
+    }
+  }
+}
+
 static void initSessionDiagnostics() {
   gMainPulse = CFAbsoluteTimeGetCurrent(); gLastNetwork = CFAbsoluteTimeGetCurrent();
   strncpy(gCrashPathUTF8, gCrashLogPath.fileSystemRepresentation, sizeof(gCrashPathUTF8)-1);
@@ -128,7 +155,7 @@ static void initSessionDiagnostics() {
     @"build":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"",
     @"os":NSProcessInfo.processInfo.operatingSystemVersionString, @"session":gSessionDir,
     @"coverage":@"adapter, in-process requests, Python, rebound file operations, stdout/stderr, self-process stack samples; OS unified logs and jetsam reports are external"});
-  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ diagnosticInventory(); diagnosticSnapshot(@"startup"); });
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ diagnosticInventory(); collectEngineLogs(); diagnosticSnapshot(@"startup"); });
   dispatch_async(dispatch_get_main_queue(), ^{
     [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer* t) { gMainPulse = CFAbsoluteTimeGetCurrent(); }];
   });
@@ -138,6 +165,7 @@ static void initSessionDiagnostics() {
   dispatch_source_set_event_handler(timer, ^{
     @autoreleasepool {
       double now = CFAbsoluteTimeGetCurrent();
+      collectEngineLogs();
       diagnosticEvent(@"heartbeat.jsonl", @{@"main_age":@(now-gMainPulse.load()), @"network_age":@(now-gLastNetwork.load()),
         @"pending_requests":@(gRequestsActive.load()), @"application_state":@(UIApplication.sharedApplication.applicationState)});
       static double lastSample = 0;
