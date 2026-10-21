@@ -1051,10 +1051,49 @@ static void startFpsMeter() {
 }
 
 // Inject commandline into UE4 engine for 120 FPS and correct color settings.
-// FCommandLine::Set / Append are resolved via symbol or known offset.
+// Primary strategy: write Documents/ue4commandline.txt early (before engine reads it).
+// Fallback: FCommandLine::Set / Append via symbol or known offset.
 typedef void (*FCommandLineSetFn)(const char16_t*);
 typedef void (*FCommandLineAppendFn)(const char16_t*);
+
+// Default commandline with Filmic tonemapper and vivid colors.
+// -r.TonemapperFilm=1         -> Filmic tonemapper (rich, saturated)
+// -r.MobileHDR=1              -> Enable HDR rendering path on mobile
+// -r.Color.Saturation=1.3     -> +30% saturation vs flat default
+// -r.Color.Contrast=1.05      -> Slight contrast boost
+// -r.Color.Mid=0.5            -> Neutral midtones
+// -r.TonemapperGamma=2.2      -> Correct gamma
+static NSString* const kDefaultCommandLine = @"-t.MaxFPS=120 -r.TonemapperFilm=1 -r.MobileHDR=1 -r.Color.Saturation=1.3 -r.Color.Contrast=1.05 -r.Color.Mid=0.5 -r.TonemapperGamma=2.2";
+
 static void setupGraphicsEnhancements() {
+  NSString* userCmdPath = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
+  NSFileManager* fm = NSFileManager.defaultManager;
+  
+  // Build target commandline: use user's custom file if it contains Tonemapper flags;
+  // otherwise write our defaults so the engine reads vivid color settings naturally.
+  NSString* targetCmd = kDefaultCommandLine;
+  if ([fm fileExistsAtPath:userCmdPath]) {
+    NSString* existing = [NSString stringWithContentsOfFile:userCmdPath encoding:NSUTF8StringEncoding error:nil];
+    NSString* trimmed = [existing stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    // User has customised — keep their settings as-is
+    if (trimmed.length > 0 && [trimmed containsString:@"-r.TonemapperFilm"]) {
+      targetCmd = trimmed;
+      ZLog(@"[GRAPHICS] Keeping user commandline: '%@'", targetCmd);
+    } else if (trimmed.length > 0 && [trimmed hasPrefix:@"-t."]) {
+      // Old file only has MaxFPS — upgrade it with color flags
+      targetCmd = [NSString stringWithFormat:@"%@ -r.TonemapperFilm=1 -r.MobileHDR=1 -r.Color.Saturation=1.3 -r.Color.Contrast=1.05 -r.Color.Mid=0.5 -r.TonemapperGamma=2.2", trimmed];
+    }
+  }
+  // Write file — engine reads this on next applicationDidFinishLaunching
+  NSError* writeErr = nil;
+  [targetCmd writeToFile:userCmdPath atomically:YES encoding:NSUTF8StringEncoding error:&writeErr];
+  if (!writeErr) {
+    ZLog(@"[GRAPHICS] Wrote ue4commandline.txt: '%@'", targetCmd);
+  } else {
+    ZLog(@"[GRAPHICS] Failed to write ue4commandline.txt: %@", writeErr.localizedDescription);
+  }
+
+  // Backup: also try FCommandLine::Set in case engine already read its commandline
   intptr_t slide = _dyld_get_image_vmaddr_slide(0);
   FCommandLineSetFn setFn = nullptr;
   FCommandLineAppendFn appendFn = nullptr;
@@ -1065,29 +1104,20 @@ static void setupGraphicsEnhancements() {
   if (!setFn) setFn = (FCommandLineSetFn)dlsym(RTLD_DEFAULT, "_ZN12FCommandLine3SetEPKDs");
   if (!appendFn) appendFn = (FCommandLineAppendFn)dlsym(RTLD_DEFAULT, "_ZN12FCommandLine6AppendEPKDs");
 
-  // Check if user has a custom commandline override in Documents/ue4commandline.txt
-  NSString* userCmdPath = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
-  NSString* targetCmd = @"-t.MaxFPS=120";
-  if ([NSFileManager.defaultManager fileExistsAtPath:userCmdPath]) {
-    NSString* customArgs = [NSString stringWithContentsOfFile:userCmdPath encoding:NSUTF8StringEncoding error:nil];
-    if (customArgs && customArgs.length > 0) targetCmd = customArgs;
+  NSString* injectCmd = targetCmd;
+  if (![injectCmd hasPrefix:@" "]) injectCmd = [@" " stringByAppendingString:injectCmd];
+  std::u16string u16(injectCmd.length + 1, u'\0');
+  for (NSUInteger i = 0; i < injectCmd.length; i++) {
+    u16[i] = (char16_t)[injectCmd characterAtIndex:i];
   }
-  targetCmd = [targetCmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if (![targetCmd hasPrefix:@" "]) targetCmd = [@" " stringByAppendingString:targetCmd];
-
-  std::u16string u16(targetCmd.length + 1, u'\0');
-  for (NSUInteger i = 0; i < targetCmd.length; i++) {
-    u16[i] = (char16_t)[targetCmd characterAtIndex:i];
-  }
-
   if (setFn) {
     setFn(u16.data());
-    ZLog(@"[GRAPHICS] FCommandLine::Set replaced commandline with: '%@'", targetCmd);
+    ZLog(@"[GRAPHICS] FCommandLine::Set injected: '%@'", injectCmd);
   } else if (appendFn) {
     appendFn(u16.data());
-    ZLog(@"[GRAPHICS] FCommandLine::Append applied commandline: '%@'", targetCmd);
+    ZLog(@"[GRAPHICS] FCommandLine::Append injected: '%@'", injectCmd);
   } else {
-    ZLog(@"[GRAPHICS] FCommandLine::Append symbol not resolved -- using bundle ue4commandline.txt preset");
+    ZLog(@"[GRAPHICS] FCommandLine::Set not resolved — color settings applied via ue4commandline.txt only");
   }
 }
 
@@ -1327,15 +1357,8 @@ static BOOL checkDirectFolderData(NSString** why) {
   // Resource repair is hash-authorized above. Pack IDs alone do not authorize
   // deleting user data, including additional player packs.
 
-  // Sanitize lingering Tonemapper overrides in ue4commandline.txt
-  NSString* docCmd = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
-  if ([fm fileExistsAtPath:docCmd]) {
-    NSString* cmdContent = [NSString stringWithContentsOfFile:docCmd encoding:NSUTF8StringEncoding error:nil];
-    if ([cmdContent containsString:@"Tonemapper"] || [cmdContent containsString:@"Gamma"]) {
-      [@"-t.MaxFPS=120\n" writeToFile:docCmd atomically:YES encoding:NSUTF8StringEncoding error:nil];
-      ZLog(@"[GRAPHICS] Reset lingering ue4commandline.txt tonemapper to -t.MaxFPS=120");
-    }
-  }
+  // ue4commandline.txt color settings are managed by setupGraphicsEnhancements() early
+  // in the constructor. Do NOT strip Tonemapper/Gamma flags here — they are intentional.
 
   // Native character containers belong in pak/, including the face textures.
   for (NSString* core in @[@"pc3600", @"pc3611"]) {
