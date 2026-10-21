@@ -1552,8 +1552,8 @@ static BOOL checkDirectFolderData(NSString** why) {
 static BOOL dataReady(NSString** why) {
 #ifdef EFOOTXI_IOS
   BOOL exists = [NSFileManager.defaultManager fileExistsAtPath:[gDocs stringByAppendingPathComponent:@"pak"]];
-  if (why) *why = gEfootxiPrepared && exists ? @"Efootxi data prepared" : @"Đang chuẩn bị dữ liệu Efootxi";
-  return gEfootxiPrepared && exists;
+  if (why) *why = exists ? @"Efootxi data prepared" : @"Chua co du lieu Efootxi trong thu muc pak";
+  return exists;
 #endif
   if (checkDirectFolderData(why)) return YES;
   std::string err;
@@ -2199,14 +2199,11 @@ static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* o
   gLaunchApp = app;
   gLaunchOptions = opts;
 #ifdef EFOOTXI_IOS
-  if (!gEfootxiPrepared) {
-    startEfootxiBootstrap(^{
-      hookDidFinish(self, _cmd, app, opts);
-      if (app.applicationState == UIApplicationStateActive && gOrigBecomeActive)
-        ((void(*)(id,SEL,id))gOrigBecomeActive)(self, @selector(applicationDidBecomeActive:), app);
-    });
-    return YES;
-  }
+  // Khoi dong server Python ngam ngay lap tuc, khong chan chu ky khoi tao giao dien cua UE4
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    efootxiPrepareResources();
+    gEfootxiPrepared = true;
+  });
 #endif
 
   // Complete mod batches are activated before Unreal opens any containers.
@@ -2252,9 +2249,7 @@ static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* o
 
 static void hookBecomeActive(id self, SEL _cmd, UIApplication* app) {
   diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookBecomeActive"});
-#ifdef EFOOTXI_IOS
-  if (!gEfootxiPrepared) return;
-#endif
+
   if (gOrigBecomeActive) ((void (*)(id, SEL, id))gOrigBecomeActive)(self, _cmd, app);
   if (!gGameStarted && !gActiveImportVC) {
     NSString* why = nil;
@@ -2266,23 +2261,17 @@ static void hookBecomeActive(id self, SEL _cmd, UIApplication* app) {
 }
 static void hookResignActive(id self, SEL _cmd, UIApplication* app) {
   diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookResignActive"});
-#ifdef EFOOTXI_IOS
-  if (!gEfootxiPrepared) return;
-#endif
+
   if (gOrigResignActive) ((void (*)(id, SEL, id))gOrigResignActive)(self, _cmd, app);
 }
 static void hookEnterBg(id self, SEL _cmd, UIApplication* app) {
   diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookEnterBg"});
-#ifdef EFOOTXI_IOS
-  if (!gEfootxiPrepared) return;
-#endif
+
   if (gOrigEnterBg) ((void (*)(id, SEL, id))gOrigEnterBg)(self, _cmd, app);
 }
 static void hookEnterFg(id self, SEL _cmd, UIApplication* app) {
   diagnosticEvent(@"lifecycle.jsonl", @{@"event":@"hookEnterFg"});
-#ifdef EFOOTXI_IOS
-  if (!gEfootxiPrepared) return;
-#endif
+
   if (gOrigEnterFg) ((void (*)(id, SEL, id))gOrigEnterFg)(self, _cmd, app);
 }
 
