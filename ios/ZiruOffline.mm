@@ -1,4 +1,4 @@
-﻿// ZiruOffline.dylib — loaded into eFootball iOS 11.1.1 (PESmobile).
+// ZiruOffline.dylib — loaded into eFootball iOS 11.1.1 (PESmobile).
 //  * Runs the C++ port of the Ziru offline server in-process.
 //  * Redirects the game's HttpImpl* requests to https://127.0.0.1:8085 (same as Ziru's Android HttpImpl patch)
 //    and answers them through an NSURLProtocol — no sockets, no TLS.
@@ -380,21 +380,58 @@ static int hook_remove(const char *path) {
 }
 
 // ---------------------------------------------------------------- pak / cpk / Download file redirection
+static bool isZipHeader(const char* path) {
+  if (!path || !path[0]) return false;
+  int (*my_open)(const char*, int, ...) = orig_open ?: (int (*)(const char*, int, ...))dlsym(RTLD_DEFAULT, "open");
+  if (!my_open) return false;
+  int fd = my_open(path, O_RDONLY, 0);
+  if (fd < 0) return false;
+  char hdr[4] = {0};
+  ssize_t r = read(fd, hdr, 4);
+  close(fd);
+  return r == 4 && hdr[0] == 'P' && hdr[1] == 'K' && hdr[2] == 3 && hdr[3] == 4;
+}
+
 static void resolveAltName(char* buffer, size_t bufSize) {
-  // Calls inside a rebound access() must use the original function, otherwise
-  // missing resources recursively enter hook_access until the stack overflows.
-  if (!orig_access || orig_access(buffer, F_OK) == 0) return;
-  // CPK tables are shared only where the table repair has validated them.
-  // IoStore assets need actual target-platform payloads, never a renamed file.
+  if (!orig_access) orig_access = (int (*)(const char*, int))dlsym(RTLD_DEFAULT, "access");
+  if (!orig_access) return;
+
   const char* extension = strrchr(buffer, '.');
-  if (!extension || strcmp(extension, ".cpk") != 0) return;
+  if (!extension) return;
+  bool isPakExt = (strcmp(extension, ".pak") == 0);
+  bool isIoStore = (strcmp(extension, ".utoc") == 0 || strcmp(extension, ".ucas") == 0);
+  bool isCpk = (strcmp(extension, ".cpk") == 0);
+  if (!isPakExt && !isIoStore && !isCpk) return;
+
+  // Check if buffer exists as a regular valid file
+  if (orig_access(buffer, F_OK) == 0) {
+    // If it's a .pak file but actually a zip archive (e.g. pc0000_mobile_and.pak), it's NOT a valid pak!
+    if (isPakExt && isZipHeader(buffer)) {
+      std::string altChunk = buffer;
+      size_t pos = altChunk.find("pc0000_mobile_ios.pak");
+      if (pos == std::string::npos) pos = altChunk.find("pc0000_mobile_and.pak");
+      if (pos != std::string::npos) {
+        altChunk.replace(pos, altChunk.length() - pos, "pakchunk0-Android_ETC2.pak");
+        if (orig_access(altChunk.c_str(), F_OK) == 0) {
+          strncpy(buffer, altChunk.c_str(), bufSize - 1);
+          buffer[bufSize - 1] = '\0';
+          return;
+        }
+      }
+    } else {
+      return;
+    }
+  }
+
   char alt[1024];
   strncpy(alt, buffer, sizeof(alt) - 1);
   alt[sizeof(alt) - 1] = '\0';
+
+  // 1. _mobile_ios <-> _mobile_and
   char* iosPtr = strstr(alt, "_mobile_ios");
   if (iosPtr) {
     memcpy(iosPtr, "_mobile_and", 11);
-    if (orig_access(alt, F_OK) == 0) {
+    if (orig_access(alt, F_OK) == 0 && (!isPakExt || !isZipHeader(alt))) {
       strncpy(buffer, alt, bufSize - 1);
       buffer[bufSize - 1] = '\0';
       return;
@@ -403,10 +440,39 @@ static void resolveAltName(char* buffer, size_t bufSize) {
   char* andPtr = strstr(alt, "_mobile_and");
   if (andPtr) {
     memcpy(andPtr, "_mobile_ios", 11);
-    if (orig_access(alt, F_OK) == 0) {
+    if (orig_access(alt, F_OK) == 0 && (!isPakExt || !isZipHeader(alt))) {
       strncpy(buffer, alt, bufSize - 1);
       buffer[bufSize - 1] = '\0';
       return;
+    }
+  }
+
+  // 2. global_mobile_ios.* <-> global.*
+  if (strstr(alt, "global_mobile_ios")) {
+    std::string altGlobal = alt;
+    size_t pos = altGlobal.find("global_mobile_ios");
+    if (pos != std::string::npos) {
+      altGlobal.replace(pos, 17, "global");
+      if (orig_access(altGlobal.c_str(), F_OK) == 0) {
+        strncpy(buffer, altGlobal.c_str(), bufSize - 1);
+        buffer[bufSize - 1] = '\0';
+        return;
+      }
+    }
+  }
+
+  // 3. pc0000_mobile_ios.* <-> pakchunk0-Android_ETC2.*
+  if (strstr(alt, "pc0000_mobile_ios") || strstr(alt, "pc0000_mobile_and")) {
+    std::string altChunk = alt;
+    size_t pos = altChunk.find("pc0000_mobile_ios");
+    if (pos == std::string::npos) pos = altChunk.find("pc0000_mobile_and");
+    if (pos != std::string::npos) {
+      altChunk.replace(pos, 17, "pakchunk0-Android_ETC2");
+      if (orig_access(altChunk.c_str(), F_OK) == 0) {
+        strncpy(buffer, altChunk.c_str(), bufSize - 1);
+        buffer[bufSize - 1] = '\0';
+        return;
+      }
     }
   }
 }
@@ -427,6 +493,19 @@ static const char* redirectPath(const char* path, char* buffer, size_t bufSize) 
     int n = snprintf(buffer, bufSize, "%s/pak/%s", gDocsUTF8, rel);
     if (n > 0 && (size_t)n < bufSize) {
       resolveAltName(buffer, bufSize);
+      if (orig_access && orig_access(buffer, F_OK) == 0) return buffer;
+      if (gOriginalDocuments && orig_access) {
+        char fallback[1024];
+        int fn = snprintf(fallback, sizeof(fallback), "%s/pak/%s", gOriginalDocuments.fileSystemRepresentation, rel);
+        if (fn > 0 && (size_t)fn < sizeof(fallback)) {
+          resolveAltName(fallback, sizeof(fallback));
+          if (orig_access(fallback, F_OK) == 0) {
+            strncpy(buffer, fallback, bufSize - 1);
+            buffer[bufSize - 1] = '\0';
+            return buffer;
+          }
+        }
+      }
       return buffer;
     }
   }
@@ -444,6 +523,19 @@ static const char* redirectPath(const char* path, char* buffer, size_t bufSize) 
     int n = snprintf(buffer, bufSize, "%s/cpk/%s", gDocsUTF8, rel);
     if (n > 0 && (size_t)n < bufSize) {
       resolveAltName(buffer, bufSize);
+      if (orig_access && orig_access(buffer, F_OK) == 0) return buffer;
+      if (gOriginalDocuments && orig_access) {
+        char fallback[1024];
+        int fn = snprintf(fallback, sizeof(fallback), "%s/cpk/%s", gOriginalDocuments.fileSystemRepresentation, rel);
+        if (fn > 0 && (size_t)fn < sizeof(fallback)) {
+          resolveAltName(fallback, sizeof(fallback));
+          if (orig_access(fallback, F_OK) == 0) {
+            strncpy(buffer, fallback, bufSize - 1);
+            buffer[bufSize - 1] = '\0';
+            return buffer;
+          }
+        }
+      }
       return buffer;
     }
   }

@@ -100,17 +100,21 @@ def install(bundle, root, emit):
     config = json.loads((bundle / 'china/installer.json').read_text(encoding='utf-8'))
     fingerprint = digest(bundle / 'china/installer.json')
     marker = root / 'china-data-installed.json'
-    if marker.is_file():
+    pak_dir = root / 'pak'
+    cpk_dir = root / 'cpk'
+    orig_pak = root.parent / 'pak'
+    orig_cpk = root.parent / 'cpk'
+
+    # If already installed, ensure global index and engine chunks are valid (not broken by zipped pak)
+    has_global = (pak_dir / 'global_mobile_ios.utoc').exists() or (pak_dir / 'global.utoc').exists()
+    has_zip_pak = any(zipfile.is_zipfile(p) for p in pak_dir.glob('*.pak')) if pak_dir.is_dir() else False
+    if marker.is_file() and has_global and not has_zip_pak:
         prior = json.loads(marker.read_text())
         if prior.get('installer_sha256') == fingerprint and all(
                 (root / r['path']).is_file() and (root / r['path']).stat().st_size == r['bytes'] for r in prior['files']):
             emit('already_installed', files=len(prior['files']))
             return prior
     root.mkdir(parents=True, exist_ok=True)
-    pak_dir = root / 'pak'
-    cpk_dir = root / 'cpk'
-    orig_pak = root.parent / 'pak'
-    orig_cpk = root.parent / 'cpk'
 
     def has_game_data(p, c):
         return (p.is_dir() and ((p / 'pc0000_mobile_and.pak').exists() or (p / 'pc0000_mobile_ios.pak').exists() or (p / 'pc1000_mobile_and.pak').exists())) or \
@@ -147,6 +151,64 @@ def install(bundle, root, emit):
                                 shutil.copyfileobj(src, dst)
                         except Exception:
                             pass
+
+        # Also pull any missing files from original Documents/pak and Documents/cpk if present
+        if orig_pak.is_dir():
+            for f in orig_pak.iterdir():
+                dest = pak_dir / f.name
+                if not dest.exists():
+                    try: os.link(f, dest)
+                    except Exception: shutil.copy2(f, dest)
+        if orig_cpk.is_dir():
+            for f in orig_cpk.iterdir():
+                dest = cpk_dir / f.name
+                if not dest.exists():
+                    try: os.link(f, dest)
+                    except Exception: shutil.copy2(f, dest)
+
+        # 1. Unpack nested zip archives in pak_dir (e.g. pc0000_mobile_and.pak from APK which is actually a zip of Content/Paks)
+        for pfile in list(pak_dir.glob('*.pak')):
+            if zipfile.is_zipfile(pfile):
+                emit('unpacking_nested_archive', file=pfile.name)
+                try:
+                    with zipfile.ZipFile(pfile) as z:
+                        for zinfo in z.infolist():
+                            if zinfo.filename.endswith('/'):
+                                continue
+                            zname = Path(zinfo.filename).name
+                            zdest = pak_dir / zname
+                            if not zdest.exists() or zdest.stat().st_size != zinfo.file_size:
+                                with z.open(zinfo) as src, zdest.open('wb') as dst:
+                                    shutil.copyfileobj(src, dst)
+                    renamed = pfile.with_name(pfile.stem + '.extracted.zip')
+                    if renamed.exists():
+                        renamed.unlink()
+                    pfile.rename(renamed)
+                except Exception as ex:
+                    print('Warning unpacking zip pak:', pfile, ex, file=sys.stderr)
+
+        # 2. Setup engine chunk 0 & global index aliases
+        for ext in ('.utoc', '.ucas'):
+            g_src = pak_dir / ('global' + ext)
+            if g_src.exists():
+                for g_alias_name in ('global_mobile_ios' + ext, 'global_mobile_and' + ext):
+                    g_alias = pak_dir / g_alias_name
+                    if not g_alias.exists():
+                        try: os.link(g_src, g_alias)
+                        except Exception: shutil.copy2(g_src, g_alias)
+
+        for ext in ('.pak', '.ucas', '.utoc'):
+            c0_src = pak_dir / ('pakchunk0-Android_ETC2' + ext)
+            if c0_src.exists():
+                for c0_alias_name in ('pc0000_mobile_ios' + ext, 'pc0000_mobile_and' + ext):
+                    c0_alias = pak_dir / c0_alias_name
+                    # If an existing pc0000_mobile_ios.pak was a symlink to the old zip, replace it with the real pak
+                    if c0_alias.exists() and ext == '.pak' and zipfile.is_zipfile(c0_alias):
+                        c0_alias.unlink()
+                    if not c0_alias.exists():
+                        try: os.link(c0_src, c0_alias)
+                        except Exception: shutil.copy2(c0_src, c0_alias)
+
         aliases = []
         for group, directory in (('pak', pak_dir), ('cpk', cpk_dir)):
             if not directory.is_dir():
@@ -154,7 +216,12 @@ def install(bundle, root, emit):
             for source in list(directory.iterdir()):
                 if source.suffix not in ALLOWED or '_mobile_and' not in source.name:
                     continue
+                # Do not alias zip archives that happen to have .pak name
+                if source.suffix == '.pak' and zipfile.is_zipfile(source):
+                    continue
                 alias = source.with_name(source.name.replace('_mobile_and', '_mobile_ios'))
+                if alias.exists() and zipfile.is_zipfile(alias):
+                    alias.unlink()
                 if not alias.exists():
                     try: os.link(source, alias)
                     except Exception: shutil.copy2(source, alias)
