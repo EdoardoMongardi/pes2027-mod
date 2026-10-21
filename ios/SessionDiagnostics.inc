@@ -147,7 +147,7 @@ static void initSessionDiagnostics() {
   gMainPulse = CFAbsoluteTimeGetCurrent(); gLastNetwork = CFAbsoluteTimeGetCurrent();
   strncpy(gCrashPathUTF8, gCrashLogPath.fileSystemRepresentation, sizeof(gCrashPathUTF8)-1);
   NSString* stream = [gSessionDir stringByAppendingPathComponent:@"stdout-stderr.log"];
-  int fd = open(stream.fileSystemRepresentation, O_CREAT|O_WRONLY|O_APPEND, 0644);
+  int fd = open(stream.fileSystemRepresentation, O_CREAT|O_WRONLY|O_TRUNC, 0644);
   if (fd >= 0) { fflush(stdout); fflush(stderr); dup2(fd, STDOUT_FILENO); dup2(fd, STDERR_FILENO); if (fd > 2) close(fd); }
   setvbuf(stdout, nullptr, _IONBF, 0); setvbuf(stderr, nullptr, _IONBF, 0);
   NSSetUncaughtExceptionHandler(diagnosticException);

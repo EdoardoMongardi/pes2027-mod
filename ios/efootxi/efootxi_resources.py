@@ -134,6 +134,19 @@ def install(bundle, root, emit):
 
     if has_game_data(pak_dir, cpk_dir):
         emit('manual_data_found', message='Data đã có sẵn trong thư mục; đang kiểm tra và liên kết iOS...')
+        base = bundle / 'china/base.zip'
+        if base.exists():
+            with zipfile.ZipFile(base) as z:
+                for entry in config['base']['entries']:
+                    ename = safe_name(entry['path'])
+                    egroup = 'cpk' if ename.endswith('.cpk') else 'pak'
+                    edest = (cpk_dir if egroup == 'cpk' else pak_dir) / ename
+                    if not edest.exists():
+                        try:
+                            with z.open(entry['path']) as src, edest.open('wb') as dst:
+                                shutil.copyfileobj(src, dst)
+                        except Exception:
+                            pass
         aliases = []
         for group, directory in (('pak', pak_dir), ('cpk', cpk_dir)):
             if not directory.is_dir():

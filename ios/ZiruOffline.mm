@@ -134,16 +134,16 @@ static void initPaths() {
 #else
   gSessionRoot = [gDocs stringByAppendingPathComponent:@"PES2027-logs"];
 #endif
-  NSDateFormatter* date = [NSDateFormatter new];
-  date.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
-  date.dateFormat = @"yyyyMMdd-HHmmss-SSS";
-  NSString* session = [NSString stringWithFormat:@"%@-%@", [date stringFromDate:NSDate.date], NSUUID.UUID.UUIDString];
-  gSessionDir = [gSessionRoot stringByAppendingPathComponent:session];
+  // Tu dong xoa log cu, chi giu 1 bo log duy nhat ghi de
+  NSArray* oldItems = [fm contentsOfDirectoryAtPath:gSessionRoot error:nil];
+  for (NSString* item in oldItems) {
+    [fm removeItemAtPath:[gSessionRoot stringByAppendingPathComponent:item] error:nil];
+  }
+  gSessionDir = gSessionRoot;
   [fm createDirectoryAtPath:gSessionDir withIntermediateDirectories:YES attributes:nil error:nil];
   gLogPath = [gSessionDir stringByAppendingPathComponent:@"adapter.log"];
   gFileIoLogPath = [gSessionDir stringByAppendingPathComponent:@"fileio.log"];
   gCrashLogPath = [gSessionDir stringByAppendingPathComponent:@"crash.log"];
-  [session writeToFile:[gSessionRoot stringByAppendingPathComponent:@"latest.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
   gBundleAssets = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru"];
   zs::setLogSink(logSink);

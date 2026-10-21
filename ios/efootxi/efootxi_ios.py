@@ -92,8 +92,11 @@ def configure(bundle, support, session):
             sys.stderr.reconfigure(line_buffering=True)
         except Exception:
             pass
-    import faulthandler
-    faulthandler.enable(all_threads=True)
+    try:
+        import faulthandler
+        faulthandler.enable(all_threads=True)
+    except BaseException:
+        pass
     event("python.jsonl", event="initializing", python=sys.version, bundle=bundle)
     target = Path(support) / "release-1.3.2-r1303" / "gateway-release"
     if not target.exists():
