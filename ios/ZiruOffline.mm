@@ -764,6 +764,7 @@ static NSData* bodyOf(NSURLRequest* r) {
   [self.client URLProtocol:self didReceiveResponse:hr cacheStoragePolicy:NSURLCacheStorageNotAllowed];
   if (data.length) [self.client URLProtocol:self didLoadData:data];
   [self.client URLProtocolDidFinishLoading:self];
+  ZLog(@"[NET_DONE] %@ status=%ld bytes=%lu", self.request.URL.path, (long)status, (unsigned long)data.length);
 }
 
 - (void)loadCdnAsset {
@@ -895,6 +896,7 @@ static NSData* bodyOf(NSURLRequest* r) {
   [self.client URLProtocol:self didReceiveResponse:hr cacheStoragePolicy:NSURLCacheStorageNotAllowed];
   if (!resp.body.empty()) [self.client URLProtocol:self didLoadData:[NSData dataWithBytes:resp.body.data() length:resp.body.size()]];
   [self.client URLProtocolDidFinishLoading:self];
+  ZLog(@"[NET_DONE] %s status=%d bytes=%lu", r.uri.c_str(), resp.status, (unsigned long)resp.body.size());
 }
 - (void)stopLoading {
   [_cdnTask cancel];
@@ -1272,19 +1274,8 @@ static BOOL checkDirectFolderData(NSString** why) {
   // contains native face textures, and removing it breaks thousands of faces.
   // Do not overwrite the user's command line on each launch.
 
-  // Purge any invalid Android containers masquerading as iOS
-  for (NSString* fake in @[@"pc9258_mobile_ios", @"pc9259_mobile_ios"]) {
-    for (NSString* ext in @[@".pak", @".ucas", @".utoc"]) {
-      NSString* fn = [fake stringByAppendingString:ext];
-      for (NSString* dir in @[pakDir, dlDir, [gDocs stringByAppendingPathComponent:@"livedata"]]) {
-        NSString* p = [dir stringByAppendingPathComponent:fn];
-        if ([fm fileExistsAtPath:p] || [fm destinationOfSymbolicLinkAtPath:p error:nil]) {
-          unlink(p.fileSystemRepresentation);
-          ZLog(@"[PURGE_FAKE_IOS] Removed invalid Android container: %@", p);
-        }
-      }
-    }
-  }
+  // Resource repair is hash-authorized above. Pack IDs alone do not authorize
+  // deleting user data, including additional player packs.
 
   // Sanitize lingering Tonemapper overrides in ue4commandline.txt
   NSString* docCmd = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];

@@ -1,7 +1,7 @@
 name: build-dylib
 on:
   push:
-    branches: [main, feature/online-1.1, community-mod-engine, codex/repair-data-loss-20261020]
+    branches: [main, feature/online-1.1, community-mod-engine, codex/repair-data-loss-20261020, codex/fix-liveupdate-20261021]
     tags: ['v*']
   workflow_dispatch:
 permissions:

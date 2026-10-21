@@ -29,15 +29,6 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     if (resumesSave || name == "responses/get_myclub_mainmenu_info.json") {
       if (resumesSave) {
         patchLocalLivedataUrls(jo);
-        // Ensure livedata_list and dt880 are empty for the iOS offline client
-        // so the game client never prompts for live update downloads and never hangs.
-        ObjP li = jo->optJSONObject("livedata_info");
-        if (li) {
-          li->put("livedata_list", newArr());
-          ObjP vf = Object::parse(li->optString("version_file", "{}"));
-          vf->put("dt880", newArr());
-          li->put("version_file", vf->toString());
-        }
       }
       ObjP ci = jo->optJSONObject("coin_info");
       if (!ci) { ci = newObj(); jo->put("coin_info", ci); }

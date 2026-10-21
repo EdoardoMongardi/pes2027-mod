@@ -591,6 +591,11 @@ void normalizeZiruAllLoginPlayers(const ObjP& jo) {
 std::string livedataBaseUrl = "https://127.0.0.1:8085/livedata/";
 
 void patchLocalLivedataUrls(const ObjP& jo) {
+  if (cfg.iosPlayerLayout) {
+    ObjP li = jo->optJSONObject("livedata_info");
+    if (li) patchIosLivedataManifest(li);
+    return;
+  }
   try {
     ObjP li = jo->optJSONObject("livedata_info");
     ArrP list;

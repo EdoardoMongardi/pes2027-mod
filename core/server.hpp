@@ -160,6 +160,7 @@ class OfflineServer {
 #include "srv_myclub.inc"
 #include "srv_league.inc"
 #include "srv_myleague.inc"
+#include "srv_livedata_ios.inc"
 #include "srv_part4.inc"
 #include "srv_part5.inc"
 #include "srv_part6.inc"

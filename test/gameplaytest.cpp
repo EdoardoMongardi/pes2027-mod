@@ -95,21 +95,47 @@ int main() {
     {
       std::filesystem::create_directories(root + "/livedata");
       std::ofstream(root + "/livedata/pc9999_mobile_ios.ucas") << "native";
+      std::ofstream(root + "/livedata/pc9999_mobile_ios.pak") << "pack";
+      std::ofstream(root + "/livedata/pc9999_mobile_ios.utoc") << "index";
       std::ofstream(root + "/livedata/pc9999_mobile_and.ucas") << "old";
       std::ofstream(root + "/livedata/dt870_mobile_and.cpk") << "fixed";
+      std::filesystem::create_directories(root + "/Download");
+      std::ofstream(root + "/Download/dt870_mobile_ios.cpk") << "different-download-copy";
+      std::ofstream(root + "/livedata/pc9997_mobile_ios.utoc") << "incomplete";
+      for (const char* ext : {"pak", "ucas", "utoc"})
+        std::ofstream(root + "/livedata/pc9998_mobile_and." + ext) << "Android only";
+      std::ofstream(root + "/native-livedata.json") << R"([{"name":"pc9999_mobile_ios.ucas"},{"name":"pc9997_mobile_ios.utoc"},{"name":"../../outside.utoc"}])";
       Config ios = cfg; ios.iosPlayerLayout = true; ios.dropAndroidLivedata = false; ios.livedataDir = root + "/livedata";
+      ios.downloadDir = root + "/Download";
       OfflineServer server(ios);
-      auto data = obj(R"({"livedata_info":{"livedata_list":[{"name":"pc9999_mobile_and.ucas","size":3},{"name":"dt870_mobile_and.cpk","size":99}],"version_file":"{\"dt880\":[{\"name\":\"pc9999\"}]}"}})");
+      auto data = obj(R"({"livedata_info":{"livedata_list":[{"name":"pc9999_mobile_and.ucas","size":3},{"name":"pc9998_mobile_and.pak","size":12},{"name":"dt870_mobile_and.cpk","size":99}],"version_file":"{\"version\":2026091003,\"dt880\":[{\"name\":\"pc9999\"}]}"}})");
       server.patchLocalLivedataUrls(data);
       auto info = data->getJSONObject("livedata_info");
       auto list = info->getJSONArray("livedata_list");
       auto version = Object::parse(info->getString("version_file"));
-      check(list->getJSONObject(0)->getInt("size") == 6 && list->getJSONObject(0)->getString("hash").size() == 64,
+      check(list->length() == 4 && list->getJSONObject(2)->getInt("size") == 6 && list->getJSONObject(2)->getString("hash").size() == 64,
           "livedata list uses actual native bytes, not Android metadata");
-      check(version->getInt("dt870FileSize") == 5 && version->getString("dt870Hash") == list->getJSONObject(1)->getString("hash"),
-          "repaired database hash is also updated in the version file");
+      check(version->getInt("dt870FileSize") == 5 && version->getString("dt870Hash") == list->getJSONObject(0)->getString("hash"),
+          "database manifest describes served livedata bytes, not a different Download copy");
       check(version->getJSONArray("dt880")->getJSONObject(0)->getInt("ucasFileSize") == 6,
           "native texture container size is also updated in the version file");
+      check(version->getJSONArray("dt880")->length() == 1, "incomplete and Android-only groups are not advertised");
+      check(version->getLong("version") > 2026091003LL, "new manifest invalidates the old empty revision");
+      Request fetch; fetch.method = "GET"; fetch.uri = "/livedata/dt870_mobile_ios.cpk";
+      auto served = server.serve(fetch);
+      check(served.status == 200 && std::string(served.body.begin(), served.body.end()) == "fixed",
+          "download URL serves exactly the CPK that was hashed");
+      auto erased = obj(R"({"livedata_info":{"livedata_list":[],"version_file":"{\"version\":2026091003,\"dt880\":[]}"}})");
+      asset(root, "CmdLogin.json", erased);
+      auto login = call(server, "CMD_LOGIN")->getJSONObject("livedata_info");
+      check(login->getJSONArray("livedata_list")->length() == 4 &&
+          Object::parse(login->getString("version_file"))->getJSONArray("dt880")->length() == 1,
+          "encrypted LOGIN recovers the erased manifest and does not clear it after patching");
+      std::filesystem::remove(root + "/livedata/dt870_mobile_and.cpk");
+      bool missingFailed = false;
+      try { server.patchLocalLivedataUrls(erased); } catch (const IOEx&) { missingFailed = true; }
+      check(missingFailed, "missing CPK does not publish a fabricated hardcoded hash");
+      std::ofstream(root + "/livedata/dt870_mobile_and.cpk") << "fixed";
       auto agueroParams = newArr();
       for (int i = 0; i < 149; ++i) agueroParams->put(0);
       auto aguero = newObj()->put("gameplayer_id", newObj()->put("id", 88044682118054LL))
