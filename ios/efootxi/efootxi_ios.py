@@ -201,7 +201,97 @@ def configure(bundle, support, session):
     return status
 
 
+_data_root = None
+_STADIUM_VERSION = 2026081300
+_STADIUM_CACHE = ".efootxi-stadium-hashes.json"
+
+
+def _stadium_name(name):
+    """Native iOS stadium container parts only; pc3001/pc3011 belong to the base."""
+    import re
+    m = re.fullmatch(r"(pc30\d\d)_mobile_ios\.(pak|ucas|utoc)", name)
+    return m and m.group(1) not in ("pc3001", "pc3011")
+
+
+def _stage_stadiums(root, original_documents, emit):
+    """Collect user-supplied iOS stadium packs into <root>/Download and hash them once.
+
+    Android stadium packs are never accepted: their materials break the Metal
+    spectator shader (white stands). Files dropped in the app's Documents
+    folder (Files app) are moved; the international data's own Download files
+    are linked, never moved.
+    """
+    download = Path(root) / "Download"
+    download.mkdir(parents=True, exist_ok=True)
+    docs = Path(original_documents)
+    for source, move in ((docs, True), (Path(root), True), (docs / "Download", False)):
+        if not source.is_dir() or source.resolve() == download.resolve():
+            continue
+        for item in source.iterdir():
+            if not item.is_file() or not _stadium_name(item.name):
+                continue
+            target = download / item.name
+            if target.exists() or target.is_symlink():
+                if move and target.is_file() and target.stat().st_size == item.stat().st_size:
+                    continue
+                os.replace(target, target.with_name(target.name + ".previous-" + str(time.time_ns())))
+            if move:
+                os.replace(item, target)
+            else:
+                os.symlink(item, target)
+            emit("stadium_imported", file=item.name, moved=move)
+    cache_path = download / _STADIUM_CACHE
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cache = {}
+    fresh = {}
+    for item in sorted(download.iterdir()):
+        if not _stadium_name(item.name) or not item.is_file():
+            continue
+        st = item.stat()
+        old = cache.get(item.name) or {}
+        if old.get("size") == st.st_size and old.get("mtime_ns") == st.st_mtime_ns and len(old.get("sha256", "")) == 64:
+            fresh[item.name] = old
+            continue
+        with item.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        fresh[item.name] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "sha256": digest}
+    temporary = cache_path.with_name(_STADIUM_CACHE + ".tmp")
+    temporary.write_text(json.dumps(fresh, indent=2), encoding="utf-8")
+    os.replace(temporary, cache_path)
+    stems = sorted({n.split("_mobile_ios.")[0] for n in fresh})
+    complete = [s for s in stems if all(s + "_mobile_ios." + e in fresh for e in ("pak", "ucas", "utoc"))]
+    emit("stadiums_ready", stadiums=complete)
+
+
+def _stadium_list():
+    """CMD_GET_STADIUM_DATA: exactly the complete, hashed iOS stadium triples installed."""
+    if _data_root is None:
+        return []
+    download = Path(_data_root) / "Download"
+    try:
+        cache = json.loads((download / _STADIUM_CACHE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for stem in sorted({n.split("_mobile_ios.")[0] for n in cache}):
+        parts = [stem + "_mobile_ios." + e for e in ("pak", "ucas", "utoc")]
+        rows = []
+        for name in parts:
+            record, path = cache.get(name), download / name
+            if not record or not path.is_file() or path.stat().st_size != record["size"]:
+                rows = []
+                break
+            rows.append({"name": name, "size": record["size"], "hash": record["sha256"],
+                         "version": _STADIUM_VERSION, "changelist_number": 0})
+        out += rows
+    return out
+
+
 def prepare_data(mode, root, original_documents):
+    global _data_root
+    _data_root = root
     from efootxi_resources import install, prepare_global, install_native_live
     def emit(kind, **value):
         event('resource-install.jsonl', event=kind, **value)
@@ -236,6 +326,10 @@ def prepare_data(mode, root, original_documents):
         if mode == 'china-data':
             from efootxi_native_base import install as install_native_base
             install_native_base(_bundle, original_documents, root, emit)
+        try:
+            _stage_stadiums(root, original_documents, emit)
+        except Exception as error:
+            event("python.jsonl", event="stadium_stage_error", error=repr(error))
         event('resource-install.jsonl', event='ready', mode=mode, result=result)
         return True
     except BaseException:
@@ -561,7 +655,7 @@ def _adapt_ios_response(request, resp):
             event("python.jsonl", event="news_ack_error", error=str(e))
 
     elif mid == "CMD_GET_STADIUM_DATA":
-        resp["data_list"] = []
+        resp["data_list"] = _stadium_list()
         resp["result"] = "NOERR"
 
     elif mid == "CMD_GET_MAINMENU_MATCH_CREATIVE_INFO":
