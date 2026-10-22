@@ -190,11 +190,16 @@ def prepare_data(mode, root, original_documents):
         print('EFOOTXI_DATA', kind, json.dumps(value, ensure_ascii=False), flush=True)
         try:
             import _efootxi_native
+            if kind == 'native_base_restart_required':
+                _efootxi_native.restart_required()
             total = value.get('total') or value.get('count') or 0
             done = value.get('downloaded') or value.get('index') or 0
             descriptions = {'download_begin': 'Đang kết nối tải data China', 'download_progress': 'Đang tải data China',
                 'download_verified': 'Đã kiểm tra gói tải', 'extract_verified': 'Đang cài tài nguyên',
                 'checking_base': 'Đang kiểm tra dữ liệu có sẵn', 'global_copy': 'Đang chuẩn bị data quốc tế',
+                'native_base_copy': 'Đang chuẩn bị đồ họa iOS gốc', 'native_base_ready': 'Đồ họa iOS đã sẵn sàng',
+                'native_base_unavailable': 'Chưa tìm thấy bộ đồ họa iOS khớp với phiên bản này',
+                'native_base_restart_required': 'Đồ họa iOS đã chuẩn bị xong; mở lại game để áp dụng',
                 'installed': 'Đã cài data China; đang thử khả năng tương thích iOS', 'already_installed': 'Data đã sẵn sàng'}
             detail = descriptions.get(kind, kind)
             if value.get('file'):
@@ -210,6 +215,9 @@ def prepare_data(mode, root, original_documents):
         else:
             result = prepare_global(original_documents, root, emit)
         install_native_live(_bundle, Path(root), emit)
+        if mode == 'china-data':
+            from efootxi_native_base import install as install_native_base
+            install_native_base(_bundle, original_documents, root, emit)
         event('resource-install.jsonl', event='ready', mode=mode, result=result)
         return True
     except BaseException:

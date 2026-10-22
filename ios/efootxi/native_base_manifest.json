@@ -1,0 +1,207 @@
+[
+  {
+    "name": "pc0100_mobile_ios.pak",
+    "bytes": 365,
+    "sha256": "db5c6f623b6865b63461b7e6af63b61ba5066131084e38989820bae49394b1a5"
+  },
+  {
+    "name": "pc0100_mobile_ios.ucas",
+    "bytes": 159745696,
+    "index_sha256": "c3112aae66c078097b3e7632028d01d7affb804a5f2aaeb8e8a083d3ee14824f"
+  },
+  {
+    "name": "pc3001_mobile_ios.pak",
+    "bytes": 365,
+    "sha256": "420a87001f0cd462289179a272fc635165c9bc90528c3ed9cfbd0b7148649280"
+  },
+  {
+    "name": "pc0100_mobile_ios.utoc",
+    "bytes": 326454,
+    "sha256": "c3112aae66c078097b3e7632028d01d7affb804a5f2aaeb8e8a083d3ee14824f"
+  },
+  {
+    "name": "pc7000_mobile_ios.pak",
+    "bytes": 132725571,
+    "sha256": "725ab4087f07d961438f4e083c0b079c3b60e504df6c50ea4e3e816aa5b6946c"
+  },
+  {
+    "name": "pc3011_mobile_ios.utoc",
+    "bytes": 132779,
+    "sha256": "e9825e2e104a29c0888daaf9b599c487bb9b97985154c893ddd5b259ba4a34be"
+  },
+  {
+    "name": "pc0010_mobile_ios.pak",
+    "bytes": 1607,
+    "sha256": "3afe265df16bf9ca1d9c427e7bc8b59c7ed7c985a466a159fe1bc210d0103ed1"
+  },
+  {
+    "name": "pc0000_mobile_ios.ucas",
+    "bytes": 26691104,
+    "index_sha256": "a22b7258eaed63a8613199a723596594c32ea61fad023eacc333fb88ceacc6b1"
+  },
+  {
+    "name": "pc0000_mobile_ios.utoc",
+    "bytes": 186194,
+    "sha256": "a22b7258eaed63a8613199a723596594c32ea61fad023eacc333fb88ceacc6b1"
+  },
+  {
+    "name": "pc3011_mobile_ios.ucas",
+    "bytes": 117167472,
+    "sha256": "e2331a0f882d25dd337c75dfba949e8ea4703cc7e81e61bfb1394d3e0948ae64"
+  },
+  {
+    "name": "pc0103_mobile_ios.pak",
+    "bytes": 365,
+    "sha256": "664665ee1916617675d23c024c33420e63502272623c521943c870b7fc912feb"
+  },
+  {
+    "name": "pc3611_mobile_ios.ucas",
+    "bytes": 123874176,
+    "index_sha256": "1b8e8d0a9875aa7513408c3fe4360287c928f71ef6c8c3168092dbc4e17727a5"
+  },
+  {
+    "name": "pc0000_mobile_ios.pak",
+    "bytes": 77512690,
+    "sha256": "5059356f54c3bc92e20125424edd108d34ff22cf06a983813dad0bc966e9605c"
+  },
+  {
+    "name": "pc1001_mobile_ios.pak",
+    "bytes": 365,
+    "sha256": "16c70efb3151340e17b56c199587c7bd253c8ec8599314108b0682973c45fef1"
+  },
+  {
+    "name": "pc3611_mobile_ios.utoc",
+    "bytes": 4700041,
+    "sha256": "1b8e8d0a9875aa7513408c3fe4360287c928f71ef6c8c3168092dbc4e17727a5"
+  },
+  {
+    "name": "pc0010_mobile_ios.ucas",
+    "bytes": 6408512,
+    "index_sha256": "249e877cfd24a9ae71ba69adfcc6be1bf6c36d99f4fde49fa0cdea5d017cf0c3"
+  },
+  {
+    "name": "pc3600_mobile_ios.ucas",
+    "bytes": 429600864,
+    "index_sha256": "ee40aaa581cf3dc4442875258f20a4c5f281dc87b2ef0ceefac31f86d43c5e1c"
+  },
+  {
+    "name": "pc3001_mobile_ios.utoc",
+    "bytes": 765237,
+    "sha256": "572af0de09ecb04c38829689a3e060612e8a014435a7c8e049dedf2cd1c15114"
+  },
+  {
+    "name": "pc1000_mobile_ios.pak",
+    "bytes": 365,
+    "sha256": "26f1b4331a8d6a00c81072536d0184774ee9de62ac0593ec2681c43aa663c8e3"
+  },
+  {
+    "name": "pc3011_mobile_ios.pak",
+    "bytes": 365,
+    "sha256": "853eceb9dac8dbe9195b71a09f9acef3e5bcd48cd9af7ee940b3fff7e9eafcd2"
+  },
+  {
+    "name": "pc3001_mobile_ios.ucas",
+    "bytes": 267827120,
+    "sha256": "6a357271283d154696c529c8f951cf4cd3705db56d543b6fbdea3b3fc2e64ae1"
+  },
+  {
+    "name": "pc0102_mobile_ios.pak",
+    "bytes": 365,
+    "sha256": "26ee0b1f6d34e734d47f85d637d46c3f2945d26cffe0f8762a41e175b713e293"
+  },
+  {
+    "name": "pc0010_mobile_ios.utoc",
+    "bytes": 81102,
+    "sha256": "249e877cfd24a9ae71ba69adfcc6be1bf6c36d99f4fde49fa0cdea5d017cf0c3"
+  },
+  {
+    "name": "pc4000_mobile_ios.pak",
+    "bytes": 365,
+    "sha256": "9519c4e42c43619b7c4dd755fec7ef5d445d4b6a33d3a7fa84705c1d95bb2316"
+  },
+  {
+    "name": "pc3600_mobile_ios.utoc",
+    "bytes": 633139,
+    "sha256": "ee40aaa581cf3dc4442875258f20a4c5f281dc87b2ef0ceefac31f86d43c5e1c"
+  },
+  {
+    "name": "pc3600_mobile_ios.pak",
+    "bytes": 365,
+    "sha256": "ce6056aedf911a029fa5536402e807dcb57ff3797b28e4d84ea4abfe3c489790"
+  },
+  {
+    "name": "pc4000_mobile_ios.ucas",
+    "bytes": 37899744,
+    "index_sha256": "d75856b2613ee1c01d140ccadb1b56967b0877658235e1ed6c766fb1e7317f3c"
+  },
+  {
+    "name": "pc4000_mobile_ios.utoc",
+    "bytes": 109642,
+    "sha256": "d75856b2613ee1c01d140ccadb1b56967b0877658235e1ed6c766fb1e7317f3c"
+  },
+  {
+    "name": "pc1001_mobile_ios.ucas",
+    "bytes": 340948624,
+    "index_sha256": "170ab8192b1aec646b236ffd427ad04e158735464c7d45731187beff7c44374a"
+  },
+  {
+    "name": "pc0103_mobile_ios.ucas",
+    "bytes": 68698768,
+    "index_sha256": "33e32f0064d88c1cb22ef604a5d717d7d36a5d6e023256286b1264ed4c179b3f"
+  },
+  {
+    "name": "pc7000_mobile_ios.utoc",
+    "bytes": 35622,
+    "sha256": "e94bb2942ec846f8e5919c60499bb92b5fcfa024f716c448bfddc27cf393e65e"
+  },
+  {
+    "name": "pc7000_mobile_ios.ucas",
+    "bytes": 266384,
+    "index_sha256": "e94bb2942ec846f8e5919c60499bb92b5fcfa024f716c448bfddc27cf393e65e"
+  },
+  {
+    "name": "pc0103_mobile_ios.utoc",
+    "bytes": 922291,
+    "sha256": "33e32f0064d88c1cb22ef604a5d717d7d36a5d6e023256286b1264ed4c179b3f"
+  },
+  {
+    "name": "pc1001_mobile_ios.utoc",
+    "bytes": 4089226,
+    "sha256": "170ab8192b1aec646b236ffd427ad04e158735464c7d45731187beff7c44374a"
+  },
+  {
+    "name": "pc1000_mobile_ios.ucas",
+    "bytes": 332155280,
+    "index_sha256": "d69c94c30e9b7a2c135b99078588b62503de15934315ce31d6e74d55aa7cb83f"
+  },
+  {
+    "name": "pc0102_mobile_ios.ucas",
+    "bytes": 445011296,
+    "index_sha256": "2c943860c55e6db4ad3107a5ef81c526d1074314a8491b3427f6f052a1dbe7d1"
+  },
+  {
+    "name": "global_mobile_ios.utoc",
+    "bytes": 669,
+    "sha256": "a8912ac9cf7c9b414a937feeea39ae6d01a3827898d43809b461ff80ea882373"
+  },
+  {
+    "name": "global_mobile_ios.ucas",
+    "bytes": 1869248,
+    "index_sha256": "a8912ac9cf7c9b414a937feeea39ae6d01a3827898d43809b461ff80ea882373"
+  },
+  {
+    "name": "pc3611_mobile_ios.pak",
+    "bytes": 365,
+    "sha256": "1077daf78d383d81db87c36e9ac3ea6de67fd2ecc4b4e75e754ff259603cee12"
+  },
+  {
+    "name": "pc0102_mobile_ios.utoc",
+    "bytes": 1761802,
+    "sha256": "2c943860c55e6db4ad3107a5ef81c526d1074314a8491b3427f6f052a1dbe7d1"
+  },
+  {
+    "name": "pc1000_mobile_ios.utoc",
+    "bytes": 4738664,
+    "sha256": "d69c94c30e9b7a2c135b99078588b62503de15934315ce31d6e74d55aa7cb83f"
+  }
+]

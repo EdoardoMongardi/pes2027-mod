@@ -12,6 +12,28 @@ static PyObject* nativeProgress(PyObject*, PyObject* args) {
   Py_RETURN_NONE;
 }
 
+static PyObject* nativeRestartRequired(PyObject*, PyObject*) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    static BOOL shown = NO;
+    if (shown) return;
+    UIWindow* window = nil;
+    for (UIScene* scene in UIApplication.sharedApplication.connectedScenes)
+      if ([scene isKindOfClass:UIWindowScene.class])
+        for (UIWindow* candidate in ((UIWindowScene*)scene).windows)
+          if (candidate.isKeyWindow) window = candidate;
+    UIViewController* controller = window.rootViewController;
+    while (controller.presentedViewController) controller = controller.presentedViewController;
+    if (!controller) return;
+    shown = YES;
+    UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"Đồ họa iOS đã sẵn sàng"
+        message:@"Đóng hẳn game rồi mở lại để áp dụng. Dữ liệu cầu thủ được giữ nguyên."
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Đã hiểu" style:UIAlertActionStyleDefault handler:nil]];
+    [controller presentViewController:alert animated:YES completion:nil];
+  });
+  Py_RETURN_NONE;
+}
+
 static PyObject* nativeAES(PyObject*, PyObject* args) {
   int encrypt; const char *key, *iv, *input; Py_ssize_t keySize, ivSize, size;
   if (!PyArg_ParseTuple(args, "iy#y#y#", &encrypt, &key, &keySize, &iv, &ivSize, &input, &size)) return nullptr;
@@ -26,7 +48,8 @@ static PyObject* nativeAES(PyObject*, PyObject* args) {
   return output;
 }
 static PyMethodDef efootxiMethods[] = {{"aes_cbc", nativeAES, METH_VARARGS, nullptr},
-  {"progress", nativeProgress, METH_VARARGS, nullptr}, {nullptr,nullptr,0,nullptr}};
+  {"progress", nativeProgress, METH_VARARGS, nullptr},
+  {"restart_required", nativeRestartRequired, METH_NOARGS, nullptr}, {nullptr,nullptr,0,nullptr}};
 static struct PyModuleDef efootxiModule = {PyModuleDef_HEAD_INIT, "_efootxi_native", nullptr, -1, efootxiMethods};
 PyMODINIT_FUNC PyInit__efootxi_native() { return PyModule_Create(&efootxiModule); }
 

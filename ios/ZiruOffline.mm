@@ -511,6 +511,7 @@ static void resolveAltName(char* buffer, size_t bufSize) {
 }
 
 #include "ZiruDisplayRepair.inc"
+#include "ZiruNativeBase.inc"
 
 static const char* redirectPath(const char* path, char* buffer, size_t bufSize) {
   // Backend/installers already use explicit paths, including staging and source data.
@@ -2321,6 +2322,10 @@ static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* o
   gLaunchApp = app;
   gLaunchOptions = opts;
 #ifdef EFOOTXI_IOS
+  {
+    BackendIOScope backendIO;
+    activatePendingNativeBase(gDocs, gSessionDir);
+  }
   // Khoi dong server Python ngam ngay lap tuc, khong chan chu ky khoi tao giao dien cua UE4
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
     efootxiPrepareResources();

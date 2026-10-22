@@ -22,6 +22,7 @@ jobs:
         run: |
           python3 -m unittest discover -s test -p 'efootxi_bridge_test.py' -v
           python3 -m unittest discover -s test -p 'efootxi_catalogue_test.py' -v
+          python3 -m unittest discover -s test -p 'efootxi_native_base_test.py' -v
           python3 -m unittest discover -s test -p 'efootxi_resources_test.py' -v
           python3 -m unittest discover -s test -p 'ios_tables_test.py' -v
           python3 -m unittest discover -s test -p 'cpk_merge_test.py' -v
