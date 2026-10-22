@@ -155,7 +155,10 @@ def configure(bundle, support, session):
         # Resume an interrupted first copy, then atomically publish it.
         shutil.copytree(_bundle / "gateway-release", staging, dirs_exist_ok=True)
         os.replace(staging, target)
-    sys.path.insert(0, str(target / "work" / "tools"))
+    bundle_tools = _bundle / "gateway-release" / "work" / "tools"
+    if bundle_tools.is_dir():
+        sys.path.insert(0, str(bundle_tools))
+    sys.path.insert(1, str(target / "work" / "tools"))
     records = json.loads((_bundle / "livedata" / "native-manifest.json").read_text())
     _native_live = {}
     for record in records:
@@ -172,6 +175,17 @@ def configure(bundle, support, session):
     restored = install(target.resolve())
     _agent_count = active_count(target.resolve())
     event('python.jsonl', event='catalogue_restored', agent_ids=restored)
+    try:
+        from efootxi_catalogue import fix_coach_linkups
+        event('python.jsonl', event='coach_linkups_fixed', coaches=fix_coach_linkups(target.resolve()))
+    except Exception as error:
+        event('python.jsonl', event='coach_linkup_fix_error', error=repr(error))
+    try:
+        from efootxi_catalogue import trim_factory_gifts
+        event('python.jsonl', event='factory_gifts_trimmed', result=trim_factory_gifts(target.resolve()))
+        _agent_count = active_count(target.resolve())
+    except Exception as error:
+        event('python.jsonl', event='factory_gift_trim_error', error=repr(error))
     _banner_hashes = {}
     for name in _banner_names:
         image = target / 'livedata' / name
@@ -181,6 +195,46 @@ def configure(bundle, support, session):
     _gateway._local_urls = lambda value: _manifest(original(value))
     event("python.jsonl", event="ready", status=status, save=str(target))
     return status
+
+
+def _install_extra_paks(root, emit):
+    """Link the bundled R9/Zidane iOS containers (pak_extra) into the engine pak folder.
+
+    Files are copied once to <root>/pak_extra with SHA-256 verification and only
+    symlinked into <root>/pak, so a later native-base swap never loses them and
+    no existing container is replaced. New links take effect on the next launch.
+    """
+    source = _bundle / "pak_extra"
+    manifest = source / "legends-ios-manifest.json"
+    if not manifest.is_file():
+        return
+    rows = [f for group in json.loads(manifest.read_text(encoding="utf-8")).values() for f in group["files"]]
+    store, pak = root / "pak_extra", root / "pak"
+    store.mkdir(parents=True, exist_ok=True)
+    linked = []
+    # .pak last: the engine discovers a container through its companion .pak.
+    for row in sorted(rows, key=lambda r: r["name"].endswith(".pak")):
+        name = row["name"]
+        if Path(name).name != name or not name.endswith((".pak", ".utoc", ".ucas")):
+            raise ValueError("invalid extra pak name " + name)
+        target = store / name
+        if not target.is_file() or hashlib.file_digest(target.open("rb"), "sha256").hexdigest() != row["sha256"]:
+            temporary = target.with_name(name + ".copying")
+            shutil.copyfile(source / name, temporary)
+            if hashlib.file_digest(temporary.open("rb"), "sha256").hexdigest() != row["sha256"]:
+                raise ValueError("extra pak hash mismatch " + name)
+            os.replace(temporary, target)
+        link = pak / name
+        if link.is_symlink() and os.readlink(link) == "../pak_extra/" + name:
+            continue
+        if link.exists() or link.is_symlink():
+            continue  # never replace a container that is already there
+        try:
+            os.symlink("../pak_extra/" + name, link)
+        except OSError:
+            shutil.copy2(target, link)
+        linked.append(name)
+    emit("extra_paks_ready", files=len(rows), linked=linked)
 
 
 def prepare_data(mode, root, original_documents):
@@ -218,6 +272,10 @@ def prepare_data(mode, root, original_documents):
         if mode == 'china-data':
             from efootxi_native_base import install as install_native_base
             install_native_base(_bundle, original_documents, root, emit)
+        try:
+            _install_extra_paks(Path(root), emit)
+        except Exception as error:
+            event("python.jsonl", event="extra_pak_error", error=repr(error))
         event('resource-install.jsonl', event='ready', mode=mode, result=result)
         return True
     except BaseException:
@@ -249,6 +307,369 @@ def _resource(path):
     return 200, mime, data
 
 
+_VIETNAMESE_EVENTS = [
+    {
+        "event_id": 90002,
+        "event_name": "UEFA Champions League - Cúp C1 Châu Âu",
+        "event_list_disp_name": "UEFA Champions League - Cúp C1 Châu Âu",
+        "major_category": "SQUAD_CHALLENGE",
+        "is_vs_user": "NO",
+        "is_custom_team": "YES",
+        "event_start_time": 0,
+        "event_end_time": 2147483647,
+        "event_panel_open_time": 0,
+        "event_panel_close_time": 0,
+        "match_entry": [],
+        "is_nonsupport": "NO",
+        "description_text": "Tranh cúp vô địch các câu lạc bộ châu Âu đỉnh cao.",
+        "rule_detail_text": "",
+        "is_championship_pro": "NO",
+        "is_official_competition": "NO",
+        "esports_mode_kind": "NONE",
+        "is_in_esports_menu": "NO",
+        "link_title_list": [],
+        "link_url_list": [],
+        "achievement_name_list": ["European Club Championship"],
+        "is_local_gamerelay": "NO",
+        "has_ranking": "NO",
+        "fame_id_list": [],
+        "collabo_kind": "NONE"
+    },
+    {
+        "event_id": 90003,
+        "event_name": "FIFA World Cup - Cúp Vô Địch Thế Giới",
+        "event_list_disp_name": "FIFA World Cup - Cúp Vô Địch Thế Giới",
+        "major_category": "SQUAD_CHALLENGE",
+        "is_vs_user": "NO",
+        "is_custom_team": "YES",
+        "event_start_time": 0,
+        "event_end_time": 2147483647,
+        "event_panel_open_time": 0,
+        "event_panel_close_time": 0,
+        "match_entry": [],
+        "is_nonsupport": "NO",
+        "description_text": "Đại hội bóng đá thế giới - Cúp vô địch các đội tuyển quốc gia.",
+        "rule_detail_text": "",
+        "is_championship_pro": "NO",
+        "is_official_competition": "NO",
+        "esports_mode_kind": "NONE",
+        "is_in_esports_menu": "NO",
+        "link_title_list": [],
+        "link_url_list": [],
+        "achievement_name_list": ["World Cup Championship"],
+        "is_local_gamerelay": "NO",
+        "has_ranking": "NO",
+        "fame_id_list": [],
+        "collabo_kind": "NONE"
+    },
+    {
+        "event_id": 90004,
+        "event_name": "Legend All-Stars Challenge - Thách Đấu Huyền Thoại",
+        "event_list_disp_name": "Legend All-Stars Challenge - Thách Đấu Huyền Thoại",
+        "major_category": "SQUAD_CHALLENGE",
+        "is_vs_user": "NO",
+        "is_custom_team": "YES",
+        "event_start_time": 0,
+        "event_end_time": 2147483647,
+        "event_panel_open_time": 0,
+        "event_panel_close_time": 0,
+        "match_entry": [],
+        "is_nonsupport": "NO",
+        "description_text": "Thử thách đỉnh cao cùng đội hình huyền thoại bóng đá thế giới.",
+        "rule_detail_text": "",
+        "is_championship_pro": "NO",
+        "is_official_competition": "NO",
+        "esports_mode_kind": "NONE",
+        "is_in_esports_menu": "NO",
+        "link_title_list": [],
+        "link_url_list": [],
+        "achievement_name_list": ["Legend Challenge"],
+        "is_local_gamerelay": "NO",
+        "has_ranking": "NO",
+        "fame_id_list": [],
+        "collabo_kind": "NONE"
+    },
+    {
+        "event_id": 90005,
+        "event_name": "European Super Derbies - Siêu Kinh Điển El Clásico",
+        "event_list_disp_name": "European Super Derbies - Siêu Kinh Điển El Clásico",
+        "major_category": "SQUAD_CHALLENGE",
+        "is_vs_user": "NO",
+        "is_custom_team": "YES",
+        "event_start_time": 0,
+        "event_end_time": 2147483647,
+        "event_panel_open_time": 0,
+        "event_panel_close_time": 0,
+        "match_entry": [],
+        "is_nonsupport": "NO",
+        "description_text": "Các trận cầu siêu kinh điển rực lửa của bóng đá châu Âu.",
+        "rule_detail_text": "",
+        "is_championship_pro": "NO",
+        "is_official_competition": "NO",
+        "esports_mode_kind": "NONE",
+        "is_in_esports_menu": "NO",
+        "link_title_list": [],
+        "link_url_list": [],
+        "achievement_name_list": ["Super Derbies"],
+        "is_local_gamerelay": "NO",
+        "has_ranking": "NO",
+        "fame_id_list": [],
+        "collabo_kind": "NONE"
+    },
+    {
+        "event_id": 100004,
+        "event_name": "My League Sprint - Đua Tốc Độ & Thử Thách",
+        "event_list_disp_name": "My League Sprint - Đua Tốc Độ & Thử Thách",
+        "major_category": "SQUAD_CHALLENGE",
+        "is_vs_user": "NO",
+        "is_custom_team": "YES",
+        "event_start_time": 0,
+        "event_end_time": 2147483647,
+        "event_panel_open_time": 0,
+        "event_panel_close_time": 0,
+        "match_entry": [],
+        "is_nonsupport": "NO",
+        "description_text": "Sự kiện đồng hành cùng mùa giải My League.",
+        "rule_detail_text": "",
+        "is_championship_pro": "NO",
+        "is_official_competition": "NO",
+        "esports_mode_kind": "NONE",
+        "is_in_esports_menu": "NO",
+        "link_title_list": [],
+        "link_url_list": [],
+        "achievement_name_list": ["My League Sprint"],
+        "is_local_gamerelay": "NO",
+        "has_ranking": "NO",
+        "fame_id_list": [],
+        "collabo_kind": "NONE"
+    }
+]
+
+
+def _second_style(position, first):
+    """Secondary (defensive) playing style when the card data leaves it 0.
+
+    Same position rule as the original PES2027 iOS server (z27GetDefensiveStyle),
+    which matches the captured official account (e.g. Messi RWF [14, 23]).
+    """
+    if position == 0:
+        return 33 if first in (16, 17) else 16
+    if position == 1 or first in (16, 17):
+        return 33
+    by_position = {2: 30, 3: 28, 4: 28, 5: 25, 6: 25, 7: 27, 8: 27, 9: 23, 10: 23, 11: 23, 12: 26, 13: 26}
+    if position in by_position:
+        return by_position[position]
+    if first in (1, 2, 3, 13, 22):
+        return 26
+    if first in (4, 6, 10, 14, 18, 19):
+        return 23
+    if first in (7, 8, 9, 20):
+        return 25
+    if first in (11, 12, 15, 21):
+        return 28
+    return 27
+
+
+def _fill_second_styles(value):
+    """Display-only: fill play_style[1] where it is 0; parameters stay untouched."""
+    if isinstance(value, dict):
+        style = value.get("play_style")
+        if (isinstance(style, list) and len(style) == 2 and type(style[0]) is int and style[0] > 0
+                and style[1] == 0):
+            params = value.get("parameters")
+            position = params[0] if isinstance(params, list) and params and type(params[0]) is int else -1
+            value["play_style"] = [style[0], _second_style(position, style[0])]
+        for item in value.values():
+            if isinstance(item, (dict, list)):
+                _fill_second_styles(item)
+    elif isinstance(value, list):
+        for item in value:
+            if isinstance(item, (dict, list)):
+                _fill_second_styles(item)
+    return value
+
+
+def _adapt_ios_response(request, resp):
+    if not isinstance(resp, dict):
+        return resp
+    _fill_second_styles(resp)
+    mid = resp.get("msgid") or (request.get("msgid") if isinstance(request, dict) else None)
+
+    if mid in ("CMD_GET_MAINMENU_INFO", "CMD_GET_MYCLUB_MAINMENU_INFO"):
+        banners = resp.get("banner_list")
+        if isinstance(banners, list) and banners:
+            for idx, b in enumerate(banners):
+                if not isinstance(b, dict):
+                    continue
+                name = urlsplit(b.get("banner_file_name", "")).path.rsplit("/", 1)[-1]
+                if "players" in name or idx == 0:
+                    b.update(announcement_type="AGENT", entity_id=91000,
+                             title_text="Cầu thủ đặc biệt", description_text="Các pack và cầu thủ mới nhất",
+                             note_text="efootxi · https://t.me/efootxi", is_popup="NO")
+                else:
+                    b.update(announcement_type="AGENT", entity_id=91001,
+                             title_text="Huấn luyện viên & Siêu sao", description_text="Các huấn luyện viên và thẻ Big Time mới nhất",
+                             note_text="efootxi · https://t.me/efootxi", is_popup="NO")
+        try:
+            import club_store as store
+            import managed_card_pool
+            import sqlite3
+            root = getattr(_gateway, '_root', None)
+            if root:
+                db_path = Path(root) / "outputs/efootball/local-club.sqlite3"
+                if db_path.is_file():
+                    with sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True) as conn:
+                        agents = store.agents(conn)
+                        by_id = {a.get("agent_id"): a for a in agents}
+                        banner_aids = [91000, 91001]
+                        banner_agents = [by_id[aid] for aid in banner_aids if aid in by_id]
+                        if banner_agents:
+                            decorated = managed_card_pool.decorate_agents(conn, banner_agents)
+                            resp["agent_list"] = _manifest(decorated)
+                        prices_str = store.get_meta(conn, "agent_price_list", "[]")
+                        if prices_str:
+                            all_prices = json.loads(prices_str)
+                            resp["agent_price_list"] = [p for p in all_prices if p.get("agent_id") in banner_aids]
+                        read_str = store.get_meta(conn, "efootxi_news_read_v1", "[]")
+                        seen = set(json.loads(read_str)) if read_str else set()
+                        if 140001 not in seen:
+                            resp["is_news_popup"] = "YES"
+                            try:
+                                with sqlite3.connect(db_path) as wconn:
+                                    seen.add(140001)
+                                    store.set_meta(wconn, "efootxi_news_read_v1", json.dumps(sorted(seen)))
+                                    wconn.commit()
+                            except Exception:
+                                pass
+                        else:
+                            resp["is_news_popup"] = "NO"
+        except Exception as e:
+            event("python.jsonl", event="banner_adapt_error", error=str(e))
+
+    elif mid == "CMD_GET_MAILBOX_INFO":
+        try:
+            news_list = resp.get("news_list")
+            if isinstance(news_list, list):
+                if not any(n.get("news_id") == 140001 for n in news_list if isinstance(n, dict)):
+                    import club_store as store
+                    import sqlite3
+                    seen = set()
+                    root = getattr(_gateway, '_root', None)
+                    if root:
+                        db_path = Path(root) / "outputs/efootball/local-club.sqlite3"
+                        if db_path.is_file():
+                            with sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True) as conn:
+                                read_str = store.get_meta(conn, "efootxi_news_read_v1", "[]")
+                                seen = set(json.loads(read_str)) if read_str else set()
+                    notice_140001 = {
+                        "news_id": 140001,
+                        "title": "Thông báo bản quyền & Chuyển đổi iOS",
+                        "date": 1792634400,
+                        "body": "Bản quyền thuộc về Efootxi và iOSVN chỉ là người biên dịch nó sang iOS theo yêu cầu của member.",
+                        "readFlag": "YES" if 140001 in seen else "NO",
+                        "type": "NEWS_TYPE_GLOBAL",
+                        "priority": 0,
+                        "frequency_type": "ONCE_POPUP_ONLY",
+                        "category": "NEWS_CATEGORY_IMPORTANT",
+                        "banner_name": "",
+                        "link_list": [],
+                        "surveyFlag": "NO"
+                    }
+                    news_list.insert(0, notice_140001)
+                    resp["result"] = "NOERR"
+        except Exception as e:
+            event("python.jsonl", event="mailbox_adapt_error", error=str(e))
+
+    elif mid == "CMD_SET_NEWSLIST":
+        try:
+            supplied = request.get("news_list") if isinstance(request, dict) else None
+            if isinstance(supplied, list) and 140001 in supplied:
+                import club_store as store
+                import sqlite3
+                root = getattr(_gateway, '_root', None)
+                if root:
+                    db_path = Path(root) / "outputs/efootball/local-club.sqlite3"
+                    if db_path.is_file():
+                        with sqlite3.connect(db_path) as conn:
+                            read_str = store.get_meta(conn, "efootxi_news_read_v1", "[]")
+                            seen = set(json.loads(read_str)) if read_str else set()
+                            seen.add(140001)
+                            store.set_meta(conn, "efootxi_news_read_v1", json.dumps(sorted(seen)))
+                            conn.commit()
+            resp["result"] = "NOERR"
+        except Exception as e:
+            event("python.jsonl", event="news_ack_error", error=str(e))
+
+    elif mid == "CMD_GET_STADIUM_DATA":
+        resp["data_list"] = []
+        resp["result"] = "NOERR"
+
+    elif mid == "CMD_GET_MAINMENU_MATCH_CREATIVE_INFO":
+        try:
+            creative_template_path = Path(__file__).with_name("old_ipa_creative_info.json")
+            if creative_template_path.is_file():
+                import copy
+                c_data = json.loads(creative_template_path.read_text(encoding="utf-8"))
+                for k in ("event_info_list", "league_division_info", "league_info", "analyst_main_info",
+                          "ml_event_info", "sheet_list", "empty_slot_info_list", "season_root_info"):
+                    if k in c_data:
+                        resp[k] = copy.deepcopy(c_data[k])
+                resp["result"] = "NOERR"
+            else:
+                far_future = 2147483647
+                if isinstance(resp.get("event_info_list"), list):
+                    for item in resp["event_info_list"]:
+                        if isinstance(item, dict):
+                            item["event_end_time"] = far_future
+                            if "event_start_time" in item:
+                                item["event_start_time"] = 0
+                if isinstance(resp.get("ml_event_info"), dict):
+                    resp["ml_event_info"]["event_end_time"] = far_future
+                    resp["ml_event_info"]["event_panel_close_time"] = far_future
+                if isinstance(resp.get("league_info"), dict):
+                    resp["league_info"]["league_phase_end_time"] = far_future
+        except Exception as e:
+            event("python.jsonl", event="creative_adapt_error", error=str(e))
+
+    elif mid in ("CMD_GET_EVENT_LIST_AND_LOG", "CMD_GET_EVENT_LIST_AND_INFO"):
+        try:
+            event_template_path = Path(__file__).with_name("old_ipa_event_list.json")
+            if event_template_path.is_file():
+                import copy
+                t_data = json.loads(event_template_path.read_text(encoding="utf-8"))
+                resp["event_list"] = copy.deepcopy(t_data["event_list"])
+                resp["event_log_list"] = copy.deepcopy(t_data["event_log_list"])
+                resp["event_num"] = len(resp["event_list"])
+                for k in ("sp_rate_list", "cpu_level_rate_list", "result_rate_list", "default_member",
+                          "event_recommend_kind", "event_recommend_str", "event_recommend_info_type"):
+                    if k in t_data:
+                        resp[k] = copy.deepcopy(t_data[k])
+                resp["result"] = "NOERR"
+            else:
+                far_future = 2147483647
+                event_list = resp.get("event_list")
+                if isinstance(event_list, list) and event_list:
+                    for ev in event_list:
+                        if isinstance(ev, dict):
+                            ev["event_start_time"] = 0
+                            ev["event_end_time"] = far_future
+                            eid = ev.get("event_id")
+                            matched = next((ve for ve in _VIETNAMESE_EVENTS if ve["event_id"] == eid), None)
+                            if matched:
+                                ev["event_name"] = matched["event_name"]
+                                ev["event_list_disp_name"] = matched["event_list_disp_name"]
+                                ev["description_text"] = matched["description_text"]
+                else:
+                    import copy
+                    resp["event_list"] = copy.deepcopy(_VIETNAMESE_EVENTS)
+                    resp["event_num"] = len(_VIETNAMESE_EVENTS)
+                resp["result"] = "NOERR"
+        except Exception as e:
+            event("python.jsonl", event="event_adapt_error", error=str(e))
+
+    return resp
+
+
 def serve(method, path, body):
     global _serial
     with _lock:
@@ -274,6 +695,8 @@ def serve(method, path, body):
                     write_json(prefix.with_suffix(".request.json"), request)
                     response = _gateway.handle(path, body)
                     response_dict = pes_msg.decode_response(response)
+                    response_dict = _adapt_ios_response(request, response_dict)
+                    response = pes_msg.encode_response(response_dict)
                 write_json(prefix.with_suffix(".response.json"), response_dict)
                 status, mime = 200, "application/x-msgpack"
             prefix.with_suffix(".response.bin").write_bytes(response)

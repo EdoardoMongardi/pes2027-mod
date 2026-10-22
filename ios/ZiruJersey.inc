@@ -373,10 +373,7 @@ static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int 
     std::string n = lookupShirtNameByPlayerId(actor, playerId);
     if (!n.empty()) return n;
   }
-  if (uniformNumber > 0 && uniformNumber <= 99) {
-    std::string n = lookupShirtName(actor, uniformNumber);
-    if (!n.empty()) return n;
-  }
+  (void)uniformNumber;  // a shirt number alone is not a player identity
 
   // 3. Try native TMPDB PlayerManager::FindPlayer with playerId
   if (playerId > 0 || (playerId & 0xFFFFFF) > 0) {
@@ -417,9 +414,29 @@ static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int 
   return "";
 }
 
+static std::string currentShirtName(void* actor) {
+  if (!actor) return "";
+  const uint8_t* s = (const uint8_t*)actor + 0x1710;
+  bool heap = (int8_t)s[23] < 0;
+  uint64_t len = heap ? ((const uint64_t*)s)[1] : (s[23] & 0x7f);
+  const char* str = heap ? *(const char**)s : (const char*)s;
+  if (!str || len == 0 || len > 120) return "";
+  return std::string(str, (size_t)len);
+}
+
+// The name to print on the shirt: the engine's own name when it has one,
+// otherwise the roster/database name of the identified player. Always the
+// upper-case ASCII form the kit fonts contain.
+static std::string desiredShirtName(void* actor, int64_t pid, int uniformNumber) {
+  std::string native = currentShirtName(actor);
+  std::string source = !native.empty() ? native : lookupPlayerNameUniversal(actor, pid, uniformNumber);
+  std::string upper = sanitizeShirtName(source.c_str());
+  return upper.empty() ? toUpperAscii(source) : upper;
+}
+
 static void applyActorShirtName(void* actor, const std::string& name) {
   if (!actor || name.empty()) return;
-  std::string formatted = formatPlayerShirtName(name);
+  std::string formatted = name;
   auto setShirt = (void (*)(void*, const char*))(0x10090ef34 + gSlide);
   if (setShirt) {
     setShirt(actor, formatted.c_str());
@@ -450,11 +467,11 @@ static void hookedSetUniformNumber(void* actor, int uniformNumber) {
     auto it = sActorPlayerId.find(actor);
     if (it != sActorPlayerId.end()) pid = it->second;
   }
-  std::string name = lookupPlayerNameUniversal(actor, pid, uniformNumber);
+  std::string name = desiredShirtName(actor, pid, uniformNumber);
   if (!name.empty()) {
     applyLegendRealFace(actor, pid, name);
-    applyActorShirtName(actor, name);
-    ZLog(@"[JERSEY] SetUniformNumber #%d pid=%lld -> '%s'", uniformNumber, (long long)pid, formatPlayerShirtName(name).c_str());
+    if (name != currentShirtName(actor)) applyActorShirtName(actor, name);
+    ZLog(@"[JERSEY] SetUniformNumber #%d pid=%lld -> '%s'", uniformNumber, (long long)pid, name.c_str());
   }
 }
 
@@ -486,11 +503,11 @@ static void hookedSetupFromPlayerId(void* actor, int64_t playerId, void* path, i
   }
   if (originalSetupFromPlayerId) originalSetupFromPlayerId(actor, playerId, path, uniformNumber, uniName);
   int32_t num = *(int32_t*)((uint8_t*)actor + 0x1708);
-  std::string name = lookupPlayerNameUniversal(actor, playerId, num);
+  std::string name = desiredShirtName(actor, playerId, num);
   applyLegendRealFace(actor, playerId, name);
   if (!name.empty()) {
-    applyActorShirtName(actor, name);
-    ZLog(@"[JERSEY] SetupFromPlayerId pid=%lld num=%d -> '%s'", (long long)playerId, num, formatPlayerShirtName(name).c_str());
+    if (name != currentShirtName(actor)) applyActorShirtName(actor, name);
+    ZLog(@"[JERSEY] SetupFromPlayerId pid=%lld num=%d -> '%s'", (long long)playerId, num, name.c_str());
   }
 }
 
@@ -508,27 +525,10 @@ static void hookedBackNumberStep(void* actor) {
       if (it != sActorPlayerId.end()) pid = it->second;
     }
 
-    const uint8_t* s = (const uint8_t*)actor + 0x1710;
-    bool heap = (int8_t)s[23] < 0;
-    uint64_t len = heap ? ((const uint64_t*)s)[1] : (s[23] & 0x7f);
-    const char* curStr = heap ? *(const char**)s : (const char*)s;
-
-    std::string neededName;
-    std::string correctName = lookupPlayerNameUniversal(actor, pid, num);
-    if (!correctName.empty()) {
-      std::string formatted = formatPlayerShirtName(correctName);
-      if (!curStr || len == 0 || len != formatted.size() || strncmp(curStr, formatted.c_str(), len) != 0) {
-        neededName = formatted;
-      }
-    } else if (curStr && len > 0) {
-      std::string raw(curStr, len);
-      std::string formatted = formatPlayerShirtName(raw);
-      if (!formatted.empty() && formatted != raw) {
-        neededName = formatted;
-      }
-    }
-
-    if (!neededName.empty()) {
+    // Keep the engine's own name (upper-cased for the kit font); only an
+    // empty name is filled, and only from an identified player.
+    std::string neededName = desiredShirtName(actor, pid, num);
+    if (!neededName.empty() && neededName != currentShirtName(actor)) {
       applyActorShirtName(actor, neededName);
     }
 
