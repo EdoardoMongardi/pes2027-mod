@@ -3,8 +3,10 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import sys
 
 MODULE = Path(__file__).resolve().parents[1] / 'ios/efootxi/efootxi_ios.py'
+sys.path.insert(0, str(MODULE.parent))
 
 
 class BridgeTests(unittest.TestCase):
@@ -87,7 +89,7 @@ class BridgeTests(unittest.TestCase):
         self.bridge._gateway = type('Gateway', (), {'_root': self.bridge._bundle})()
         (self.bridge._bundle / 'livedata/efootxi-home-players.jpg').write_bytes(image)
         value = self.bridge._manifest({'banner_file_name': 'http://127.0.0.1:8085/livedata/efootxi-home-players.jpg?rev=123'})
-        self.assertEqual(value['banner_file_name'], '/efootxi/efootxi-home-players.jpg?rev=123')
+        self.assertEqual(value['banner_file_name'], '/efootxi/efootxi-home-players.jpg')
         for path in ('/prd' + value['banner_file_name'],
                      '/prdhttp://127.0.0.1:8085/livedata/efootxi-home-players.jpg?rev=123',
                      '/livedata/efootxi-home-players.jpg'):
@@ -95,6 +97,20 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(self.bridge.serve('GET', '/prd/efootxi/unrecognized.jpg', b'')[0], 404)
         self.assertEqual(self.bridge.serve('GET', '/missing', b'')[0], 404)
         self.assertFalse(list((self.bridge._session / 'requests').glob('*.exception.txt')))
+
+    def test_hash_only_banner_identity_and_contract_count(self):
+        import hashlib
+        image = b'\xff\xd8\xff\xe0JPEG'
+        digest = hashlib.sha256(image).hexdigest()
+        self.bridge._banner_hashes = {digest: 'efootxi-home-players.jpg'}
+        self.bridge._agent_count = 38
+        self.bridge._gateway = type('Gateway', (), {'_root': self.bridge._bundle})()
+        (self.bridge._bundle / 'livedata/efootxi-home-players.jpg').write_bytes(image)
+        result = self.bridge._manifest({'banner_file_name': '/livedata/efootxi-home-players.jpg?rev=old'})
+        self.assertEqual(result['banner_file_name'], '/efootxi/'+digest)
+        self.assertEqual(self.bridge.serve('GET','/prd'+result['banner_file_name'],b''), (200,'image/jpeg',image))
+        self.assertEqual(self.bridge._manifest({'agent_num':11})['agent_num'],38)
+        self.assertEqual(self.bridge.serve('GET','/prd/efootxi/'+'a'*64,b'')[0],404)
 
 
 if __name__ == '__main__':

@@ -510,10 +510,13 @@ static void resolveAltName(char* buffer, size_t bufSize) {
   }
 }
 
+#include "ZiruDisplayRepair.inc"
+
 static const char* redirectPath(const char* path, char* buffer, size_t bufSize) {
   // Backend/installers already use explicit paths, including staging and source data.
   if (gBackendIO) return path;
   if (!path || !path[0] || !gDocsUTF8[0]) return path;
+  if (isTemporaryDownloadPath(path)) return path;
   // The verified bundled iOS resources must not be redirected into an older cache.
   if (strstr(path, ".app/efootxi/") || strstr(path, ".app/python/") ||
       strstr(path, "/Application Support/Efootxi2027/") || strstr(path, "/Application Support/Efootxi2027-")) return path;
@@ -995,12 +998,13 @@ static NSData* bodyOf(NSURLRequest* r) {
   gLastNetwork = CFAbsoluteTimeGetCurrent();
   diagnosticEvent(@"native-network.jsonl", @{@"event":@"begin", @"url":url.absoluteString ?: @"", @"method":rq.HTTPMethod ?: @"GET"});
 #ifdef EFOOTXI_IOS
-  BOOL localBanner = [@[@"efootxi-home-players.jpg", @"efootxi-home-coaches.jpg"] containsObject:url.lastPathComponent] &&
+  BOOL localBanner = [url.path hasPrefix:@"/prd/efootxi/"] || [url.path hasPrefix:@"/efootxi/"] ||
+    ([@[@"efootxi-home-players.jpg", @"efootxi-home-coaches.jpg"] containsObject:url.lastPathComponent] &&
     ([url.path hasPrefix:@"/prd/efootxi/"] || [url.path hasPrefix:@"/efootxi/"] ||
-     [url.path hasPrefix:@"/prdhttp://127.0.0.1:8085/livedata/"]);
+     [url.path hasPrefix:@"/prdhttp://127.0.0.1:8085/livedata/"]));
   if (localBanner || !isCdnAssetURL(url)) {
     NSString* path = url.path.length ? url.path : @"/";
-    if (localBanner || [url.host.lowercaseString isEqualToString:@"d1ln4m3c7n87ju.cloudfront.net"])
+    if (!localBanner && [url.host.lowercaseString isEqualToString:@"d1ln4m3c7n87ju.cloudfront.net"])
       path = [@"/livedata/" stringByAppendingString:url.lastPathComponent ?: @""];
     NSData* body = bodyOf(rq) ?: [NSData data];
     gRequestsActive.fetch_add(1);
@@ -1224,16 +1228,16 @@ typedef void (*FCommandLineAppendFn)(const char16_t*);
 static NSString* const kDefaultCommandLine = @"-t.MaxFPS=120";
 
 static void setupGraphicsEnhancements() {
+  repairSavedGraphics(gOriginalDocuments ?: gDocs, gSessionDir);
+  if (gOriginalDocuments && ![gOriginalDocuments isEqualToString:gDocs])
+    repairSavedGraphics(gDocs, gSessionDir);
   NSString* userCmdPath = [gDocs stringByAppendingPathComponent:@"ue4commandline.txt"];
   NSFileManager* fm = NSFileManager.defaultManager;
   
   NSString* existing = [NSString stringWithContentsOfFile:userCmdPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
   // Migrate the previous adapter's forced Film/HDR/gamma settings. Preserve
   // unrelated switches rather than replacing the whole user's command line.
-  NSRegularExpression* forced = [NSRegularExpression regularExpressionWithPattern:
-    @"(?i)(?<!\\S)-r\\.(?:TonemapperFilm|MobileHDR|Color\\.(?:Saturation|Contrast|Mid)|TonemapperGamma)=[^\\s]+"
-    options:0 error:nil];
-  NSString* cleaned = [forced stringByReplacingMatchesInString:existing options:0 range:NSMakeRange(0, existing.length) withTemplate:@""];
+  NSString* cleaned = cleanLegacyGraphics(existing, YES);
   NSString* targetCmd = [cleaned stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
   if (!targetCmd.length) targetCmd = kDefaultCommandLine;
   if (![existing isEqualToString:cleaned]) {

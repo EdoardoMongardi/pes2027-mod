@@ -24,6 +24,8 @@ _lock = threading.RLock()
 _native_live = None
 _country_names = json.loads(Path(__file__).with_name("country_names.json").read_text(encoding="utf-8"))
 _banner_names = frozenset(("efootxi-home-players.jpg", "efootxi-home-coaches.jpg"))
+_banner_hashes = {}
+_agent_count = None
 
 
 def _resource_path(path):
@@ -32,6 +34,8 @@ def _resource_path(path):
     if path.startswith("/livedata/"):
         return path
     name = path.rsplit("/", 1)[-1]
+    if name in _banner_hashes and path.startswith(("/prd/efootxi/", "/efootxi/")):
+        return "/livedata/" + _banner_hashes[name]
     if name in _banner_names and (path.startswith("/prd/efootxi/") or
             path.startswith("/efootxi/") or
             path.startswith("/prdhttp://127.0.0.1:8085/livedata/")):
@@ -79,8 +83,24 @@ def _manifest(value):
             if name in _banner_names:
                 # iOS prepends its CDN root and /prd. Absolute URLs here are
                 # concatenated literally, not resolved as a URL.
-                query = urlsplit(banner).query
-                result["banner_file_name"] = "/efootxi/" + name + ("?" + query if query else "")
+                digest = next((h for h, n in _banner_hashes.items() if n == name), None)
+                # Native image caches treat the last URL component as a file
+                # identity. Match the CDN's hash-only names, without ?rev text.
+                result["banner_file_name"] = "/efootxi/" + (digest or name)
+                if name == 'efootxi-home-players.jpg':
+                    result.update(title_text='Cầu thủ đặc biệt', description_text='Các pack và cầu thủ mới nhất')
+                else:
+                    result.update(title_text='Huấn luyện viên', description_text='Các huấn luyện viên mới nhất')
+                result['note_text'] = 'efootxi · https://t.me/efootxi'
+        from efootxi_catalogue import LABELS
+        if 'agent_num' in result and _agent_count is not None:
+            result['agent_num'] = _agent_count
+        if result.get('agent_id') in LABELS and 'title' in result:
+            result['title'] = LABELS[result['agent_id']]
+            if 'description' in result:
+                result['description'] = 'Cầu thủ trong pack theo giải đấu và vị trí.'
+        elif 'agent_id' in result and isinstance(result.get('title'), str):
+            result['title'] = result['title'].replace('（', ' (').replace('人）', ' players)')
         if isinstance(result.get("livedata_list"), list) and "version_file" in result:
             version = json.loads(result["version_file"])
             version["version"] = max(int(version.get("version", 0)), 2026102102)
@@ -107,7 +127,7 @@ def _manifest(value):
 
 
 def configure(bundle, support, session):
-    global _bundle, _session, _gateway, _native_live
+    global _bundle, _session, _gateway, _native_live, _banner_hashes, _agent_count
     _bundle, _session = Path(bundle), Path(session)
     _session.mkdir(parents=True, exist_ok=True)
     (_session / "requests").mkdir(exist_ok=True)
@@ -148,6 +168,15 @@ def configure(bundle, support, session):
     import embedded_gateway
     _gateway = embedded_gateway
     status = _gateway.initialize(str(target))
+    from efootxi_catalogue import install, active_count
+    restored = install(target.resolve())
+    _agent_count = active_count(target.resolve())
+    event('python.jsonl', event='catalogue_restored', agent_ids=restored)
+    _banner_hashes = {}
+    for name in _banner_names:
+        image = target / 'livedata' / name
+        if image.is_file():
+            _banner_hashes[hashlib.sha256(image.read_bytes()).hexdigest()] = name
     original = _gateway._local_urls
     _gateway._local_urls = lambda value: _manifest(original(value))
     event("python.jsonl", event="ready", status=status, save=str(target))
