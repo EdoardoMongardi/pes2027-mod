@@ -243,3 +243,39 @@ def trim_factory_gifts(target):
                                (TRIM_REVISION, report)):
                 connection.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', (key, json.dumps(value)))
         return report
+
+
+# Cards with no card art and no base-player photo in any iOS/Android data set
+# (mostly fake-name unlicensed legends). They stay owned if already owned, but
+# packs no longer offer them (weight 0 keeps the membership row reversible).
+ARTLESS_REVISION = 'ios-hide-artless-cards-v1'
+ARTLESS_CARDS = (
+    '105592576279511', '105592576326312', '105636599735981', '105636599756769', '105648679323740', '105648679325457',
+    '17593259920868', '17593796657382', '17593796657960', '17593796658038', '17593796658075', '17593796658077',
+    '17593796658129', '17593796659501', '17593796661920', '17593796662070', '17593796663560', '17593796664224',
+    '17593796664301', '17593796664596', '17593796693708', '17593796695746', '17593796791754', '17593796791755',
+    '17593796791775', '17593796791779', '17593796791800', '17593796791801', '17593796791803', '17593796791817',
+    '17593796791819', '17593796791820', '17593796791823', '17593796791827', '17593796791829', '17593796795111',
+    '17593796795120', '17593796803742', '17593796803743', '17593796805177', '17593796805366', '53876069804536',
+    '53876338230181', '53876338231746', '53876338233036', '53876338238982', '53876338339533', '70373844564769',
+    '70379750033946', '87960930356657', '88045755829779', '88045755835027', '88045755859255', '90138210258002',
+    '90138210259180', '90138210259184', '90138210259191', '90138210259211', '90138210263185', '90138210263302',
+    '90138210263452', '90138210263497', '90138210263571', '90138210263973', '90138478693458', '90138478694636',
+    '90138478694640', '90138478694647', '90138478694667', '90138478698641', '90138478698758', '90138478698908',
+    '90138478698953', '90138478699027', '90138478699429', '90138747128914', '90138747130092', '90138747130096',
+    '90138747130103', '90138747130123', '90138747134097', '90138747134214', '90138747134364', '90138747134409',
+    '90138747134483', '90138747134885',
+)
+
+
+def hide_artless_cards(target):
+    database = Path(target) / 'outputs/efootball/local-club.sqlite3'
+    with sqlite3.connect(database.as_uri() + '?mode=rw', uri=True) as connection:
+        if connection.execute('SELECT 1 FROM meta WHERE key=?', (ARTLESS_REVISION,)).fetchone():
+            return {'already_applied': True}
+        marks = ','.join('?' * len(ARTLESS_CARDS))
+        with connection:
+            hidden = connection.execute('UPDATE managed_members SET weight=0 WHERE weight>0 AND card_id IN (%s)' % marks,
+                                        ARTLESS_CARDS).rowcount
+            connection.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', (ARTLESS_REVISION, json.dumps({'hidden': hidden})))
+        return {'hidden': hidden}

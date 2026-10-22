@@ -103,7 +103,9 @@ def _manifest(value):
             result['title'] = result['title'].replace('（', ' (').replace('人）', ' players)')
         if isinstance(result.get("livedata_list"), list) and "version_file" in result:
             version = json.loads(result["version_file"])
-            version["version"] = max(int(version.get("version", 0)), 2026102102)
+            # Bumped when the bundled livedata set changes (pc9290-9292 supplemental
+            # containers) so the client re-reads the dt880 list and mounts them.
+            version["version"] = max(int(version.get("version", 0)), 2026102202)
             # Native iOS IsPassAppVer rejects the Android release's 6.1.0 target.
             version.pop("targetAppVersion", None)
             version["dt870Hash"] = _native_live["dt870_mobile_ios.cpk"]["sha256"]
@@ -183,6 +185,8 @@ def configure(bundle, support, session):
     try:
         from efootxi_catalogue import trim_factory_gifts
         event('python.jsonl', event='factory_gifts_trimmed', result=trim_factory_gifts(target.resolve()))
+        from efootxi_catalogue import hide_artless_cards
+        event('python.jsonl', event='artless_cards_hidden', result=hide_artless_cards(target.resolve()))
         _agent_count = active_count(target.resolve())
     except Exception as error:
         event('python.jsonl', event='factory_gift_trim_error', error=repr(error))
@@ -195,46 +199,6 @@ def configure(bundle, support, session):
     _gateway._local_urls = lambda value: _manifest(original(value))
     event("python.jsonl", event="ready", status=status, save=str(target))
     return status
-
-
-def _install_extra_paks(root, emit):
-    """Link the bundled R9/Zidane iOS containers (pak_extra) into the engine pak folder.
-
-    Files are copied once to <root>/pak_extra with SHA-256 verification and only
-    symlinked into <root>/pak, so a later native-base swap never loses them and
-    no existing container is replaced. New links take effect on the next launch.
-    """
-    source = _bundle / "pak_extra"
-    manifest = source / "legends-ios-manifest.json"
-    if not manifest.is_file():
-        return
-    rows = [f for group in json.loads(manifest.read_text(encoding="utf-8")).values() for f in group["files"]]
-    store, pak = root / "pak_extra", root / "pak"
-    store.mkdir(parents=True, exist_ok=True)
-    linked = []
-    # .pak last: the engine discovers a container through its companion .pak.
-    for row in sorted(rows, key=lambda r: r["name"].endswith(".pak")):
-        name = row["name"]
-        if Path(name).name != name or not name.endswith((".pak", ".utoc", ".ucas")):
-            raise ValueError("invalid extra pak name " + name)
-        target = store / name
-        if not target.is_file() or hashlib.file_digest(target.open("rb"), "sha256").hexdigest() != row["sha256"]:
-            temporary = target.with_name(name + ".copying")
-            shutil.copyfile(source / name, temporary)
-            if hashlib.file_digest(temporary.open("rb"), "sha256").hexdigest() != row["sha256"]:
-                raise ValueError("extra pak hash mismatch " + name)
-            os.replace(temporary, target)
-        link = pak / name
-        if link.is_symlink() and os.readlink(link) == "../pak_extra/" + name:
-            continue
-        if link.exists() or link.is_symlink():
-            continue  # never replace a container that is already there
-        try:
-            os.symlink("../pak_extra/" + name, link)
-        except OSError:
-            shutil.copy2(target, link)
-        linked.append(name)
-    emit("extra_paks_ready", files=len(rows), linked=linked)
 
 
 def prepare_data(mode, root, original_documents):
@@ -272,10 +236,6 @@ def prepare_data(mode, root, original_documents):
         if mode == 'china-data':
             from efootxi_native_base import install as install_native_base
             install_native_base(_bundle, original_documents, root, emit)
-        try:
-            _install_extra_paks(Path(root), emit)
-        except Exception as error:
-            event("python.jsonl", event="extra_pak_error", error=repr(error))
         event('resource-install.jsonl', event='ready', mode=mode, result=result)
         return True
     except BaseException:
