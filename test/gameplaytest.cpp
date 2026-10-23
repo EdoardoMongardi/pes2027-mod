@@ -77,6 +77,16 @@ static bool sameStyles(const ObjP& p, int first, int second, const std::vector<i
   return true;
 }
 
+// The match uses CMD_START_GAME's parameters for the user's own players, so they
+// must be exactly the card's parameters (styles, AI styles, skills, everything).
+static std::string paramDiff(const ObjP& card, const ObjP& match) {
+  auto a = card->getJSONArray("parameters"), b = match->getJSONArray("parameters");
+  if (a->length() != b->length()) return "length " + std::to_string(a->length()) + " vs " + std::to_string(b->length());
+  for (int i = 0; i < a->length(); ++i)
+    if (a->optInt(i, -1) != b->optInt(i, -1)) return "index " + std::to_string(i);
+  return "";
+}
+
 static void cardIdentityTests(const std::string& top) {
   const std::string root = top + "/card-identity";
   std::filesystem::create_directories(root + "/responses");
@@ -128,6 +138,17 @@ static void cardIdentityTests(const std::string& top) {
       ->put("player_ids", newArr()->put(C)->put(G)->put(Z)))));
   asset(root, "ZIRU_GET_VSCOM_OPPONENT.json", obj(R"({"squad_data":{"squad_gameplan":{"formation":[],"match_plan_settings":{}}},"user_info":[{}]})"));
   asset(root, "ZIRU_START_GAME.json", obj(R"({"squad_data_home":{"coach":{"coach_id":{"id":999,"serial":999}}},"commentary_info":{}})"));
+  // A captured MyLeague start: a squad of other people's cards with captured
+  // (here: invented) parameters and no play_style, as in the shipped file.
+  const long long Y = 4242 + (1LL << 40);  // known only to the template
+  auto templatePlayer = [&](long long id, int style1, int style2) {
+    auto c = card(id, 900000 + (id & 0xFF), 2, style1, style2, all, {0}, 0, 0, 145);
+    return newObj()->put("gameplayer_id", c->getJSONObject("gameplayer_id"))->put("parameters", c->getJSONArray("parameters"))->put("averaged_overall", 0);
+  };
+  asset(root, "ZIRU_ML_START_GAME.json", newObj()->put("squad_data_home", newObj()->put("team_id", 1)
+      ->put("player_list", newArr()->put(templatePlayer(A, 3, 26))->put(templatePlayer(C, 9, 30))->put(templatePlayer(Y, 11, 29)))
+      ->put("coach", newObj()->put("coach_id", newObj()->put("id", 999)->put("serial", 999)))->put("squad_gameplan", newObj()))
+      ->put("commentary_info", newObj()));
   asset(root, "CMD_USE_MYCLUB_ITEM.json", obj(R"({"result":"NOERR"})"));
   asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
   Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
@@ -182,6 +203,39 @@ static void cardIdentityTests(const std::string& top) {
         sameStyles(bySerial(home, 503), 14, 0, aiS) && sameStyles(bySerial(home, 505), 0, 9, aiK),
       "match start: the user's players carry the same styles as their cards");
   check(sameStyles(byId(away, C), 9, 0, none) && sameStyles(byId(away, G), 0, 17, none), "match start: AI cards as printed");
+  for (long long serial : {501, 502, 503, 504, 505}) {
+    std::string diff = paramDiff(bySerial(roster, serial), bySerial(home, serial));
+    check(diff.empty(), ("match start: the user's player " + std::to_string(serial) + " plays with the card's own parameters, " + diff).c_str());
+  }
+  // MyLeague without a special squad: the captured template squad is not sent as the user's players.
+  s.ziruMyLeagueSetActive(1);
+  auto ml = call(s, "CMD_START_GAME", newObj()->put("game_id", 7));
+  auto userSide = ml->getJSONObject("squad_data_home"), aiSide = ml->getJSONObject("squad_data_away");
+  check(userSide->getJSONArray("player_list")->length() == 0, "MyLeague: no captured player_list on the user's side");
+  auto aiPlayers = aiSide->getJSONArray("player_list");
+  check(aiPlayers->length() == 3 && sameStyles(byId(aiPlayers, A), 3, 0, aiA) && skillBit(byId(aiPlayers, A), 0) == 0 &&
+        sameStyles(byId(aiPlayers, C), 9, 0, none), "MyLeague: the AI template's known cards carry their own identity");
+  // MyLeague with a special squad: the user's own cards, a rental card, a card only the template knows,
+  // and a card nobody knows (left out).
+  auto special = newArr();
+  for (auto ref : {std::make_pair(A, 501LL), std::make_pair(S, 503LL), std::make_pair(D, 505LL), std::make_pair(R, 0LL),
+                   std::make_pair(Y, 0LL), std::make_pair(424242LL, 0LL)})
+    special->put(newObj()->put("gameplayer_id", newObj()->put("id", ref.first)->put("serial", ref.second)));
+  s.ziruDb->saveMeta("ziru_myleague_special_squad", newObj()->put("squad_data", newObj()->put("player_list", special)
+      ->put("coach", newArr()->put(coachRef(100, 1000))))->toString());
+  auto login2 = call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+  s.ziruMyLeagueSetActive(1);
+  auto mine = call(s, "CMD_START_GAME", newObj()->put("game_id", 8))->getJSONObject("squad_data_home")->getJSONArray("player_list");
+  check(mine->length() == 5, "MyLeague: an unknown card is left out instead of copying another player");
+  for (long long serial : {501, 503, 505}) {
+    std::string diff = paramDiff(bySerial(login2, serial), bySerial(mine, serial));
+    check(diff.empty(), ("MyLeague: the user's player " + std::to_string(serial) + " plays with the card's own parameters, " + diff).c_str());
+  }
+  check(sameStyles(byId(mine, R), 20, 28, aiS), "MyLeague: a rental card plays with its rental entry");
+  check(byId(mine, Y)->getJSONArray("parameters")->getInt(61) == 11, "MyLeague: a card only the template knows uses the template entry");
+  s.ziruMyLeagueSetActive(0);
+  s.ziruDb->saveMeta("ziru_myleague_special_squad", "");
+  check(sqlite3_exec(s.ziruDb->db, "DELETE FROM meta WHERE k='ziru_myleague_special_squad'", nullptr, nullptr, nullptr) == SQLITE_OK, "clear special squad");
 
 
   // Saves written by older builds: a learned Snap Strike (25) / Attack Trigger (68)

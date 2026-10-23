@@ -180,6 +180,10 @@ Response handleZiruMyLeagueStartGameV71() {
       hydrateZiruMyLeagueCoachV73(selected);
       nn(jo)->getJSONObject("squad_data_home")->put("coach",
           selected->getJSONObject("squad_data")->getJSONArray("coach")->getJSONObject(0));
+      // The template's player_list is a captured squad, not the user's cards. The
+      // client would play those cards with the captured parameters (styles, stats,
+      // skills), so send none and let the client use the user's own cards.
+      jo->getJSONObject("squad_data_home")->put("player_list", newArr());
     }
     if (m) {
       ObjP sq = Object::parse(*m);
@@ -255,6 +259,8 @@ Response handleZiruMyLeagueStartGameV71() {
     int aiTeam = userHome ? awayTeam : homeTeam;
     ObjP aiSquad = templateAiSquad ? z27Copy(templateAiSquad) : z27Copy(jo->optJSONObject("squad_data_home"));
     if (aiSquad) {
+      ArrP aiPlayers = aiSquad->optJSONArray("player_list");
+      for (int i = 0; aiPlayers && i < aiPlayers->length(); i++) z27ApplyCardIdentity(aiPlayers->optJSONObject(i));
       aiSquad->put("team_id", aiTeam);
       aiSquad->put("base_team", newArr()->put(z27Team(aiTeam)));
       ObjP aiCoach = aiSquad->optJSONObject("coach");
@@ -280,7 +286,25 @@ Response handleZiruMyLeagueStartGameV71() {
     return serveObjectAsEncryptedMsgPack(jo);
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V71_START_GAME_ERR] ") + e.what());
-    return handleZiruLeagueStatic("responses/ZIRU_ML_START_GAME.json");
+    return handleZiruMyLeagueStartGameFallback();
+  }
+}
+
+// The captured template, without its player_list: those are not the user's cards.
+Response handleZiruMyLeagueStartGameFallback() {
+  try {
+    ObjP jo = nn(loadZiruJsonAssetObject("responses/ZIRU_ML_START_GAME.json"));
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    if (req) jo->put("rqid", (long long)req->optLong("rqid", 1));
+    patchZiruMyLeagueCommonState(jo);
+    for (const char* side : {"squad_data_home", "squad_data_away"}) {
+      ObjP squad = jo->optJSONObject(side);
+      if (squad) squad->put("player_list", newArr());
+    }
+    return serveObjectAsEncryptedMsgPack(jo);
+  } catch (const std::exception& e) {
+    zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V71_START_GAME_FALLBACK_ERR] ") + e.what());
+    return handleZiruProtocolAckV81(std::nullopt);
   }
 }
 
