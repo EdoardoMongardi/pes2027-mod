@@ -88,16 +88,37 @@ bool parseManifest(const std::string& json, Manifest& m, std::string& err) {
   }
 }
 
+// The manifest sits at the root of the ZIP, or inside one top-level folder when the ZIP was made by
+// compressing the data folder itself ("PES2027-data/data-manifest.json", "PES2027-data/pak/..."). root
+// receives "" or that folder name plus '/'; every file listed in the manifest is looked up under it.
+static const zz::Entry* findManifest(const zz::Reader& z, std::string& root, std::string& err) {
+  root.clear();
+  if (const zz::Entry* e = z.find(kManifestName)) return e;
+  const zz::Entry* found = nullptr;
+  for (const auto& e : z.entries()) {
+    size_t slash = e.name.find('/');
+    if (slash == std::string::npos || slash == 0 || e.name.compare(slash + 1, std::string::npos, kManifestName) != 0) continue;
+    std::string dir = e.name.substr(0, slash);
+    if (dir[0] == '.' || dir == "__MACOSX") continue;  // hidden folders and macOS resource-fork copies
+    if (found) { err = "Gói có nhiều hơn một data-manifest.json"; return nullptr; }
+    found = &e;
+    root = dir + "/";
+  }
+  if (!found) err = "Gói không có data-manifest.json";
+  return found;
+}
+
 bool inspectPack(const std::string& zipPath, Manifest& m, std::string& err) {
   zz::Reader z;
   if (!z.open(zipPath, err)) return false;
-  const zz::Entry* me = z.find(kManifestName);
-  if (!me) { err = "Gói không có data-manifest.json"; return false; }
+  std::string root;
+  const zz::Entry* me = findManifest(z, root, err);
+  if (!me) return false;
   std::string js;
   if (!z.readAll(*me, js, err)) return false;
   if (!parseManifest(js, m, err)) return false;
   for (auto& f : m.files) {
-    const zz::Entry* e = z.find(f.path);
+    const zz::Entry* e = z.find(root + f.path);
     if (!e) { err = "Gói thiếu file: " + f.path; return false; }
     if (e->size != f.size) { err = "Sai dung lượng trong ZIP: " + f.path; return false; }
   }
@@ -173,8 +194,9 @@ bool installPack(const std::string& zipPath, const Layout& L, uint64_t freeBytes
   if (cb && !cb(pr)) { err = "Đã hủy"; return false; }
   zz::Reader z;
   if (!z.open(zipPath, err)) return false;
-  const zz::Entry* me = z.find(kManifestName);
-  if (!me) { err = "Gói không có data-manifest.json"; return false; }
+  std::string root;
+  const zz::Entry* me = findManifest(z, root, err);
+  if (!me) return false;
   std::string js;
   if (!z.readAll(*me, js, err) || !parseManifest(js, m, err)) return false;
   uint64_t total = m.totalBytes();
@@ -191,7 +213,7 @@ bool installPack(const std::string& zipPath, const Layout& L, uint64_t freeBytes
   pr.total = total;
   uint64_t base = 0;
   for (auto& f : m.files) {
-    const zz::Entry* e = z.find(f.path);
+    const zz::Entry* e = z.find(root + f.path);
     if (!e || e->size != f.size) { removeTree(staging); err = "Gói thiếu hoặc sai file: " + f.path; return false; }
     std::string dst = staging + "/" + f.path;
     mkdirs(dst.substr(0, dst.rfind('/')));
