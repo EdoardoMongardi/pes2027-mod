@@ -890,17 +890,33 @@ ObjP z27RentalCard(int64_t id) {
   return nullptr;
 }
 
+// The saved player of this serial when it is this exact card (also when the
+// requested id is an old id that the saved card was upgraded from), else null.
+// Learned skills are stored per serial and belong to this saved card only:
+// other cards that Konami's starter data lists under the same serial never
+// get them.
+ObjP z27SavedCardFor(int64_t serial, int64_t id) {
+  if (serial <= 0 || id <= 0) return nullptr;
+  JStr lp = loadPlayer(serial);
+  if (!lp || lp->empty()) return nullptr;
+  ObjP p = Object::parse(*lp);
+  if (p->optJSONObject("gameplayer")) p = p->getJSONObject("gameplayer");
+  ObjP sid = p->optJSONObject("gameplayer_id");
+  int64_t savedId = sid ? sid->optLong("id", 0) : 0;
+  if (savedId <= 0) return nullptr;
+  if (savedId == id || savedId == z27UpgradeIosCardPid(id, p->optInt("initial_base_team_id", 0))) return p;
+  return nullptr;
+}
+
 // The player as the match uses it. Looked up by exact card id only:
 // the saved player, the starter entry for this serial, the card's record, a
 // MyLeague rental card, the starter entry for this card. A card none of these
 // know is logged and null is returned; it is never built from another player.
 ObjP z27Player(const ObjP& gid) {
   int64_t serial = gid->optLong("serial", 0);
-  JStr lp = loadPlayer(serial);
-  ObjP p = lp ? Object::parse(*lp) : nullptr;
-  if (p && p->optJSONObject("gameplayer")) p = p->getJSONObject("gameplayer");
-  if (!p || p->getJSONObject("gameplayer_id")->getLong("id") != gid->getLong("id")) {
-    p = nullptr;
+  ObjP p = z27SavedCardFor(serial, gid->optLong("id", 0));
+  bool fromSave = p != nullptr;
+  if (!fromSave) {
     int64_t id = gid->getLong("id");
     ArrP list = z27Entry()->getJSONArray("gameplayer_list");
     for (int i = 0; !p && i < list->length(); i++) {
@@ -935,7 +951,7 @@ ObjP z27Player(const ObjP& gid) {
 
   // Learned skills first, so the card identity below keeps them on top of the card's own skills.
   std::vector<int32_t> al;
-  if (serial > 0) {
+  if (fromSave) {
     std::string s = sp("almanac_state").getString("ziru_skills_" + str(serial), "");
     if (!s.empty()) {
       for (auto& part : split(s, ',')) {

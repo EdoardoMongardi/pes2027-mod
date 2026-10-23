@@ -21,24 +21,34 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
       }
       int64_t j2 = ziruPlayerDataSerial;
       ObjP catalog = gp ? z27Copy(gp) : nullptr;
-      if (j2 > 0) {
+      // The owned card only when it is this exact card (or the card this id is
+      // upgraded to): the detail screen never mixes two versions of a player.
+      ObjP owned = j > 0 ? z27SavedCardFor(j2, j) : nullptr;
+      if (!owned && j <= 0 && j2 > 0) {
         JStr lp = loadPlayer(j2);
         if (lp && !lp->empty()) {
           ObjP parsed = Object::parse(*lp);
-          ObjP owned = parsed->optJSONObject("gameplayer") ? parsed->getJSONObject("gameplayer") : parsed;
-          ObjP gid = owned ? owned->optJSONObject("gameplayer_id") : nullptr;
-          int64_t ownedId = gid ? gid->optLong("id", 0) : 0;
-          if (ownedId > 0 && (j <= 0 || ownedId == j || (ownedId & 0xFFFFFF) == (j & 0xFFFFFF))) gp = owned;
+          owned = parsed->optJSONObject("gameplayer") ? parsed->getJSONObject("gameplayer") : parsed;
         }
+      }
+      if (owned) {
+        gp = z27Copy(owned);
+      } else if (j > 0) {
+        // Not saved under this serial (a starter card whose serial holds another
+        // card, a rental, a card in a static list): the same card the match uses.
+        ObjP built = z27Player(newObj()->put("id", (long long)j)->put("serial", (long long)j2));
+        if (built) gp = built;
       }
       if (gp) {
         gp = z27Copy(gp);
         params = gp->optJSONArray("parameters");
       }
+      ObjP shownId = gp ? gp->optJSONObject("gameplayer_id") : nullptr;
+      if (catalog && (!shownId || shownId->optLong("id", 0) != j)) catalog = nullptr;
       if (gp && params) {
         z27NormalizeOwnedCard(gp);
         // Restore missing intrinsic flags without replacing owned progression,
-        // boosters or learned skills with a catalog copy.
+        // boosters or learned skills with a catalog copy (the same card only).
         ArrP base = catalog ? catalog->optJSONArray("parameters") : nullptr;
         ArrP original = gp->optJSONArray("original_parameters");
         for (int index = 70; index < 142 && index < params->length(); ++index) {

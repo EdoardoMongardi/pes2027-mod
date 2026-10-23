@@ -100,6 +100,7 @@ static void cardIdentityTests(const std::string& top) {
   const long long E = 88 + (1LL << 40);   // record with two boosters
   const long long F = 99 + (1LL << 40);   // saved only, like D
   const long long T = 7511 + (5LL << 40); // starter entry sharing serial 501 with A; player 7511 has a weak-foot fix
+  const long long A2 = 14 + (6LL << 40);  // another version of player 14 (A's player), record only
   const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0}, all = {1, 1, 1, 1, 1, 1, 1};
   const std::vector<int> aiA = {0, 0, 1, 0, 0, 0, 0}, aiS = {1, 0, 0, 0, 0, 0, 1}, aiK = {0, 1, 0, 0, 0, 0, 0};
   auto recordA = card(A, 0, 12, 3, 0, aiA, {29}, 0, 0, 149);
@@ -113,6 +114,7 @@ static void cardIdentityTests(const std::string& top) {
   recordE->put("initial_booster_id_list", newArr()->put(186)->put(136)->put(0));
   recordE->getJSONArray("parameters")->put(142, 186)->put(143, 136);
   records->put(std::to_string(E), newObj()->put("gameplayer", recordE));
+  records->put(std::to_string(A2), newObj()->put("gameplayer", card(A2, 0, 12, 11, 0, aiK, {5}, 0, 0, 149)));
   asset(root, "ZIRU_PLAYER_RECORDS.json", records);
   // Starter entries carry their owners' learned skills inside the parameters, like Konami's login data.
   auto starterS = card(S, 503, 7, 14, 0, aiS, {1, 6}, 50, 5, 145);
@@ -206,6 +208,25 @@ static void cardIdentityTests(const std::string& top) {
   check(sameStyles(detail, 3, 0, aiA) && skillBit(detail, 0) == 0, "player detail: the record's styles, AI styles and skills");
   auto entry = call(s, "CMD_GET_MYCLUB_ENTRY_INFO")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
   check(sameStyles(bySerial(entry, 501), 3, 0, aiA) && sameStyles(bySerial(entry, 503), 14, 0, aiS), "entry info: same cards as login");
+  // The detail screen of every listed card shows that card: styles, AI styles and skills, also for a
+  // starter card whose serial holds another card (T shares 501 with A) and has no record.
+  auto detailOf = [&](long long id, long long serial) {
+    return call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", id)->put("serial", serial)));
+  };
+  for (int i = 0; i < entry->length(); ++i) {
+    auto shown = entry->getJSONObject(i);
+    auto g = shown->getJSONObject("gameplayer_id");
+    std::string what = "player detail of card " + std::to_string(g->getLong("id")) + " at serial " + std::to_string(g->getLong("serial"));
+    auto values = detailOf(g->getLong("id"), g->getLong("serial"))->optJSONArray("parameters");
+    check(values != nullptr, (what + " has the card's parameters").c_str());
+    auto shownValues = shown->getJSONArray("parameters");
+    for (int k = 61; k < 142; ++k)
+      check(values->optInt(k, -1) == shownValues->optInt(k, -2), (what + " equals the listed card at parameter " + std::to_string(k)).c_str());
+  }
+  // A version of A's player that is not the card saved under 501 shows its own record, never A.
+  auto otherVersion = detailOf(A2, 501)->getJSONArray("parameters");
+  check(otherVersion->getInt(61) == 11 && otherVersion->getInt(64) == 1 && otherVersion->getInt(kZiruSkillParameters[5]) == 1 &&
+        otherVersion->getInt(kZiruSkillParameters[29]) == 0, "player detail never mixes two versions of a player");
 
   auto opponent = call(s, "CMD_GET_VSCOM_OPPONENT");
   auto ai = opponent->getJSONArray("player_list");
@@ -339,6 +360,16 @@ static void cardIdentityTests(const std::string& top) {
   check(skillCount(trainedA) == 2 && skillBit(trainedA, 29) == 1 && skillBit(trainedA, 44) == 1,
       "retraining one slot leaves the card's own skill plus the one learned skill");
   check(sameStyles(trainedA, 3, 0, aiA), "training keeps the card's styles");
+  // Learned skills belong to the card saved under the serial. T shares serial 501 with A in the
+  // starter data: training A must not change how T plays.
+  {
+    auto opp = call(s, "CMD_GET_VSCOM_OPPONENT");
+    auto after = call(s, "CMD_START_GAME", newObj()->put("game_id", (long long)opp->getLong("game_id")))
+        ->getJSONObject("squad_data_home")->getJSONArray("player_list");
+    std::string diff = paramDiff(byId(home, T), byId(after, T));
+    check(diff.empty(), ("training A leaves T, which shares A's serial, as it was: " + diff).c_str());
+    check(skillBit(byId(after, A), 44) == 1, "the trained card plays with its learned skill");
+  }
   // A card nobody knows (D, own skill 2): the replaced skill's flag is cleared too.
   check(train("SKILL_TRAINING_SELECT", D, 505, newObj()->put("skill_id", 0)) == 0, "unknown card: first skill learned");
   check(train("SKILL_TRAINING_SELECT", D, 505, newObj()->put("skill_id", 1)) == 1, "unknown card: slot retrained");
