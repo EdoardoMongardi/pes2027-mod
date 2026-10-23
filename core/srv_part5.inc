@@ -322,6 +322,17 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
   }
 }
 
+// One normalisation for a user's card wherever it is sent or played (login
+// roster, entry info, player detail, careerplan, match start), so the card the
+// client shows is the card the match uses.
+void z27NormalizeOwnedCard(const ObjP& p) {
+  if (!p) return;
+  z27ApplyAppearanceAndClub(p);
+  applyZiruRonaldoMaxProgression(p);
+  applyZiruWeakFootFix(p);
+  ziruSyncActiveBooster(p);
+}
+
 void z27ApplyProgressionPoints(const ArrP& params, const ObjP& prog, const ArrP& baseParams) {
   if (!params || !prog || params->length() < 145) return;
   const ArrP& src = (baseParams && baseParams->length() >= 145) ? baseParams : params;
@@ -515,13 +526,11 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
             }
           }
         }
-        z27ApplyAppearanceAndClub(cur);
-        applyZiruRonaldoMaxProgression(cur);
-        applyZiruWeakFootFix(cur);
+        z27NormalizeOwnedCard(cur);
         if (serial > 0) {
           ziruDb->savePlayer(serial, id, cur->toString());
         }
-        return ziruSyncActiveBooster(cur);
+        return cur;
       }
     }
     return jo;

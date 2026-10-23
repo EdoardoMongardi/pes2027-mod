@@ -210,6 +210,8 @@ Response handleZiruMyLeagueStartGameV71() {
               if (ib) pObj->put("initial_booster_id_list", Array::parse(ib->toString()));
               ArrP ps = p->optJSONArray("play_style");
               if (ps) pObj->put("play_style", Array::parse(ps->toString()));
+              ArrP learned = p->optJSONArray("additional_skill_id");
+              if (learned) pObj->put("additional_skill_id", Array::parse(learned->toString()));
               out->put(pObj);
             }
           }

@@ -622,12 +622,12 @@ void z27Restore(const ObjP& jo) {
               }
             }
 
-            z27ApplyAppearanceAndClub(sv);
+            z27NormalizeOwnedCard(sv);
             ziruDb->savePlayer(serial, sv->getJSONObject("gameplayer_id")->getLong("id"), sv->toString());
             gl->put(i, sv);
           } else {
             // This serial now holds another card; the listed entry is still sent, with its own identity.
-            z27ApplyAppearanceAndClub(p);
+            z27NormalizeOwnedCard(p);
           }
         } else {
           zs::Prefs& statePrefs = sp("almanac_state");
@@ -665,7 +665,7 @@ void z27Restore(const ObjP& jo) {
               }
             }
           }
-          z27ApplyAppearanceAndClub(p);
+          z27NormalizeOwnedCard(p);
           ziruDb->savePlayer(serial, p->getJSONObject("gameplayer_id")->getLong("id"), p->toString());
         }
       }
@@ -968,10 +968,8 @@ ObjP z27Player(const ObjP& gid) {
     }
   }
   // Same normalisation as the login roster, so the match uses what the card shows.
-  z27ApplyAppearanceAndClub(p);
-  applyZiruRonaldoMaxProgression(p);
-  applyZiruWeakFootFix(p);
-  return ziruSyncActiveBooster(p);
+  z27NormalizeOwnedCard(p);
+  return p;
 }
 
 // The captured start-game template's entry for this card, under the requested

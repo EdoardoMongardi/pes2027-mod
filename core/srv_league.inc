@@ -504,7 +504,7 @@ Response handleZiruCareerplan(Request& r) {
               }
             }
             if (!fail) {
-              z27ApplyAppearanceAndClub(res);
+              z27NormalizeOwnedCard(res);
               ObjP li = res->optJSONObject("level_info");
               if (li) {
                 int cp = ziruProgressionBudget(li->optInt("level_limit", 1)) - ziruCareerSpent;

@@ -99,6 +99,7 @@ static void cardIdentityTests(const std::string& top) {
   const long long C = 77, G = 78, Z = 79; // AI cards: The Destroyer + Basic, Basic + Defensive GK, Basic + Basic
   const long long E = 88 + (1LL << 40);   // record with two boosters
   const long long F = 99 + (1LL << 40);   // saved only, like D
+  const long long T = 7511 + (5LL << 40); // starter entry sharing serial 501 with A; player 7511 has a weak-foot fix
   const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0}, all = {1, 1, 1, 1, 1, 1, 1};
   const std::vector<int> aiA = {0, 0, 1, 0, 0, 0, 0}, aiS = {1, 0, 0, 0, 0, 0, 1}, aiK = {0, 1, 0, 0, 0, 0, 0};
   auto recordA = card(A, 0, 12, 3, 0, aiA, {29}, 0, 0, 149);
@@ -121,11 +122,12 @@ static void cardIdentityTests(const std::string& top) {
     long long id = serial == 501 ? A : serial == 502 ? B : serial == 503 ? S : serial == 504 ? K : D;
     refs->put(newObj()->put("gameplayer_id", newObj()->put("id", id)->put("serial", serial)));
   }
+  refs->put(newObj()->put("gameplayer_id", newObj()->put("id", T)->put("serial", 501)));
   auto squadData = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
   auto starter = newObj()->put("main_squad_id", 9)
       ->put("gameplayer_list", newArr()->put(card(A, 501, 12, 3, 26, all, {29}, 157, 5, 145))
           ->put(card(B, 502, 12, 0, 0, none, {}, 0, 0, 145))->put(starterS)
-          ->put(card(K, 504, 9, 14, 0, aiK, {33}, 173, 0, 145)))
+          ->put(card(K, 504, 9, 14, 0, aiK, {33}, 173, 0, 145))->put(card(T, 501, 10, 4, 0, none, {7}, 0, 0, 145)))
       ->put("coach_list", newArr()->put(coachRef(100, 1000)))
       ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squadData)
           ->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))));
@@ -220,6 +222,9 @@ static void cardIdentityTests(const std::string& top) {
     std::string diff = paramDiff(bySerial(roster, serial), bySerial(home, serial));
     check(diff.empty(), ("match start: the user's player " + std::to_string(serial) + " plays with the card's own parameters, " + diff).c_str());
   }
+  // GET_MYCLUB_ENTRY_INFO also lists starter entries whose serial now holds another card.
+  check(paramDiff(byId(entry, T), byId(home, T)).empty() && byId(home, T)->getJSONArray("parameters")->getInt(33) == 2,
+      "match start: a card listed only by entry info plays with the parameters entry info shows");
   // MyLeague without a special squad: the captured template squad is not sent as the user's players.
   s.ziruMyLeagueSetActive(1);
   auto ml = call(s, "CMD_START_GAME", newObj()->put("game_id", 7));

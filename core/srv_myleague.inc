@@ -36,7 +36,7 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
         params = gp->optJSONArray("parameters");
       }
       if (gp && params) {
-        z27ApplyAppearanceAndClub(gp);
+        z27NormalizeOwnedCard(gp);
         // Restore missing intrinsic flags without replacing owned progression,
         // boosters or learned skills with a catalog copy.
         ArrP base = catalog ? catalog->optJSONArray("parameters") : nullptr;
