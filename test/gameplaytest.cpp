@@ -750,7 +750,7 @@ int main() {
       check(db.loadMeta("progress", progress) && progress == "retained" && prefs.getString("recruited_players", "") == "[1,2]", "DB and recruits survive exit without destructors");
     }
     std::filesystem::remove_all(root);
-    std::cout << "PASS: gameplay, booster layout, all 72 skill mappings/roundtrip/training/skill-zero restart, CREATE_USER resume, D1 migration, failed writes and abrupt-exit persistence\n";
+    std::cout << "PASS: gameplay, booster layout, all 72 skill mappings/roundtrip/training/skill-zero restart, CREATE_USER resume, D1 migration, failed writes and abrupt-exit persistence, card identity, old-save repair, match-start parameters and outgoing style check\n";
     return 0;
   } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << "\n"; return 1; }
 }

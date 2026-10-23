@@ -468,8 +468,8 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
         }
         // Level limit: from the card's record, else the card's own level_info.
         ObjP bl = base ? base->optJSONObject("level_info") : cur->optJSONObject("level_info");
-        if (bl) {
-          int lim = bl->optInt("level_limit", 1);
+        if (base || bl) {
+          int lim = bl ? bl->optInt("level_limit", 1) : 1;
           if (lim == 1 && (((int32_t)id) & 16777215) == 134665) {
             lim = 33;
             logRequest("ZIRU_V16_LEVEL", "[ZIRU_V16_ADRIANO_FALLBACK] base_id=134665 level_limit=33");
