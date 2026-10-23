@@ -128,6 +128,10 @@ python3 -m unittest discover -s online -p 'test_online_server.py' -v
 # 5. Kiểm thử liên kết thư mục dữ liệu (Documents/pak, cpk, livedata) và nhập gói data ZIP:
 ./build/folderroutetest
 python3 test/datapack_fixtures.py /tmp/datapack-test && ./build/datapacktest /tmp/datapack-test
+
+# 6. Kiểm tra dữ liệu cầu thủ trong ziru-extra/responses (mỗi phía tối đa một phong cách chơi,
+#    play_style khớp tham số 61/62, mọi bản sao của một thẻ khớp với ZIRU_PLAYER_RECORDS.json):
+python3 -m unittest discover -s test -p 'player_data_test.py' -v
 ```
 
 ---
