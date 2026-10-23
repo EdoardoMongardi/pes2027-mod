@@ -101,6 +101,8 @@ static void cardIdentityTests(const std::string& top) {
   const long long F = 99 + (1LL << 40);   // saved only, like D
   const long long T = 7511 + (5LL << 40); // starter entry sharing serial 501 with A; player 7511 has a weak-foot fix
   const long long A2 = 14 + (6LL << 40);  // another version of player 14 (A's player), record only
+  const long long X = 120 + (1LL << 40);  // record: has 2 of the 7 normal defensive skills
+  const long long FULL1 = 121 + (1LL << 40), FULL2 = 122 + (1LL << 40);  // records holding (nearly) every normal skill
   const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0}, all = {1, 1, 1, 1, 1, 1, 1};
   const std::vector<int> aiA = {0, 0, 1, 0, 0, 0, 0}, aiS = {1, 0, 0, 0, 0, 0, 1}, aiK = {0, 1, 0, 0, 0, 0, 0};
   auto recordA = card(A, 0, 12, 3, 0, aiA, {29}, 0, 0, 149);
@@ -115,6 +117,11 @@ static void cardIdentityTests(const std::string& top) {
   recordE->getJSONArray("parameters")->put(142, 186)->put(143, 136);
   records->put(std::to_string(E), newObj()->put("gameplayer", recordE));
   records->put(std::to_string(A2), newObj()->put("gameplayer", card(A2, 0, 12, 11, 0, aiK, {5}, 0, 0, 149)));
+  records->put(std::to_string(X), newObj()->put("gameplayer", card(X, 0, 9, 9, 0, none, {55, 56}, 108, 0, 149)));
+  std::vector<int> allNormal, allButFive;
+  for (int skill = 0; skill < 72; ++skill) if (isZiruTrainableSkill(skill)) { allNormal.push_back(skill); if (skill > 4) allButFive.push_back(skill); }
+  records->put(std::to_string(FULL1), newObj()->put("gameplayer", card(FULL1, 0, 9, 9, 0, none, allButFive, 108, 0, 149)));
+  records->put(std::to_string(FULL2), newObj()->put("gameplayer", card(FULL2, 0, 9, 9, 0, none, allNormal, 108, 0, 149)));
   asset(root, "ZIRU_PLAYER_RECORDS.json", records);
   // Starter entries carry their owners' learned skills inside the parameters, like Konami's login data.
   auto starterS = card(S, 503, 7, 14, 0, aiS, {1, 6}, 50, 5, 145);
@@ -370,6 +377,44 @@ static void cardIdentityTests(const std::string& top) {
     check(diff.empty(), ("training A leaves T, which shares A's serial, as it was: " + diff).c_str());
     check(skillBit(byId(after, A), 44) == 1, "the trained card plays with its learned skill");
   }
+  // A category with nothing left for the card: any other normal skill instead of an error.
+  auto useItem = [&](OfflineServer& srv, const char* type, long long id, long long serial, int index, const char* category) {
+    auto req = newObj()->put("gameplayer_id_list", newArr()->put(newObj()->put("id", id)->put("serial", serial)))->put("training_index", index)
+        ->put("item_list", newArr()->put(newObj()->put("present_num", 1)->put("item", newObj()->put("item_type", type))));
+    if (category) req->put("skill_training_category_type", category);
+    return call(srv, "CMD_USE_MYCLUB_ITEM", req);
+  };
+  const std::vector<int> defenceNormal = {55, 56, 57, 58, 59, 60, 64};
+  auto savedX = card(X, 506, 9, 9, 0, none, {55, 56, 57, 58, 59, 60, 64}, 108, 0, 145);
+  savedX->put("additional_skill_id", newArr()->put(57)->put(58)->put(59)->put(60)->put(64));
+  s.ziruDb->savePlayer(506, X, savedX->toString());
+  s.sp("almanac_state").edit().putString("ziru_skills_506", "57,58,59,60,64").commit();
+  auto defence = useItem(s, "SKILL_TRAINING_CATEGORY", X, 506, 0, "DEFENCE")->getJSONObject("skill_training_result");
+  int got = defence->getInt("additional_skill_id");
+  check(defence->getString("is_success") == "YES" && isZiruTrainableSkill(got) && std::find(defenceNormal.begin(), defenceNormal.end(), got) == defenceNormal.end(),
+      "a category with nothing left teaches another normal skill");
+  check(s.sp("almanac_state").getString("ziru_skills_506", "") == std::to_string(got) + ",58,59,60,64", "the new skill takes the trained slot");
+  // Nothing left at all: retraining a slot keeps its skill; a new slot is refused and nothing changes.
+  auto savedFull1 = card(FULL1, 507, 9, 9, 0, none, allNormal, 108, 0, 145);
+  savedFull1->put("additional_skill_id", newArr()->put(0)->put(1)->put(2)->put(3)->put(4));
+  s.ziruDb->savePlayer(507, FULL1, savedFull1->toString());
+  s.sp("almanac_state").edit().putString("ziru_skills_507", "0,1,2,3,4").commit();
+  auto kept = useItem(s, "SKILL_TRAINING", FULL1, 507, 2, nullptr)->getJSONObject("skill_training_result");
+  check(kept->getString("is_success") == "YES" && kept->getInt("additional_skill_id") == 2 &&
+        s.sp("almanac_state").getString("ziru_skills_507", "") == "0,1,2,3,4", "nothing left: the retrained slot keeps its skill");
+  s.ziruDb->savePlayer(508, FULL2, card(FULL2, 508, 9, 9, 0, none, allNormal, 108, 0, 145)->toString());
+  std::string before = *s.loadPlayer(508);
+  auto none2 = useItem(s, "SKILL_TRAINING_CATEGORY", FULL2, 508, 0, "SHOOT");
+  auto refused = none2->getJSONObject("skill_training_result");
+  check(refused->getString("is_success") == "NO" && !refused->has("additional_skill_id") && *s.loadPlayer(508) == before &&
+        s.sp("almanac_state").getString("ziru_skills_508", "").empty(), "nothing left for a new slot: not successful, the card is unchanged");
+  bool itemKept = false;
+  auto items = none2->getJSONArray("item_list");
+  for (int i = 0; items && i < items->length(); ++i) {
+    auto it = items->getJSONObject(i);
+    if (it->getJSONObject("item")->optString("item_type") == "SKILL_TRAINING_CATEGORY") itemKept = it->getInt("inventory_num") == 999999;
+  }
+  check(itemKept, "the training item is not used up");
   // A card nobody knows (D, own skill 2): the replaced skill's flag is cleared too.
   check(train("SKILL_TRAINING_SELECT", D, 505, newObj()->put("skill_id", 0)) == 0, "unknown card: first skill learned");
   check(train("SKILL_TRAINING_SELECT", D, 505, newObj()->put("skill_id", 1)) == 1, "unknown card: slot retrained");

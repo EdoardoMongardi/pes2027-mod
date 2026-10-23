@@ -650,10 +650,17 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     // nothing the card already has by itself or has already learned.
     std::set<int> cardSkills = z27CardSkillParams(owned);
     auto cardHas = [&](int id) { return isZiruSkillId(id) && cardSkills.count(kZiruSkillParameters[id]) > 0; };
+    auto open = [&](int val) { return isZiruTrainableSkill(val) && !cardHas(val) && !vcontains(al, val); };
     std::vector<int> candidates;
     for (const auto& s_item : sp_) {
       int val = parseInt(s_item);
-      if (isZiruTrainableSkill(val) && !cardHas(val) && !vcontains(al, val)) candidates.push_back(val);
+      if (open(val)) candidates.push_back(val);
+    }
+    // The chosen category has nothing left for this card: any normal skill it
+    // neither has nor has learned.
+    if (candidates.empty()) {
+      for (int val = 0; val < 72; ++val)
+        if (open(val)) candidates.push_back(val);
     }
     int slot = ziruTrainingIndex;
     int target = (slot >= 0 && slot < (int)al.size()) ? slot : (al.size() < 5 ? -1 : 0);  // -1: a new slot
@@ -671,7 +678,17 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     } else if (!candidates.empty()) {
       v = candidates[rand() % candidates.size()];
     }
-    if (v < 0) throw IllegalState("No eligible additional skill remains");
+    // Nothing left to learn at all. Retraining a slot keeps the skill it has;
+    // a new slot stays empty and the client is told the training did not
+    // succeed (it then leaves the card as it is). The item is not used up.
+    if (v < 0 && target >= 0) v = al[target];
+    if (v < 0) {
+      logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_NONE_LEFT] serial=" + str(j) + " has every normal skill");
+      ObjP res = newObj()->put("is_success", "NO");
+      jo->put("skill_training_result", res);
+      z27KeepSkillTrainingItems(jo);
+      return;
+    }
 
     int replaced = -1;
     if (target >= 0) {
@@ -708,28 +725,32 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     if (!res) { res = newObj(); jo->put("skill_training_result", res); }
     res->put("additional_skill_id", v);
     res->put("is_success", "YES");
-    ArrP items = jo->optJSONArray("item_list");
-    if (items) {
-      bool hasSel = false;
-      for (int i8 = 0; i8 < items->length(); i8++) {
-        ObjP it = items->optJSONObject(i8);
-        ObjP item;
-        if (it && (item = it->optJSONObject("item"))) {
-          std::string t = item->optString("item_type", "");
-          if (t == "SKILL_TRAINING_SELECT") hasSel = true;
-          if (t == "SKILL_TRAINING" || t == "SKILL_TRAINING_CATEGORY" || t == "SKILL_TRAINING_SELECT") it->put("inventory_num", 999999);
-        }
-      }
-      if (!hasSel) {
-        ObjP it = newObj();
-        it->put("item", newObj()->put("item_type", "SKILL_TRAINING_SELECT")->put("grade", 0)->put("effect", 0));
-        it->put("inventory_num", 999999);
-        items->put(it);
-      }
-    }
+    z27KeepSkillTrainingItems(jo);
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_SKILL_V2] response/persistence failed ") + e.what());
     throw;
+  }
+}
+
+// Skill training items are never used up.
+void z27KeepSkillTrainingItems(const ObjP& jo) {
+  ArrP items = jo->optJSONArray("item_list");
+  if (!items) return;
+  bool hasSel = false;
+  for (int i8 = 0; i8 < items->length(); i8++) {
+    ObjP it = items->optJSONObject(i8);
+    ObjP item;
+    if (it && (item = it->optJSONObject("item"))) {
+      std::string t = item->optString("item_type", "");
+      if (t == "SKILL_TRAINING_SELECT") hasSel = true;
+      if (t == "SKILL_TRAINING" || t == "SKILL_TRAINING_CATEGORY" || t == "SKILL_TRAINING_SELECT") it->put("inventory_num", 999999);
+    }
+  }
+  if (!hasSel) {
+    ObjP it = newObj();
+    it->put("item", newObj()->put("item_type", "SKILL_TRAINING_SELECT")->put("grade", 0)->put("effect", 0));
+    it->put("inventory_num", 999999);
+    items->put(it);
   }
 }
 
