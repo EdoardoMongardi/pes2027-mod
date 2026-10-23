@@ -1156,7 +1156,11 @@ static zfr::Spec pakSpec() {
   return s;
 }
 static zfr::Spec cpkSpec() { return {"cpk", {"dt200_mobile_all.cpk", "dt230_mobile_all.cpk"}, false}; }
-static zfr::Spec livedataSpec() { return {"livedata", {}, true}; }
+static zfr::Spec livedataSpec() {
+  zfr::Spec s{"livedata", {}, true};
+  s.folderWhenBroken = true;
+  return s;
+}
 
 struct DataFolders {
   zfr::Result pak, cpk, livedata;

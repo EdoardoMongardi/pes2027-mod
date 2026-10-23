@@ -39,9 +39,13 @@ struct Spec {
   // Files never linked one by one into a folder that has to keep its real files (for pak: the
   // stadium paks, which the app keeps out of Documents/pak and removes from there on every launch).
   std::function<bool(const std::string&)> notLinkedSingly;
+  // livedata: a broken Documents/<name> link with nothing to point it at becomes an empty real
+  // folder, so the app can link its bundled files into it again. pak and cpk keep the broken link
+  // for the ZIP importer's own repair.
+  bool folderWhenBroken = false;
 };
 
-enum class Action { None, Linked, Relinked, Converted, Merged, KeptReal, KeptLink, NotFound };
+enum class Action { None, Linked, Relinked, Converted, Merged, KeptReal, KeptLink, MadeFolder, NotFound };
 
 inline const char* actionName(Action a) {
   switch (a) {
@@ -52,6 +56,7 @@ inline const char* actionName(Action a) {
     case Action::Merged: return "merged";
     case Action::KeptReal: return "kept-real-folder";
     case Action::KeptLink: return "kept-link";
+    case Action::MadeFolder: return "made-folder";
     case Action::NotFound: return "not-found";
   }
   return "?";
@@ -64,7 +69,8 @@ struct Result {
   std::string dataFolder;       // where the data comes from: Documents/<name> (or what it links to), or the folder merged into it
   Action action = Action::None;
   bool changed() const {
-    return action == Action::Linked || action == Action::Relinked || action == Action::Converted || action == Action::Merged;
+    return action == Action::Linked || action == Action::Relinked || action == Action::Converted || action == Action::Merged ||
+           action == Action::MadeFolder;
   }
 };
 
@@ -341,7 +347,16 @@ inline Result resolve(const std::string& docs, const Spec& spec, const LogFn& lo
       }
       say("could not move link to " + c[0].path);
     }
-    // A broken link with nothing better: leave it for the ZIP importer's own repair.
+    // A broken link with nothing better: an empty folder for livedata (bundled files are linked
+    // into it next), else leave it for the ZIP importer's own repair. Removing a link never
+    // removes what it pointed to.
+    if (!alive && spec.folderWhenBroken) {
+      if (unlink(link.c_str()) == 0 && mkdir(link.c_str(), 0755) == 0) {
+        say("replaced a broken link with an empty folder");
+        return finish(link, spec, Action::MadeFolder, false);
+      }
+      say("could not replace the broken link with a folder");
+    }
     return finish(link, spec, alive ? Action::KeptLink : Action::NotFound, false);
   }
 

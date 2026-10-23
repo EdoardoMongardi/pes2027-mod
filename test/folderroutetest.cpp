@@ -95,7 +95,11 @@ static zfr::Spec pakSpec() {
   return s;
 }
 static zfr::Spec cpkSpec() { return {"cpk", {"dt200_mobile_all.cpk", "dt230_mobile_all.cpk"}, false}; }
-static zfr::Spec livedataSpec() { return {"livedata", {}, true}; }
+static zfr::Spec livedataSpec() {
+  zfr::Spec s{"livedata", {}, true};
+  s.folderWhenBroken = true;
+  return s;
+}
 
 // ------------------------------------------------------------------ fake device
 struct World {
@@ -565,6 +569,26 @@ int main(int argc, char** argv) {
     for (auto& n : zfr::listDir(w.docs + "/PES2027-repair-backups"))
       for (int i = 0; i < 2; i++) kept += exists(w.docs + "/PES2027-repair-backups/" + n + "/mine" + std::to_string(i) + ".pak");
     CHECK(kept == 2 && !exists(w.docs + "/.pak.ziru-convert"), "both leftovers kept in separate backup folders");
+  }
+
+  std::cout << "\n[21] broken Documents/livedata link with no data folder: becomes an empty folder for the bundled files\n";
+  {
+    World w = makeWorld("new-broken-live");
+    symlink("PES2027-data/livedata", (w.docs + "/livedata").c_str());  // the player deleted the data folder
+    symlink("PES2027-data/cpk", (w.docs + "/cpk").c_str());
+    symlink("PES2027-data/pak", (w.docs + "/pak").c_str());
+    Launch a = newLaunch(w, true);
+    CHECK(a.live.action == zfr::Action::MadeFolder && !zfr::isLink(w.docs + "/livedata") && zfr::isDirFollow(w.docs + "/livedata"),
+          "Documents/livedata is a real folder again");
+    CHECK(exists(w.docs + "/livedata/pc9242_mobile_and.ucas") && zfr::isLink(w.docs + "/livedata/pc9242_mobile_and.ucas"),
+          "the bundled livedata files are linked into it");
+    CHECK(a.cpk.action == zfr::Action::NotFound && a.pak.action == zfr::Action::NotFound && zfr::isLink(w.docs + "/cpk") &&
+          zfr::isLink(w.docs + "/pak") && !a.ready, "broken pak and cpk links are left for the ZIP importer (unchanged)");
+    std::map<std::string, std::string> t1, t2;
+    tree(w.root, t1);
+    Launch b = newLaunch(w);
+    tree(w.root, t2);
+    CHECK(b.live.action == zfr::Action::KeptReal && t1 == t2, "next launch changes nothing");
   }
 
   std::cout << "\nlinkText\n";
