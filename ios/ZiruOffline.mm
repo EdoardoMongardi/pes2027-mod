@@ -41,6 +41,7 @@ static FILE* (*orig_fopen)(const char *filename, const char *mode);
 static DIR* (*orig_opendir)(const char *name);
 
 #include "../core/datapack.hpp"
+#include "../core/folderroute.hpp"
 #include "../core/modpack.hpp"
 #include "../core/server.hpp"
 #include "ZiruFontPak.h"
@@ -1135,21 +1136,36 @@ static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
   }
 }
 
-static NSString* findFolderNamed(NSString* root, NSString* targetName, int maxDepth) {
-  if (maxDepth < 0) return nil;
-  NSFileManager* fm = NSFileManager.defaultManager;
-  for (NSString* item in [fm contentsOfDirectoryAtPath:root error:nil]) {
-    NSString* full = [root stringByAppendingPathComponent:item];
-    BOOL isDir = NO;
-    if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
-      if ([item.lowercaseString isEqualToString:targetName.lowercaseString]) {
-        return full;
-      }
-      NSString* found = findFolderNamed(full, targetName, maxDepth - 1);
-      if (found) return found;
-    }
-  }
-  return nil;
+// ---------------------------------------------------------------- data folder links
+// FPakPlatformFile::Initialize builds "global_<platform>_ios.utoc" and MountAllPakFiles builds
+// "pc0000_<platform>_ios.pak": a pak folder without them cannot start the game.
+static zfr::Spec pakSpec() {
+  zfr::Spec s{"pak", {"global_mobile_ios.utoc", "global_mobile_and.utoc", "pc0000_mobile_ios.ucas", "pc0000_mobile_and.ucas",
+                      "pc0000_mobile_ios.pak", "pc0000_mobile_and.pak"}, false};
+  // Stadium paks stay out of Documents/pak (see the stale stadium loop in checkDirectFolderData).
+  s.notLinkedSingly = [](const std::string& n) { return zm::stadiumName(n); };
+  return s;
+}
+static zfr::Spec cpkSpec() { return {"cpk", {"dt200_mobile_all.cpk", "dt230_mobile_all.cpk"}, false}; }
+static zfr::Spec livedataSpec() { return {"livedata", {}, true}; }
+
+struct DataFolders {
+  zfr::Result pak, cpk, livedata;
+  std::string dataParent;  // folder holding the pak folder in use; cpk, livedata and Download are preferred from there
+};
+
+// Points Documents/pak, Documents/cpk and Documents/livedata at the folders that really hold the game data
+// (core/folderroute.hpp). Cheap and safe to repeat: runs before Unreal starts and on every data check.
+static DataFolders prepareDataFolderLinks() {
+  std::string docs = gDocs.fileSystemRepresentation;
+  zfr::LogFn log = [](const std::string& line) { ZLog(@"[DATA_LINK] %s", line.c_str()); };
+  DataFolders f;
+  f.pak = zfr::resolve(docs, pakSpec(), log);
+  if (f.pak.hasBase) f.dataParent = zfr::dataParent(docs, "pak");
+  f.cpk = zfr::resolve(docs, cpkSpec(), log, f.dataParent);
+  f.livedata = zfr::resolve(docs, livedataSpec(), log, f.dataParent);
+  for (const char* n : {"pak", "cpk", "livedata"}) zfr::pruneDanglingLinks(docs + "/" + n, log);
+  return f;
 }
 
 static void installBundledTableFixes(NSArray<NSString*>* directories) {
@@ -1240,15 +1256,21 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
 static BOOL checkDirectFolderData(NSString** why) {
   NSFileManager* fm = NSFileManager.defaultManager;
 
-  // Search for pak, cpk, Download, livedata anywhere inside Documents (up to 3 levels deep)
-  NSString* foundPak = findFolderNamed(gDocs, @"pak", 3);
-  NSString* foundCpk = findFolderNamed(gDocs, @"cpk", 3);
-  NSString* foundDl = findFolderNamed(gDocs, @"Download", 3);
-  if (!foundDl) foundDl = findFolderNamed(gDocs, @"download", 3);
-  NSString* foundLivedata = findFolderNamed(gDocs, @"livedata", 3);
+  // Documents/pak, cpk, livedata -> the folders holding the real data (anywhere up to 3 levels deep). A folder
+  // this mod made on a launch before the data was copied is replaced by a link (or filled with links).
+  DataFolders folders = prepareDataFolderLinks();
+  // Download is linked file by file below; look for the data's own Download folder, never the
+  // Documents/Download this function creates on every launch.
+  NSString* foundDl = nil;
+  {
+    zfr::Spec downloadSpec{"download", {}, false};
+    auto found = zfr::candidates(gDocs.fileSystemRepresentation, downloadSpec, 3,
+                                 [gDocs stringByAppendingPathComponent:@"Download"].fileSystemRepresentation, folders.dataParent);
+    if (!found.empty()) foundDl = [NSString stringWithUTF8String:found.front().path.c_str()];
+  }
 
   // If user dropped .pak/.ucas/.utoc files directly into Documents without folder:
-  if (!foundPak) {
+  if (zfr::mayLinkLooseFiles([gDocs stringByAppendingPathComponent:@"pak"].fileSystemRepresentation, folders.pak)) {
     for (NSString* item in [fm contentsOfDirectoryAtPath:gDocs error:nil]) {
       if ([item.pathExtension.lowercaseString isEqualToString:@"pak"]) {
         NSString* pakDir = [gDocs stringByAppendingPathComponent:@"pak"];
@@ -1259,14 +1281,13 @@ static BOOL checkDirectFolderData(NSString** why) {
             ensureSymlink([pakDir stringByAppendingPathComponent:f], [gDocs stringByAppendingPathComponent:f]);
           }
         }
-        foundPak = pakDir;
         break;
       }
     }
   }
 
   // If user dropped .cpk files directly into Documents without folder:
-  if (!foundCpk) {
+  if (zfr::mayLinkLooseFiles([gDocs stringByAppendingPathComponent:@"cpk"].fileSystemRepresentation, folders.cpk)) {
     for (NSString* item in [fm contentsOfDirectoryAtPath:gDocs error:nil]) {
       if ([item.pathExtension.lowercaseString isEqualToString:@"cpk"] && ![item.lowercaseString containsString:@"dt510"]) {
         NSString* cpkDir = [gDocs stringByAppendingPathComponent:@"cpk"];
@@ -1276,21 +1297,9 @@ static BOOL checkDirectFolderData(NSString** why) {
             ensureSymlink([cpkDir stringByAppendingPathComponent:f], [gDocs stringByAppendingPathComponent:f]);
           }
         }
-        foundCpk = cpkDir;
         break;
       }
     }
-  }
-
-  // Symlink found directories to gDocs/pak, gDocs/cpk, etc.
-  if (foundPak && ![foundPak isEqualToString:[gDocs stringByAppendingPathComponent:@"pak"]]) {
-    ensureSymlink([gDocs stringByAppendingPathComponent:@"pak"], foundPak);
-  }
-  if (foundCpk && ![foundCpk isEqualToString:[gDocs stringByAppendingPathComponent:@"cpk"]]) {
-    ensureSymlink([gDocs stringByAppendingPathComponent:@"cpk"], foundCpk);
-  }
-  if (foundLivedata && ![foundLivedata isEqualToString:[gDocs stringByAppendingPathComponent:@"livedata"]]) {
-    ensureSymlink([gDocs stringByAppendingPathComponent:@"livedata"], foundLivedata);
   }
 
   NSString* pakDir = [gDocs stringByAppendingPathComponent:@"pak"];
@@ -1324,7 +1333,6 @@ static BOOL checkDirectFolderData(NSString** why) {
       NSString* dst = [liveDocs stringByAppendingPathComponent:f];
       ensureSymlink(dst, src);
     }
-    if (!foundLivedata) foundLivedata = liveDocs;
   }
 
   // Extra UI container bundled in the IPA (tools/make_extra_pak.py): standard card photos, emblems, kit thumbnails that
@@ -1473,6 +1481,12 @@ static BOOL checkDirectFolderData(NSString** why) {
   NSArray* cpkItems = [fm contentsOfDirectoryAtPath:cpkDir error:nil];
   if (pakItems.count == 0 || cpkItems.count == 0) {
     if (why) *why = @"Thư mục pak hoặc cpk bị trống không có tệp dữ liệu";
+    return NO;
+  }
+  // Documents/pak always holds the bundled extra paks, so "not empty" is not enough: without the base
+  // containers the engine starts to a black screen.
+  if (!zfr::hasMarker(pakDir.fileSystemRepresentation, pakSpec(), false)) {
+    if (why) *why = @"Thư mục pak chưa có tệp gốc của game (global_mobile_ios.utoc, pc0000_mobile_ios.*). Hãy chép đủ thư mục pak của gói data.";
     return NO;
   }
 
@@ -2123,6 +2137,10 @@ static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* o
   gDelegate = self;
   gLaunchApp = app;
   gLaunchOptions = opts;
+
+  // Point Documents/pak|cpk|livedata at the real data first, so the mods below are installed through these
+  // links instead of into a folder this mod made on a launch before the data was copied.
+  prepareDataFolderLinks();
 
   // Complete mod batches are activated before Unreal opens any containers.
   std::string modSummary, modError;

@@ -18,3 +18,7 @@ build/packtest: core/datapack.cpp core/zipread.cpp core/jvalue.cpp test/packtest
 build/modtest: core/modpack.cpp core/datapack.cpp core/zipread.cpp core/jvalue.cpp test/modtest.cpp
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ core/modpack.cpp core/datapack.cpp core/zipread.cpp core/jvalue.cpp test/modtest.cpp -lz
+
+build/folderroutetest: core/folderroute.hpp test/folderroutetest.cpp
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -o $@ test/folderroutetest.cpp
