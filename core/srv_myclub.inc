@@ -560,7 +560,7 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
       }
       // The card's own skills plus the learned ones (exact card only).
       z27ApplyCardIdentity(p);
-      if (!al.empty()) {
+      if (!al.empty() && prefs.getString("ziru_skills_" + str(serial), "") != joinInts(al)) {
         prefs.edit().putString("ziru_skills_" + str(serial), joinInts(al)).commit();
       }
       JStr saved = loadPlayer(serial);

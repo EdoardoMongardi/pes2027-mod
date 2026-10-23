@@ -184,14 +184,43 @@ inline void z27BoostAllCoaches(const ObjP& entry) {
   }
 }
 
-ObjP z27Entry() {
-  ObjP e = nn(loadZiruJsonAssetObject("responses/CmdLogin.json"))->getJSONObject("entry_info");
+// ---- The starter cards (CmdLogin.json), read once per process ----
+// entry_info as the client gets it (training items, coach settings) and an
+// index of its cards. Nothing in here is ever changed: whoever hands a card or
+// the entry out, or changes it, takes a copy first.
+struct ZiruStarters {
+  bool loaded = false;
+  ObjP entry;
+  std::map<std::pair<int64_t, int64_t>, ObjP> bySerialId;  // (serial, id) -> listed card
+  std::unordered_map<int64_t, ObjP> byId;                   // id -> first card listed with it
+};
+ZiruStarters ziruStarters;
+int ziruLoginParses = 0;  // how often CmdLogin.json was parsed (checked by the tests)
+
+const ZiruStarters& z27Starters() {
+  if (ziruStarters.loaded) return ziruStarters;
+  ziruStarters.loaded = true;
+  ObjP login = loadZiruJsonAssetObject("responses/CmdLogin.json");
+  ObjP e = login ? login->optJSONObject("entry_info") : nullptr;
+  if (!e) return ziruStarters;
   z27InjectTrainingItems(e);
   z27BoostAllCoaches(e);
-  return e;
+  ziruStarters.entry = e;
+  ArrP list = e->optJSONArray("gameplayer_list");
+  for (int i = 0; list && i < list->length(); i++) {
+    ObjP card = list->optJSONObject(i);
+    ObjP gid = card ? card->optJSONObject("gameplayer_id") : nullptr;
+    if (!gid) continue;
+    int64_t id = gid->optLong("id", 0), serial = gid->optLong("serial", 0);
+    ziruStarters.bySerialId.emplace(std::make_pair(serial, id), card);
+    ziruStarters.byId.emplace(id, card);
+  }
+  return ziruStarters;
 }
 
-int32_t z27Main() { return z27Int("main_squad_id", z27Entry()->getInt("main_squad_id")); }
+ObjP z27Entry() { return z27Clone(nn(z27Starters().entry)); }
+
+int32_t z27Main() { return z27Int("main_squad_id", nn(z27Starters().entry)->getInt("main_squad_id")); }
 
 inline int64_t z27UpgradeIosCardPid(int64_t pid, int32_t teamId = 0) {
   int32_t bid = (int32_t)(pid & 0xFFFFFF);
@@ -226,7 +255,7 @@ ObjP z27Squad(int32_t id) {
     ObjP jo = Object::parse(*s);
     res = jo->optJSONObject("squad_data") ? jo->getJSONObject("squad_data") : jo;
   } else {
-    ArrP list = z27Entry()->getJSONArray("squad_list");
+    ArrP list = nn(z27Starters().entry)->getJSONArray("squad_list");
     for (int i = 0; i < list->length(); i++) {
       ObjP sq = list->getJSONObject(i);
       if (sq->optInt("squad_id", -1) == id) { res = z27Copy(sq->getJSONObject("squad_data")); break; }
@@ -269,7 +298,7 @@ ObjP z27Base(int32_t id) {
     ident->put("base_team_license", z27Team(m->getInt("base_team_id"))->optString("base_team_license", "LICENSED"));
     return ident;
   }
-  ArrP list = z27Entry()->getJSONArray("squad_list");
+  ArrP list = nn(z27Starters().entry)->getJSONArray("squad_list");
   for (int i = 0; i < list->length(); i++) {
     ObjP sq = list->getJSONObject(i);
     if (sq->optInt("squad_id", -1) == id) return z27Identity(z27Team(sq->getJSONArray("base_team")->getJSONObject(0)->getInt("base_team_id")));
@@ -369,14 +398,18 @@ Response z27TeamChange(const std::string& cmd) {
       ObjP ack = z27Ack(cmd, req);
       ack->put("base_team", newArr()->put(curBase));
       ack->put("entry_info", ei);
+      ZiruTx tx(*ziruDb);
       z27Restore(ack);
+      tx.commit();
       logRequest("ZIRU_TEAM_COMMIT", "squad=" + str(sq) + " base=" + str(curBase->getInt("base_team_id")));
       return serveObjectAsEncryptedMsgPack(ack);
     }
     ObjP ack = z27Ack(cmd, req);
     ack->put("base_team", newArr()->put(z27Base(sq)));
     ack->put("entry_info", z27Entry());
+    ZiruTx tx(*ziruDb);
     z27Restore(ack);
+    tx.commit();
     ack->put("main_squad_id", z27Main());
     logRequest("ZIRU_TEAM_COMMIT", "squad=" + str(sq) + " base=" + str(z27Base(sq)->getInt("base_team_id")));
     return serveObjectAsEncryptedMsgPack(ack);
@@ -608,7 +641,7 @@ void z27Restore(const ObjP& jo) {
             ArrP newSkillArr = newArr();
             for (int v : skillList) newSkillArr->put(v);
             sv->put("additional_skill_id", newSkillArr);
-            if (!skillList.empty()) {
+            if (!skillList.empty() && statePrefs.getString(prefKey, "") != joinInts(skillList)) {
               statePrefs.edit().putString(prefKey, joinInts(skillList)).commit();
             }
             if (svParams && svParams->length() >= 142) {
@@ -623,7 +656,8 @@ void z27Restore(const ObjP& jo) {
             }
 
             z27NormalizeOwnedCard(sv);
-            ziruDb->savePlayer(serial, sv->getJSONObject("gameplayer_id")->getLong("id"), sv->toString());
+            std::string text = sv->toString();
+            if (text != *lp) ziruDb->savePlayer(serial, sv->getJSONObject("gameplayer_id")->getLong("id"), text);
             gl->put(i, sv);
           } else {
             // This serial now holds another card; the listed entry is still sent, with its own identity.
@@ -653,7 +687,7 @@ void z27Restore(const ObjP& jo) {
           ArrP newSkillArr = newArr();
           for (int v : skillList) newSkillArr->put(v);
           p->put("additional_skill_id", newSkillArr);
-          if (!skillList.empty()) {
+          if (!skillList.empty() && statePrefs.getString(prefKey, "") != joinInts(skillList)) {
             statePrefs.edit().putString(prefKey, joinInts(skillList)).commit();
           }
           ArrP pParams = p->optJSONArray("parameters");
@@ -920,23 +954,17 @@ ObjP z27Player(const ObjP& gid) {
   bool fromSave = p != nullptr;
   if (!fromSave) {
     int64_t id = gid->getLong("id");
-    ArrP list = z27Entry()->getJSONArray("gameplayer_list");
-    for (int i = 0; !p && i < list->length(); i++) {
-      ObjP entry = list->optJSONObject(i);
-      ObjP eid = entry ? entry->optJSONObject("gameplayer_id") : nullptr;
-      if (eid && eid->optLong("serial", -1) == serial && eid->optLong("id", 0) == id) p = entry;
-    }
+    const ZiruStarters& starters = z27Starters();
+    auto listed = starters.bySerialId.find({serial, id});
+    if (listed != starters.bySerialId.end()) p = z27Clone(listed->second);
     if (!p && serial == 0) p = z27RentalCard(id);
     if (!p) {
       ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
       if (w && w->optJSONObject("gameplayer")) p = z27Copy(w->getJSONObject("gameplayer"));
     }
     if (!p && serial != 0) p = z27RentalCard(id);
-    for (int i = 0; !p && i < list->length(); i++) {
-      ObjP entry = list->optJSONObject(i);
-      ObjP eid = entry ? entry->optJSONObject("gameplayer_id") : nullptr;
-      if (eid && eid->optLong("id", 0) == id) p = z27Copy(entry);
-    }
+    auto any = starters.byId.find(id);
+    if (!p && any != starters.byId.end()) p = z27Clone(any->second);
     if (!p) {
       logRequest("Z27_PLAYER_UNKNOWN", "[Z27_PLAYER_UNKNOWN] no card data for id=" + str(id) + " serial=" + str(serial));
       return nullptr;
@@ -1427,7 +1455,9 @@ std::optional<Response> z27Route(const std::string& uri) {
     entry->put("unlock_gameplayer_frame", 100000);
     entry->put("unlock_gameplayer_warehouse_frame", 100000);
     ObjP put = z27Ack("CMD_GET_MYCLUB_ENTRY_INFO", z27Request())->put("entry_info", entry);
+    ZiruTx tx(*ziruDb);
     z27Restore(put);
+    tx.commit();
     return serveObjectAsEncryptedMsgPack(put);
   }
   for (const char* c : {"CMD_UPDATE_MYCLUB_BASE_TEAM", "CMD_SET_MYCLUB_MAIN_SQUAD", "CMD_SET_MYCLUB_BRING_UNIFORM", "CMD_SET_MYCLUB_ENTRY_INFO"}) {

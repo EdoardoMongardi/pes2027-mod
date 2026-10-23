@@ -2,6 +2,7 @@
 
 Response serveJsonAsEncryptedMsgPack(const std::string& name) {
   std::string text = readAsset(name);  // IOException propagates (caller decides)
+  if (name == "responses/CmdLogin.json") ziruLoginParses++;
   std::string trimmed = text;
   size_t b = 0;
   while (b < trimmed.size() && (unsigned char)trimmed[b] <= ' ') b++;
@@ -139,6 +140,9 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     applyZiruSkillTrainingResponse(jo);
     z27InjectTrainingItems(jo);
   }
+  // The player rows written while the roster is put together (70 starter
+  // cards and every pack card on a login) reach the save file in one write.
+  ZiruTx tx(*ziruDb);
   bool isEntryInfo = (resumesSave || name == "responses/CmdGetMyclubEntryInfo.json" || name == "responses/CmdGetEntryInfo.json");
   if (jo && isEntryInfo) filterZiruSoldPlayersFromLogin(jo);
   if (jo && isEntryInfo) applyZiruSquadStateToLogin(jo);
@@ -219,6 +223,7 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     z27Restore(jo);
     z27RepairLoginRoster(jo);
   }
+  tx.commit();
   Response r = newFixed(200, "application/x-msgpack", encodeClientResponse(root));
   r.headers["Connection"] = "close";
   return r;

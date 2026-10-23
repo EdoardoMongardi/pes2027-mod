@@ -313,15 +313,10 @@ ObjP ziruSyncActiveBooster(const ObjP& jo) {
       ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
       ObjP base = w ? w->optJSONObject("gameplayer") : nullptr;
       if (!base) {
-        ArrP list = z27Entry()->optJSONArray("gameplayer_list");
-        if (!list) return jo;
-        int i2 = 0;
-        for (;; i2++) {
-          if (i2 >= list->length()) return jo;
-          ObjP o = list->optJSONObject(i2);
-          ObjP g2;
-          if (o && (g2 = o->optJSONObject("gameplayer_id")) && g2->optLong("id") == id) { base = o; break; }
-        }
+        // A starter card without a record: its own starter entry (read only).
+        auto it = z27Starters().byId.find(id);
+        if (it == z27Starters().byId.end()) return jo;
+        base = it->second;
       }
       ArrP ib = base->optJSONArray("initial_booster_id_list");
       if (ib) {
@@ -348,6 +343,38 @@ ObjP ziruSyncActiveBooster(const ObjP& jo) {
 }
 
 ObjP z27Copy(const ObjP& jo) { return Object::parse(nn(jo)->toString()); }
+
+// A deep copy without printing and parsing the object again (same result as z27Copy).
+static Value z27CloneValue(const Value& v) {
+  if (v.t == Value::OBJ) return Value(z27Clone(v.o));
+  if (v.t == Value::ARR) {
+    ArrP a = newArr();
+    a->v.reserve(v.a->v.size());
+    for (const auto& x : v.a->v) a->v.push_back(z27CloneValue(x));
+    return Value(a);
+  }
+  return v;
+}
+static ObjP z27Clone(const ObjP& jo) {
+  ObjP c = newObj();
+  c->kv.reserve(nn(jo)->kv.size());
+  for (const auto& kv : jo->kv) c->kv.emplace_back(kv.first, z27CloneValue(kv.second));
+  c->idx = jo->idx;
+  return c;
+}
+
+// Writes made while this is alive reach the save file together, at commit().
+// Leaving the scope without commit() undoes them.
+struct ZiruTx {
+  zs::ZiruDb& db;
+  bool open = true;
+  explicit ZiruTx(zs::ZiruDb& d) : db(d) { db.begin(); }
+  void commit() { if (open) { db.commit(); open = false; } }
+  ~ZiruTx() {
+    if (!open) return;
+    try { db.rollback(); } catch (const std::exception& e) { zs::loge("OFFLINE_SERVER", std::string("[ZIRU_DB_ROLLBACK_ERR] ") + e.what()); }
+  }
+};
 
 void z27PutMeta(const std::string& k, const std::string& v) {
   ziruDb->saveMeta(k, v);

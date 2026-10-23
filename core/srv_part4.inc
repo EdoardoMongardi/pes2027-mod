@@ -548,6 +548,7 @@ bool isZiruPlayerSold(int64_t s) {
 
 ObjP loadZiruJsonAssetObject(const std::string& name) {
   try {
+    if (name == "responses/CmdLogin.json") ziruLoginParses++;
     return Object::parse(readAsset(name));
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V46_LOAD_JSON_ERR] ") + name + " " + e.what());

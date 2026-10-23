@@ -18,8 +18,8 @@ struct ZiruCardIdentity {
   std::set<int> skills;               // parameter indices 70..141 the card has by itself
 };
 
-std::unordered_map<int64_t, ObjP> ziruStarterCards, ziruRentalCards;
-bool ziruStarterCardsLoaded = false, ziruRentalCardsLoaded = false;
+std::unordered_map<int64_t, ObjP> ziruRentalCards;
+bool ziruRentalCardsLoaded = false;
 
 // Exact-id index of the cards in one static list, built once. A file that cannot
 // be read gives an empty index (logged once).
@@ -50,11 +50,10 @@ ObjP z27CardSource(int64_t id) {
   ObjP rec = recs ? recs->optJSONObject(str(id)) : nullptr;
   ObjP card = rec ? rec->optJSONObject("gameplayer") : nullptr;
   if (card) return card;
-  z27IndexCards("responses/CmdLogin.json", "gameplayer_list", nullptr, ziruStarterCardsLoaded, ziruStarterCards);
-  auto it = ziruStarterCards.find(id);
-  if (it != ziruStarterCards.end()) return it->second;
+  auto starter = z27Starters().byId.find(id);
+  if (starter != z27Starters().byId.end()) return starter->second;
   z27IndexCards("responses/ZIRU_ML_RENTAL_LIST.json", "rental_player_list", "player_info", ziruRentalCardsLoaded, ziruRentalCards);
-  it = ziruRentalCards.find(id);
+  auto it = ziruRentalCards.find(id);
   return it != ziruRentalCards.end() ? it->second : nullptr;
 }
 
@@ -529,7 +528,8 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
         }
         z27NormalizeOwnedCard(cur);
         if (serial > 0) {
-          ziruDb->savePlayer(serial, id, cur->toString());
+          std::string text = cur->toString();
+          if (!lp || text != *lp) ziruDb->savePlayer(serial, id, text);
         }
         return cur;
       }
@@ -543,10 +543,9 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
 
 ObjP resolveZiruCoachFromLoginV73(int64_t id) {
   try {
-    ObjP login = loadZiruJsonAssetObject("responses/CmdLogin.json");
-    ObjP ei;
+    ObjP ei = z27Starters().entry;
     ArrP cl;
-    if (!login || !(ei = login->optJSONObject("entry_info")) || !(cl = ei->optJSONArray("coach_list"))) return nullptr;
+    if (!ei || !(cl = ei->optJSONArray("coach_list"))) return nullptr;
     auto boostCoach = [](const ObjP& c) -> ObjP {
       ObjP res = Object::parse(c->toString());
       res->put("possession", 99);
@@ -737,10 +736,12 @@ ObjP z27OwnedPlayer(int64_t serial) {
       ObjP gp = o->optJSONObject("gameplayer");
       if (gp) o = gp;
       ObjP gid = o->optJSONObject("gameplayer_id");
-      if (gid && gid->optLong("serial") == serial) return o;
+      if (gid && gid->optLong("serial") == serial) return second ? z27Clone(o) : o;
     }
     if (second) return nullptr;
-    arr = z27Entry()->getJSONArray("gameplayer_list");
+    ObjP starters = z27Starters().entry;
+    arr = starters ? starters->optJSONArray("gameplayer_list") : nullptr;
+    if (!arr) return nullptr;
     second = true;
   }
 }

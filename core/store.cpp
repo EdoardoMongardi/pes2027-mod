@@ -224,15 +224,31 @@ void ZiruDb::saveLeagueHistory(int64_t id, const std::string& json) {
   run(db, "INSERT OR REPLACE INTO league_history(storage_id,history_json,played_at) VALUES(?,?,?)", {zj::Value((long long)id), zj::Value(json), zj::Value((long long)zc::currentTimeMillis())});
 }
 void ZiruDb::saveMatchState(const std::string& state, const std::string& k, const std::string& v) {
-  exec("BEGIN");
+  begin();
   try {
     run(db, "INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", {zj::Value(k), zj::Value(v)});
     run(db, "INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", {zj::Value("z27_division_state"), zj::Value(state)});
-    exec("COMMIT");
+    commit();
   } catch (...) {
-    exec("ROLLBACK");
+    rollback();
     throw;
   }
+}
+// Savepoints, so a group of writes can sit inside another one.
+void ZiruDb::begin() {
+  exec("SAVEPOINT z" + std::to_string(txDepth));
+  txDepth++;
+}
+void ZiruDb::commit() {
+  if (txDepth <= 0) return;
+  exec("RELEASE z" + std::to_string(txDepth - 1));
+  txDepth--;
+}
+void ZiruDb::rollback() {
+  if (txDepth <= 0) return;
+  exec("ROLLBACK TO z" + std::to_string(txDepth - 1));
+  exec("RELEASE z" + std::to_string(txDepth - 1));
+  txDepth--;
 }
 void ZiruDb::saveMeta(const std::string& k, const std::string& v) { run(db, "INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", {zj::Value(k), zj::Value(v)}); }
 void ZiruDb::savePlayer(int64_t s, int64_t pid, const std::string& json) {

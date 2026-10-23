@@ -86,6 +86,12 @@ struct ZiruDb {
   void saveProgression(int64_t serial, const std::string& json);
   void saveSquad(int32_t id, const std::string& json);
   void deleteSquad(int32_t id);
+  // Groups writes so they reach the file together. Calls nest: only the
+  // outermost commit writes; rollback undoes everything since the matching begin.
+  void begin();
+  void commit();
+  void rollback();
+  int txDepth = 0;
  private:
   void exec(const std::string& sql);
   bool queryOne(const std::string& sql, const std::vector<std::string>& args, std::string& out);

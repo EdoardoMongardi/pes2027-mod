@@ -542,6 +542,20 @@ static void cardIdentityTests(const std::string& top) {
     check(legacyStyles && legacyStyles->getInt(0) == 14 && legacyStyles->getInt(1) == 0,
         "outgoing: a single-number play_style of a known card is replaced by its two styles");
   }
+  // CmdLogin.json is read once per process. A login parses it once more (it is the
+  // response itself); entry info, match start, player detail and training do not parse it.
+  {
+    auto parses = [&](const char* cmd, ObjP req) { s.ziruLoginParses = 0; call(s, cmd, req); return s.ziruLoginParses; };
+    check(parses("CMD_LOGIN", newObj()) <= 1, "parses: a login reads CmdLogin.json at most once");
+    check(parses("CMD_GET_MYCLUB_ENTRY_INFO", newObj()) == 0, "parses: entry info uses the starter cards read before");
+    auto game = call(s, "CMD_GET_VSCOM_OPPONENT")->getLong("game_id");
+    check(parses("CMD_START_GAME", newObj()->put("game_id", (long long)game)) == 0, "parses: match start uses the starter cards read before");
+    check(parses("CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", T)->put("serial", 501))) == 0,
+        "parses: player detail uses the starter cards read before");
+    auto booster = newObj()->put("gameplayer_id_list", newArr()->put(newObj()->put("id", S)->put("serial", 503)))->put("training_index", 2)
+        ->put("ability_id", 77)->put("item_list", newArr()->put(newObj()->put("present_num", 1)->put("item", newObj()->put("item_type", "ABILITY_TRAINING_SELECT"))));
+    check(parses("CMD_USE_MYCLUB_ITEM", booster) == 0, "parses: training uses the starter cards read before");
+  }
   auto aiY = byId(aiSideTemplate, Y);
   check(sameStyles(aiY, 11, 29, all), "outgoing: an AI template card nobody knows keeps its parameters and gets a matching play_style");
   auto rental = s.z27Player(newObj()->put("id", R)->put("serial", 0LL));
@@ -816,6 +830,24 @@ int main() {
       active->put("division", 10)->put("cpu_level", "NORMAL");
       s.ziruDb->saveMeta("z27_active_match", active->toString());
       check(call(s, "CMD_GET_VSCOM_OPPONENT")->getString("cpu_level") == "NORMAL", "already-migrated D10 saves maintain D10 snapshots");
+      // Grouped writes: an inner group is undone on its own, a match result inside an undone
+      // group is undone with it, and the outer group's writes stay.
+      {
+        std::string v;
+        s.ziruDb->begin();
+        s.ziruDb->saveMeta("group_outer", "1");
+        s.ziruDb->begin();
+        s.ziruDb->saveMeta("group_inner", "1");
+        s.ziruDb->rollback();
+        s.ziruDb->begin();
+        s.ziruDb->saveMatchState(R"({"division":10})", "group_result", "1");
+        s.ziruDb->rollback();
+        s.ziruDb->commit();
+        check(s.ziruDb->loadMeta("group_outer", v) && !s.ziruDb->loadMeta("group_inner", v) && !s.ziruDb->loadMeta("group_result", v) &&
+              s.ziruDb->txDepth == 0, "grouped writes: inner groups are undone alone, the outer group is written");
+        { OfflineServer::ZiruTx tx(*s.ziruDb); s.ziruDb->saveMeta("group_dropped", "1"); }
+        check(!s.ziruDb->loadMeta("group_dropped", v) && s.ziruDb->txDepth == 0, "grouped writes: a group left without commit is undone");
+      }
       sqlite3_exec(s.ziruDb->db, "PRAGMA query_only=ON", nullptr, nullptr, nullptr);
       bool failed = false;
       try { s.ziruDb->saveMeta("must_not_succeed", "1"); } catch (const std::exception&) { failed = true; }
