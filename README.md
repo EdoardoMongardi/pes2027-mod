@@ -105,6 +105,11 @@ python tools/build_ipa.py `
    - Nếu dữ liệu được chép hoặc nhập trong lúc màn hình nhập dữ liệu đang mở, hãy tắt hẳn ứng dụng rồi mở lại: game chỉ đọc dữ liệu khi khởi động.
 3. **Xem file nhật ký khi gặp sự cố**:
    - Toàn bộ log vận hành được ghi tại: *Tệp › Trên iPhone › PES 2027 › `PES2027-logs/ziru.log`* và `offline_server.log`.
+4. **Save cũ (bản build 138) khi cập nhật lên bản này**:
+   - Mỗi cầu thủ khởi đầu giờ có số serial riêng như dữ liệu gốc của Konami (trước đây 70 thẻ dùng chung 11 serial), nên huấn luyện kỹ năng, booster, vị trí và điểm phát triển chỉ áp dụng cho đúng thẻ được chọn.
+   - Lần mở đầu tiên, save cũ được chuyển một lần: thẻ đang giữ tiến trình ở mỗi serial cũ được chuyển sang serial mới của chính nó cùng kỹ năng đã học, booster, vị trí, cấp độ và điểm phát triển; các thẻ khởi đầu khác bắt đầu với chỉ số gốc; đội hình và đội hình MyLeague trỏ sang serial mới; thẻ từ gói không bị động tới.
+   - Bản sao dữ liệu cũ được giữ trong save (`meta` khóa `z27_starter_serials_backup`); mỗi bước được ghi vào `offline_server.log` với nhãn `Z27_SERIAL_MIGRATION`.
+   - Yêu cầu huấn luyện cho một thẻ không nằm ở serial đó sẽ được trả lời là không thành công và không thay đổi gì (`Z27_TRAINING_REFUSED` trong log).
 
 ---
 
@@ -130,7 +135,8 @@ python3 -m unittest discover -s online -p 'test_online_server.py' -v
 python3 test/datapack_fixtures.py /tmp/datapack-test && ./build/datapacktest /tmp/datapack-test
 
 # 6. Kiểm tra dữ liệu cầu thủ trong ziru-extra/responses (mỗi phía tối đa một phong cách chơi,
-#    play_style khớp tham số 61/62, mọi bản sao của một thẻ khớp với ZIRU_PLAYER_RECORDS.json):
+#    play_style khớp tham số 61/62, mọi bản sao của một thẻ khớp với ZIRU_PLAYER_RECORDS.json,
+#    mỗi thẻ khởi đầu có serial riêng của Konami và bảng chuyển save core/starter_serials.inc khớp dữ liệu):
 python3 -m unittest discover -s test -p 'player_data_test.py' -v
 ```
 
