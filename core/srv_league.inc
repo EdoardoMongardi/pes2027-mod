@@ -242,10 +242,16 @@ void decodeZiruMyclubItemRequest(const Bytes& b) {
       }
     }
     ziruTrainingIndex = req->optInt("training_index", -1);
-    if (req->has("ability_id")) ziruAbilityId = req->optInt("ability_id", 0);
-    else if (req->has("ability_Id")) ziruAbilityId = req->optInt("ability_Id", 0);
-    else if (req->has("skill_id")) ziruAbilityId = req->optInt("skill_id", 0);
-    else if (req->has("additional_skill_id")) ziruAbilityId = req->optInt("additional_skill_id", 0);
+    // skill_id / additional_skill_id were already put in Ziru's numbering when the request
+    // came in (adaptIosPlayerData); ability_id and the item's effect were not.
+    bool abilityInClientNumbers = false;
+    auto readAbility = [&](const ObjP& o) {
+      if (o->has("ability_id")) { ziruAbilityId = o->optInt("ability_id", 0); abilityInClientNumbers = true; }
+      else if (o->has("ability_Id")) { ziruAbilityId = o->optInt("ability_Id", 0); abilityInClientNumbers = true; }
+      else if (o->has("skill_id")) { ziruAbilityId = o->optInt("skill_id", 0); abilityInClientNumbers = false; }
+      else if (o->has("additional_skill_id")) { ziruAbilityId = o->optInt("additional_skill_id", 0); abilityInClientNumbers = false; }
+    };
+    readAbility(req);
 
     if (req->has("skill_training_category_type")) {
       ziruSkillCategory = req->optString("skill_training_category_type", "");
@@ -263,22 +269,25 @@ void decodeZiruMyclubItemRequest(const Bytes& b) {
           if (item->has("item_type")) ziruItemType = item->optString("item_type", "");
           if (item->has("effect")) { i5 = item->optInt("effect", 0); ziruSkillItemEffect = i5; }
           if (item->has("grade")) ziruSkillItemGrade = item->optInt("grade", 0);
-          if (item->has("ability_id")) ziruAbilityId = item->optInt("ability_id", 0);
-          else if (item->has("ability_Id")) ziruAbilityId = item->optInt("ability_Id", 0);
-          else if (item->has("skill_id")) ziruAbilityId = item->optInt("skill_id", 0);
-          else if (item->has("additional_skill_id")) ziruAbilityId = item->optInt("additional_skill_id", 0);
+          readAbility(item);
         }
         int i6 = it->optInt("present_num", 0);
-        if (it->has("ability_id")) ziruAbilityId = it->optInt("ability_id", 0);
-        else if (it->has("ability_Id")) ziruAbilityId = it->optInt("ability_Id", 0);
-        else if (it->has("skill_id")) ziruAbilityId = it->optInt("skill_id", 0);
-        else if (it->has("additional_skill_id")) ziruAbilityId = it->optInt("additional_skill_id", 0);
+        readAbility(it);
 
         if (ziruItemType && *ziruItemType == "LEVEL_TRAINING") {
           ziruLevelEffect += (int32_t)((uint32_t)i5 * (uint32_t)i6);
         }
       }
-      if (ziruAbilityId == 0 && ziruSkillItemEffect > 0) ziruAbilityId = ziruSkillItemEffect;
+      if (ziruAbilityId == 0 && ziruSkillItemEffect > 0) { ziruAbilityId = ziruSkillItemEffect; abilityInClientNumbers = true; }
+    }
+    // The 11.1.1 client sends the skill picked in Skill Training (Select) as ability_id, and again
+    // as the item's effect, in its own skill card numbers (UtilityMyClubTraining::GetCategorySkillIdList
+    // 0x1048a5600 -> MyClubMyTeamPlayerTrainingSkillSelect::StartSkillTrainingCommand 0x1046845f4 ->
+    // CommandObjectCmdUseMyclubItem::InitCommand 0x104774a3c). Those differ from Ziru's after Dummy
+    // cards 25 and 68. Booster training also uses ability_id, for a booster id: left as it is.
+    if (cfg.iosPlayerLayout && ziruItemType && *ziruItemType == "SKILL_TRAINING_SELECT") {
+      if (abilityInClientNumbers) ziruAbilityId = iosSkillId(ziruAbilityId, false);
+      if (ziruSkillItemEffect > 0) ziruSkillItemEffect = iosSkillId(ziruSkillItemEffect, false);
     }
     zs::logi("OFFLINE_SERVER", "[ZIRU V15.7.2A ITEM] type=" + (ziruItemType ? *ziruItemType : "none") +
              " serial=" + str(ziruTargetSerial) + " player_id=" + str(ziruTargetPlayerId) +

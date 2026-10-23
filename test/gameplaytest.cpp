@@ -432,6 +432,30 @@ static void cardIdentityTests(const std::string& top) {
     auto wire = call(w, "CMD_GET_MYCLUB_SELECT_SKILL")->getJSONArray("select_skill_list");
     for (int i = 0; i < wire->length(); ++i) check(isZiruTrainableSkill(iosSkillId(wire->getInt(i), false)), "iOS selection list offers normal skills only");
   }
+  {
+    // The 11.1.1 client sends the skill picked in Skill Training (Select) as ability_id and as the
+    // item's effect, in its own skill numbers; booster training sends a booster id as ability_id.
+    Config wireCfg = cfg; wireCfg.dataDir = root + "/select-ios-train"; wireCfg.iosPlayerLayout = true;
+    std::filesystem::create_directories(wireCfg.dataDir);
+    OfflineServer w(wireCfg);
+    call(w, "CMD_LOGIN");
+    auto pick = [&](const char* type, int index, int ability) {
+      auto req = newObj()->put("gameplayer_id_list", newArr()->put(newObj()->put("id", A)->put("serial", 501)))->put("training_index", index)
+          ->put("ability_id", ability)->put("position_id", 0)
+          ->put("item_list", newArr()->put(newObj()->put("present_num", 100)
+              ->put("item", newObj()->put("item_type", type)->put("grade", 0)->put("effect", std::string(type) == "SKILL_TRAINING_SELECT" ? ability : 0))));
+      return call(w, "CMD_USE_MYCLUB_ITEM", req);
+    };
+    int first = pick("SKILL_TRAINING_SELECT", 0, iosSkillId(44, true))->getJSONObject("skill_training_result")->getInt("additional_skill_id");
+    int second = pick("SKILL_TRAINING_SELECT", 1, iosSkillId(69, true))->getJSONObject("skill_training_result")->getInt("additional_skill_id");
+    check(first == iosSkillId(44, true) && second == iosSkillId(69, true), "iOS Select: the client's skill numbers are answered in the client's numbers");
+    check(w.sp("almanac_state").getString("ziru_skills_501", "") == "44,69", "iOS Select: the picked skills are the ones learned");
+    auto learnedA = Object::parse(*w.loadPlayer(501));
+    check(skillBit(learnedA, 44) == 1 && skillBit(learnedA, 69) == 1 && skillBit(learnedA, 45) == 0 && skillBit(learnedA, 70) == 0,
+        "iOS Select: the picked skills' flags are on, the neighbours' are not");
+    pick("ABILITY_TRAINING_SELECT", 1, 186);
+    check(Object::parse(*w.loadPlayer(501))->getJSONArray("initial_booster_id_list")->getInt(1) == 186, "iOS booster Select: the booster id is used as sent");
+  }
   // Progression reset keeps the owned boosters of a 145-value save.
   auto boosted = Object::parse(*s.loadPlayer(501));
   boosted->getJSONArray("parameters")->put(142, 12);
