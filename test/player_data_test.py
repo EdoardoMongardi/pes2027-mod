@@ -13,6 +13,7 @@ the other response files must agree with its record.
 """
 import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -185,6 +186,94 @@ class PlayerDataTest(unittest.TestCase):
                     bad.append("%s[%d] %s: original_parameters 61..69 %r, Konami %r" % (name, i, cid, original[61:70], want_params))
         self.assertEqual(bad, [])
         self.assertGreater(checked, 0)
+
+
+# Files with Konami's captured squads that refer to the user's starter cards by (id, serial).
+TEMPLATE_FILES = ["ZIRU_START_GAME.json", "ZIRU_ML_START_GAME.json", "ZIRU_ML_SET_SEASON_ENTER.json",
+                  "ZIRU_ML_GAME_RESULT.json", "ZIRU_GET_VSCOM_GAME_RESULT_TEMPLATE.json"]
+BUILD_138 = "75288ee"   # the build whose saves the server moves to the new serials
+
+
+def card_refs(node, out):
+    """(id, serial) of every gameplayer_id under node."""
+    if isinstance(node, dict):
+        gid = node.get("gameplayer_id")
+        if isinstance(gid, dict) and "serial" in gid:
+            out.add((gid.get("id"), gid["serial"]))
+        for value in node.values():
+            card_refs(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            card_refs(value, out)
+    return out
+
+
+def starter_serial_table():
+    """Rows (id, before, now, order) of core/starter_serials.inc."""
+    text = (ROOT / "core" / "starter_serials.inc").read_text()
+    return [tuple(int(v) for v in row) for row in re.findall(r"\{(\d+)LL, (\d+)LL, (\d+)LL, (\d+)\}", text)]
+
+
+class StarterSerialTest(unittest.TestCase):
+    """Every starter card has the serial Konami's own login gives it, one card per serial: the
+    server keeps a card's training, learned skills and careerplan points under its serial."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.capture = json.loads((RESPONSES / LOGIN_CAPTURE).read_bytes())["entry_info"]
+        cls.login = json.loads((RESPONSES / "CmdLogin.json").read_bytes())["entry_info"]
+
+    @staticmethod
+    def keys(entry):
+        return [(p["gameplayer_id"]["id"], p["gameplayer_id"]["serial"]) for p in entry["gameplayer_list"]]
+
+    @staticmethod
+    def squad(entry):
+        return [(p["gameplayer_id"]["id"], p["gameplayer_id"]["serial"], p.get("uniform_number"))
+                for p in entry["squad_list"][0]["squad_data"]["player_list"]]
+
+    def test_every_starter_card_has_konamis_serial(self):
+        want, want_squad = self.keys(self.capture), self.squad(self.capture)
+        self.assertEqual(len(want), 70)
+        for name in sorted(STARTER_FILES):
+            entry = json.loads((RESPONSES / name).read_bytes())["entry_info"]
+            self.assertEqual(entry["gameplayer_list"], self.login["gameplayer_list"], name)
+            self.assertEqual(entry["squad_list"], self.login["squad_list"], name)
+            keys = self.keys(entry)
+            self.assertEqual(keys, want, name)
+            self.assertEqual(len({s for _, s in keys}), 70, name + ": one card per serial")
+            self.assertEqual(self.squad(entry), want_squad, name + ": the default squad is Konami's")
+            self.assertTrue(all((i, s) in set(keys) for i, s, _ in want_squad), name + ": every squad card is a listed card")
+
+    def test_starter_serials_are_no_other_cards_serials(self):
+        serials = {s for _, s in self.keys(self.login)}
+        coaches = {c["coach_id"]["serial"] for c in self.login["coach_list"]}
+        self.assertFalse(serials & coaches)
+        starters = set(self.keys(self.login))
+        others = set()
+        for name in TEMPLATE_FILES:
+            others |= {r for r in card_refs(json.loads((RESPONSES / name).read_bytes()), set()) if r not in starters}
+        self.assertTrue(others)
+        self.assertEqual(sorted(r for r in others if r[1] in serials), [], "a template card would be read as one of the user's cards")
+
+    def test_save_move_table_matches_the_data(self):
+        table = starter_serial_table()
+        self.assertEqual([(i, now) for i, _, now, _ in table], self.keys(self.login))
+        squad = {(i, s) for i, s, _ in self.squad(self.capture)}
+        groups = {}
+        for i, before, now, order in table:
+            groups.setdefault((i, before), []).append((order, now))
+        for (i, before), copies in groups.items():
+            self.assertEqual(sorted(o for o, _ in copies), list(range(len(copies))), (i, before))
+            if len(copies) > 1:
+                self.assertIn((i, dict(copies)[0]), squad, "order 0 is the copy Konami's squad uses")
+        self.assertEqual(len({before for _, before, _, _ in table}), 11)
+        try:
+            old = subprocess.run(["git", "-C", str(ROOT), "show", BUILD_138 + ":ziru-extra/responses/CmdLogin.json"],
+                                 capture_output=True, check=True).stdout
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("build 138 is not in this checkout")
+        self.assertEqual([(i, before) for i, before, _, _ in table], self.keys(json.loads(old)["entry_info"]))
 
 
 if __name__ == "__main__":
