@@ -8,8 +8,10 @@
 #include <limits.h>
 #include <stdlib.h>
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <set>
 
