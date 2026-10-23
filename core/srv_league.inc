@@ -107,12 +107,9 @@ ObjP buildZiruResetPlayer(int64_t playerId, int64_t serial) {
     if (bp) {
       ArrP np = Array::parse(bp->toString());
       ArrP cur = jo->optJSONArray("parameters");
-      if (cur) {
-        int l1 = np->length(), l2 = cur->length();
-        if (l1 >= 7 && l2 >= 7) {
-          int a = l1 - 7, b = l2 - 7;
-          for (int k = 0; k < 3; k++) np->put(a + k, cur->optInt(b + k));
-        }
+      // Boosters are at 142..144 in both the 145- and the 149-value layouts.
+      if (cur && np->length() >= 145 && cur->length() >= 145) {
+        for (int k = 0; k < 3; k++) np->put(142 + k, cur->optInt(142 + k));
       }
       jo->put("parameters", np);
     }

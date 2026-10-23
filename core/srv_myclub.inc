@@ -578,6 +578,26 @@ static std::string joinInts(const std::vector<int32_t>& v) {
   return s;
 }
 
+// Parameter indices of the skills a card has by itself: from its identity
+// source, else (unknown card) its original_parameters, else its parameters
+// without the learned skills.
+std::set<int> z27CardSkillParams(const ObjP& p) {
+  ObjP gid = p ? p->optJSONObject("gameplayer_id") : nullptr;
+  ZiruCardIdentity card;
+  if (gid && z27CardIdentity(gid->optLong("id", 0), card) && card.hasSkills) return card.skills;
+  std::set<int> out;
+  ArrP printed = p ? p->optJSONArray("original_parameters") : nullptr;
+  if (printed && printed->length() >= 142) {
+    for (int i = 70; i < 142; ++i) if (printed->optInt(i, 0) == 1) out.insert(i);
+    return out;
+  }
+  ArrP values = p ? p->optJSONArray("parameters") : nullptr;
+  std::set<int> learned = z27LearnedSkillParams(p);
+  for (int i = 70; values && i < 142 && i < values->length(); ++i)
+    if (values->optInt(i, 0) == 1 && !learned.count(i)) out.insert(i);
+  return out;
+}
+
 void applyZiruSkillTrainingResponse(const ObjP& jo) {
   try {
     if (!ziruItemType || (*ziruItemType != "SKILL_TRAINING" && *ziruItemType != "SKILL_TRAINING_CATEGORY" && *ziruItemType != "SKILL_TRAINING_SELECT")) return;
@@ -626,73 +646,60 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
       else pool = "44,45,47,48,49,50,51,52,53,54,67,68,69,70,71";
     }
     std::vector<std::string> sp_ = split(pool, ',');
+    // Only normal skills can be trained: no special skill, no Dummy skill card,
+    // nothing the card already has by itself or has already learned.
+    std::set<int> cardSkills = z27CardSkillParams(owned);
+    auto cardHas = [&](int id) { return isZiruSkillId(id) && cardSkills.count(kZiruSkillParameters[id]) > 0; };
     std::vector<int> candidates;
-    ArrP baseSkills = owned->optJSONArray("parameters");
     for (const auto& s_item : sp_) {
       int val = parseInt(s_item);
-      bool builtIn = isZiruSkillId(val) && isZiruSkillParameter(kZiruSkillParameters[val]) && baseSkills && baseSkills->optInt(kZiruSkillParameters[val]) != 0;
-      if (isZiruSkillId(val) && !builtIn && !vcontains(al, val)) candidates.push_back(val);
+      if (isZiruTrainableSkill(val) && !cardHas(val) && !vcontains(al, val)) candidates.push_back(val);
     }
-    int v = 70;
+    int slot = ziruTrainingIndex;
+    int target = (slot >= 0 && slot < (int)al.size()) ? slot : (al.size() < 5 ? -1 : 0);  // -1: a new slot
+    int v = -1;
     if (*ziruItemType == "SKILL_TRAINING_SELECT") {
       int chosen = ziruAbilityId;
       if (chosen == 0 && ziruSkillItemEffect > 0) chosen = ziruSkillItemEffect;
-
-      if (!isZiruSkillId(chosen)) chosen = ziruAbilityId;
-      if (isZiruSkillId(chosen)) {
+      bool learnedElsewhere = vcontains(al, chosen) && !(target >= 0 && al[target] == chosen);
+      if (isZiruTrainableSkill(chosen) && !cardHas(chosen) && !learnedElsewhere) {
         v = chosen;
-      } else if (!candidates.empty()) {
-        v = candidates[0];
+      } else {
+        logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_SELECT_REFUSED] skill=" + str(chosen) + " cannot be trained");
+        if (!candidates.empty()) v = candidates[0];
       }
-    } else {
-      if (!candidates.empty()) {
-        v = candidates[rand() % candidates.size()];
-      } else throw IllegalState("No eligible additional skill remains");
+    } else if (!candidates.empty()) {
+      v = candidates[rand() % candidates.size()];
     }
+    if (v < 0) throw IllegalState("No eligible additional skill remains");
 
-    int slot = ziruTrainingIndex;
-    if (slot >= 0 && slot < (int)al.size()) {
-      int old = al[slot];
-      al[slot] = v;
-      logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_V18_REPLACE] slot=" + str(slot) + " old=" + str(old) + " new=" + str(v));
-    } else if (al.size() < 5) {
-      al.push_back(v);
+    int replaced = -1;
+    if (target >= 0) {
+      replaced = al[target];
+      al[target] = v;
+      logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_V18_REPLACE] slot=" + str(target) + " old=" + str(replaced) + " new=" + str(v));
     } else {
-      int old = al[0];
-      al[0] = v;
-      logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_V18_REPLACE] slot=0 old=" + str(old) + " new=" + str(v));
+      al.push_back(v);
     }
 
     ArrP ja = newArr();
     for (int skillId : al) ja->put(skillId);
     owned->put("additional_skill_id", ja);
 
-    int64_t pid = owned->optJSONObject("gameplayer_id") ? owned->getJSONObject("gameplayer_id")->optLong("id", 0) : 0;
-    int32_t bid = (int32_t)(pid & 0xFFFFFF);
-    ObjP w = getZiruPlayerWrapper(Value((long long)pid), false);
-    ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
-    ArrP origParams = owned->optJSONArray("original_parameters");
     ArrP params = owned->optJSONArray("parameters");
     if (params && params->length() >= 142) {
-      if (baseParams && baseParams->length() >= 142) {
-        for (int idx = 70; idx <= 141; ++idx) {
-          if (baseParams->optInt(idx, 0) == 1) params->put(idx, 1);
-        }
-      }
-      if (origParams && origParams->length() >= 142) {
-        for (int idx = 70; idx <= 141; ++idx) {
-          if (origParams->optInt(idx, 0) == 1) params->put(idx, 1);
-        }
+      // The replaced skill stops working, unless the card has it by itself.
+      if (replaced >= 0 && replaced != v && !cardHas(replaced) && !vcontains(al, replaced)) {
+        int pIdx = kZiruSkillParameters[replaced];
+        if (isZiruSkillParameter(pIdx) && pIdx < params->length()) params->put(pIdx, 0);
       }
       for (int skillId : al) {
-        if (isZiruSkillId(skillId)) {
-          int pIdx = kZiruSkillParameters[skillId];
-          if (isZiruSkillParameter(pIdx) && pIdx < params->length()) {
-            params->put(pIdx, 1);
-          }
-        }
+        int pIdx = kZiruSkillParameters[skillId];
+        if (isZiruSkillParameter(pIdx) && pIdx < params->length()) params->put(pIdx, 1);
       }
     }
+    // A known card ends with exactly its own skills plus the learned ones.
+    z27ApplyCardIdentity(owned);
     prefs.edit().putString(key, joinInts(al)).commit();
     saveZiruPlayerToDb(owned);
 

@@ -30,6 +30,8 @@ inline bool isZiruSpecialSkill(int id) {
       return false;
   }
 }
+// Skill Training teaches normal skills only.
+inline bool isZiruTrainableSkill(int id) { return isZiruSkillId(id) && id < 72 && !isZiruDummySkill(id) && !isZiruSpecialSkill(id); }
 // A learned skill read back from a save, or -1 when it must be dropped.
 // Older builds stored a learned Snap Strike (25) or Attack Trigger (68) as 72/73,
 // the iOS numbers of two Dummy cards; those are mapped back. Dummy skills and
@@ -94,7 +96,7 @@ inline bool adaptIosPlayerData(zj::Value& value, bool outgoing) {
     }
     for (const auto& key : value.o->keys()) {
       auto item = value.o->get(key);
-      if ((key == "additional_skill_id" || key == "skillcard_id_list") && item.t == zj::Value::ARR) {
+      if ((key == "additional_skill_id" || key == "skillcard_id_list" || key == "select_skill_list") && item.t == zj::Value::ARR) {
         auto skills = zj::Array::make();
         for (int i = 0; i < item.a->length(); ++i) skills->put(iosSkillId(item.a->getInt(i), outgoing));
         value.o->put(key, skills);

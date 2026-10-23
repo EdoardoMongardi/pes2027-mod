@@ -241,6 +241,57 @@ static void cardIdentityTests(const std::string& top) {
     check(learned->getInt(0) == iosSkillId(25, true) && learned->getInt(1) == iosSkillId(68, true), "iOS wire: learned skills use the client's numbers");
     check(wire->getInt(kZiruSkillParameters[25]) == 1 && wire->getInt(kZiruSkillParameters[68]) == 1, "iOS wire: the learned skills' own flags are on");
   }
+
+  // Skill Training: only normal skills; a replaced skill stops working.
+  auto train = [&](const char* type, long long id, long long serial, ObjP extra) {
+    auto req = newObj()->put("gameplayer_id_list", newArr()->put(newObj()->put("id", id)->put("serial", serial)))->put("training_index", 0)
+        ->put("item_list", newArr()->put(newObj()->put("present_num", 1)->put("item", newObj()->put("item_type", type))));
+    for (const auto& k : extra->keys()) req->put(k, extra->get(k));
+    return call(s, "CMD_USE_MYCLUB_ITEM", req)->getJSONObject("skill_training_result")->getInt("additional_skill_id");
+  };
+  auto skillCount = [](const ObjP& p) { int n = 0; for (int i = 70; i < 142; ++i) n += p->getJSONArray("parameters")->getInt(i); return n; };
+  const std::vector<std::string> categories = {"SHOOT", "PASS", "DRIBBLE", "DEFENCE", "OTHER"};
+  for (int k = 0; k < 120; ++k) {
+    int awarded = train(k % 2 ? "SKILL_TRAINING" : "SKILL_TRAINING_CATEGORY", A, 501,
+        newObj()->put("skill_training_category_type", categories[k % 5]));
+    check(isZiruTrainableSkill(awarded), "Skill Training never awards a special or Dummy skill");
+  }
+  for (int refused : {29, 9, 72, 73}) {
+    int awarded = train("SKILL_TRAINING_SELECT", A, 501, newObj()->put("skill_id", refused));
+    check(awarded != refused && isZiruTrainableSkill(awarded), "a special or Dummy skill cannot be selected");
+  }
+  check(train("SKILL_TRAINING_SELECT", A, 501, newObj()->put("skill_id", 44)) == 44, "a normal skill can be selected");
+  auto trainedA = Object::parse(*s.loadPlayer(501));
+  check(skillCount(trainedA) == 2 && skillBit(trainedA, 29) == 1 && skillBit(trainedA, 44) == 1,
+      "retraining one slot leaves the card's own skill plus the one learned skill");
+  check(sameStyles(trainedA, 3, 0, aiA), "training keeps the card's styles");
+  // A card nobody knows (D, own skill 2): the replaced skill's flag is cleared too.
+  check(train("SKILL_TRAINING_SELECT", D, 505, newObj()->put("skill_id", 0)) == 0, "unknown card: first skill learned");
+  check(train("SKILL_TRAINING_SELECT", D, 505, newObj()->put("skill_id", 1)) == 1, "unknown card: slot retrained");
+  for (int k = 0; k < 30; ++k) train("SKILL_TRAINING", D, 505, newObj());
+  auto trainedD = Object::parse(*s.loadPlayer(505));
+  check(skillCount(trainedD) == 2 && skillBit(trainedD, 2) == 1 && trainedD->getJSONArray("additional_skill_id")->length() == 1,
+      "unknown card: retraining leaves its own skill plus one learned skill");
+  auto choices = call(s, "CMD_GET_MYCLUB_SELECT_SKILL")->getJSONArray("select_skill_list");
+  check(choices->length() == 44, "the selection list has the 44 normal skills");
+  for (int i = 0; i < choices->length(); ++i) check(isZiruTrainableSkill(choices->getInt(i)), "the selection list offers normal skills only");
+  {
+    Config wireCfg = cfg; wireCfg.dataDir = root + "/select-ios"; wireCfg.iosPlayerLayout = true;
+    std::filesystem::create_directories(wireCfg.dataDir);
+    OfflineServer w(wireCfg);
+    auto wire = call(w, "CMD_GET_MYCLUB_SELECT_SKILL")->getJSONArray("select_skill_list");
+    for (int i = 0; i < wire->length(); ++i) check(isZiruTrainableSkill(iosSkillId(wire->getInt(i), false)), "iOS selection list offers normal skills only");
+  }
+  // Progression reset keeps the owned boosters of a 145-value save.
+  auto boosted = Object::parse(*s.loadPlayer(501));
+  boosted->getJSONArray("parameters")->put(142, 12);
+  boosted->put("initial_booster_id_list", newArr()->put(12)->put(0)->put(0));
+  s.ziruDb->savePlayer(501, A, boosted->toString());
+  auto reset = call(s, "CMD_USE_MYCLUB_CAREERPLAN", newObj()->put("gameplayer_use_list", newArr()->put(
+      newObj()->put("gameplayer_id", newObj()->put("id", A)->put("serial", 501))->put("use_list", newArr()))));
+  auto resetA = reset->getJSONArray("careerplan_result_list")->getJSONObject(0)->getJSONObject("gameplayer");
+  check(resetA->getJSONArray("parameters")->getInt(142) == 12, "progression reset keeps the boosters");
+  check(sameStyles(resetA, 3, 0, aiA) && skillBit(resetA, 44) == 1, "progression reset keeps the styles and the learned skill");
   check(!s.z27Player(newObj()->put("id", 424242LL)->put("serial", 0LL)), "an unknown card is not built from another player");
   auto rental = s.z27Player(newObj()->put("id", R)->put("serial", 0LL));
   check(rental && sameStyles(rental, 20, 28, aiS) && skillBit(rental, 44) == 1 && rental->getInt("initial_base_team_id") == 61,
@@ -366,6 +417,10 @@ int main() {
     asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
     asset(root, "ZIRU_MATCH_PROFILES.json", obj(R"({"profiles":[{"profile_id":1,"player_ids":[1],"coordinates":[],"team_style":0,"base_team_id":108}]})"));
     {
+      // The card itself has Double Touch (skill 2, parameter 71); the owner learned 25 and 68.
+      auto intrinsic = Object::parse(p->toString());
+      intrinsic->getJSONArray("parameters")->put(71, 1);
+      asset(root, "ZIRU_PLAYER_RECORDS.json", newObj()->put("1", newObj()->put("gameplayer", intrinsic)));
       Config skillCfg = cfg; skillCfg.dataDir = root + "/skill-display";
       std::filesystem::create_directories(skillCfg.dataDir);
       OfflineServer server(skillCfg);
@@ -377,8 +432,10 @@ int main() {
       auto detail = call(server, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", 1)->put("serial", 101)));
       check(detail->getJSONArray("parameters")->getInt(14) == 91,
           "player-detail endpoint uses owned progression rather than catalog stats");
-      check(detail->getJSONArray("skillcard_id_list")->length() > 0,
-          "owned intrinsic skills appear outside matches");
+      auto cards = detail->getJSONArray("skillcard_id_list");
+      bool intrinsicShown = false;
+      for (int i = 0; i < cards->length(); ++i) intrinsicShown |= cards->getInt(i) == 2;
+      check(intrinsicShown, "owned intrinsic skills appear outside matches");
       auto extra = detail->getJSONArray("additional_skill_id");
       check(extra->getInt(0) == 25 && extra->getInt(1) == 68,
           "stored internal skill IDs 25/68 are not remapped a second time");
@@ -387,6 +444,7 @@ int main() {
           "match player retains the same internal learned skill identity");
       check(player->getJSONArray("parameters")->getInt(142) == 42,
           "skill synchronization preserves booster data");
+      asset(root, "ZIRU_PLAYER_RECORDS.json", newObj()->put("1", newObj()->put("gameplayer", p)));
     }
     asset(root, "ZIRU_GET_VSCOM_OPPONENT.json", obj(R"({"squad_data":{"squad_gameplan":{"formation":[],"match_plan_settings":{}}},"user_info":[{}]})"));
     auto start = obj(R"({"squad_data_home":{"coach":{"coach_id":{"id":999,"serial":999}}},"commentary_info":{}})");
@@ -518,6 +576,14 @@ int main() {
       auto resumed = call(s, "CMD_CREATE_USER")->getJSONObject("entry_info");
       check(resumed->getJSONArray("gameplayer_list")->length() == 2, "CREATE_USER resumes recruits after process restart");
       check(resumed->getJSONArray("squad_list")->length() > 0, "CREATE_USER resumes saved squads");
+      // The card has every skill but skill 0 by itself, so 0 is the only skill left to train.
+      auto builtIn = Object::parse(p->toString());
+      auto builtInParams = builtIn->getJSONArray("parameters");
+      while (builtInParams->length() < 149) builtInParams->put(0);
+      for (int id = 0; id < 72; ++id) builtInParams->put(kZiruSkillParameters[id], id == 0 ? 0 : 1);
+      builtIn->put("initial_booster_id_list", newArr()->put(12)->put(0)->put(0));
+      asset(root, "ZIRU_PLAYER_RECORDS.json", newObj()->put("1", newObj()->put("gameplayer", builtIn)));
+      s.ziruPlayerRecordsCache.reset();
       auto owned = Object::parse(*s.loadPlayer(101));
       owned->getJSONObject("gameplayer_id")->put("serial", 303);
       auto params = owned->getJSONArray("parameters");

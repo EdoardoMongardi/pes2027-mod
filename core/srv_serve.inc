@@ -309,7 +309,7 @@ Response serveInner(Request& r) {
     jo->put("msgid", "CMD_GET_MYCLUB_SELECT_SKILL");
     jo->put("is_success", "YES");
     ArrP list = newArr();
-    for (int i = 0; i < 74; i++) list->put(i);
+    for (int i = 0; i < 74; i++) if (isZiruTrainableSkill(i)) list->put(i);
     jo->put("select_skill_list", list);
     return serveObjectAsEncryptedMsgPack(jo);
   }
