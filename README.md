@@ -99,7 +99,10 @@ python tools/build_ipa.py `
 2. **Nhập gói dữ liệu (Data Pack)**:
    - Chép file dữ liệu `PES2027-data-<data_id>.zip` vào ứng dụng **Tệp (Files)** trên iPhone (thư mục *Trên iPhone › PES 2027* hoặc vị trí bất kỳ).
    - Mở game lần đầu → Màn hình **Nhập dữ liệu game** của mod xuất hiện → Nhấn chọn gói ZIP vừa chép.
+   - Gói ZIP có thể có `data-manifest.json` ngay ở gốc, hoặc nằm trong đúng một thư mục (ví dụ nén cả thư mục `PES2027-data` thành `PES2027-data.zip`).
    - Ứng dụng sẽ tự động giải nén, kiểm tra tính toàn vẹn (SHA-256) của từng file và khởi tạo môi trường offline.
+   - Cách khác: dùng 3uTools hoặc ứng dụng Tệp chép cả thư mục `PES2027-data` (gồm `pak`, `cpk`, `livedata`) vào thư mục của app. Mod tự trỏ `Documents/pak`, `cpk`, `livedata` tới thư mục này, kể cả khi app đã từng được mở trước khi có dữ liệu.
+   - Nếu dữ liệu được chép hoặc nhập trong lúc màn hình nhập dữ liệu đang mở, hãy tắt hẳn ứng dụng rồi mở lại: game chỉ đọc dữ liệu khi khởi động.
 3. **Xem file nhật ký khi gặp sự cố**:
    - Toàn bộ log vận hành được ghi tại: *Tệp › Trên iPhone › PES 2027 › `PES2027-logs/ziru.log`* và `offline_server.log`.
 
@@ -111,7 +114,7 @@ Dự án tích hợp sẵn bộ test đầy đủ để xác minh tính tương 
 
 ```bash
 # 1. Biên dịch bộ công cụ test trên Linux / macOS:
-make -j2 build/runcpp build/packtest build/gameplaytest
+make -j2 build/runcpp build/packtest build/gameplaytest build/modtest build/folderroutetest build/datapacktest
 
 # 2. Chạy hồi quy kiểm thử logic gameplay (division, career, progression, skills):
 ./build/gameplaytest
@@ -121,6 +124,10 @@ python3 -m unittest discover -s test -p 'ios_tables_test.py' -v
 
 # 4. Kiểm thử giao thức mã hóa máy chủ Online (Signaling + TURN):
 python3 -m unittest discover -s online -p 'test_online_server.py' -v
+
+# 5. Kiểm thử liên kết thư mục dữ liệu (Documents/pak, cpk, livedata) và nhập gói data ZIP:
+./build/folderroutetest
+python3 test/datapack_fixtures.py /tmp/datapack-test && ./build/datapacktest /tmp/datapack-test
 ```
 
 ---
