@@ -61,6 +61,7 @@ struct Result {
   std::string folder;           // the folder Documents/<name> now shows (empty = nothing usable)
   bool hasBase = false;         // Documents/<name> now shows the markers
   bool otherDataFolder = false; // a folder other than Documents/<name> holds the markers
+  std::string dataFolder;       // where the data comes from: Documents/<name> (or what it links to), or the folder merged into it
   Action action = Action::None;
   bool changed() const {
     return action == Action::Linked || action == Action::Relinked || action == Action::Converted || action == Action::Merged;
@@ -176,13 +177,11 @@ inline std::vector<Candidate> candidates(const std::string& docs, const Spec& sp
   return out;
 }
 
-// The folder that holds the folder Documents/<name> shows ("Documents/PES2027-data" when
-// Documents/pak links to PES2027-data/pak), or "" when Documents/<name> is not a folder.
-// Passed as `near` so cpk, livedata and Download are taken from the same data folder.
-inline std::string dataParent(const std::string& docs, const std::string& name) {
-  const std::string p = docs + "/" + name;
-  return isDirFollow(p) ? p + "/.." : "";
-}
+// The folder holding the data folder in use ("Documents/PES2027-data" when Documents/pak links to,
+// or is filled from, PES2027-data/pak), or "" when the base data was not found. Passed as `near` so
+// cpk, livedata and Download are taken from the same data folder. "<folder>/.." is resolved by the
+// file system, through the link when <folder> is one.
+inline std::string dataParent(const Result& r) { return r.hasBase && !r.dataFolder.empty() ? r.dataFolder + "/.." : ""; }
 
 inline std::vector<std::string> splitPath(const std::string& p) {
   std::vector<std::string> out;
@@ -288,7 +287,7 @@ inline Result finish(const std::string& path, const Spec& spec, Action action, b
   r.action = action;
   r.otherDataFolder = other;
   if (isDirFollow(path)) {
-    r.folder = path;
+    r.folder = r.dataFolder = path;
     r.hasBase = hasMarker(path, spec, false);
   }
   return r;
@@ -304,7 +303,7 @@ inline bool mayLinkLooseFiles(const std::string& folder, const Result& r) {
   return S_ISDIR(st.st_mode) && onlyLinks(folder);
 }
 
-// near: see candidates() (pass dataParent(docs, "pak") for cpk and livedata, "" for pak itself).
+// near: see candidates() (pass dataParent(<pak result>) for cpk and livedata, "" for pak itself).
 inline Result resolve(const std::string& docs, const Spec& spec, const LogFn& log = nullptr, const std::string& near = "",
                       int maxDepth = 3) {
   const std::string link = docs + "/" + spec.name;
@@ -366,9 +365,10 @@ inline Result resolve(const std::string& docs, const Spec& spec, const LogFn& lo
     say("could not replace the folder the mod made earlier; linking files one by one");
   }
   int n = mergeLinks(docs, link, c[0].path, spec.notLinkedSingly);
-  if (n == 0) return finish(link, spec, Action::KeptReal, true);
-  say("kept the real files already in " + link + " and linked " + std::to_string(n) + " files from " + c[0].path);
-  return finish(link, spec, Action::Merged, true);
+  if (n) say("kept the real files already in " + link + " and linked " + std::to_string(n) + " files from " + c[0].path);
+  Result r = finish(link, spec, n ? Action::Merged : Action::KeptReal, true);
+  r.dataFolder = c[0].path;  // filled from there (now or on an earlier launch)
+  return r;
 }
 
 }  // namespace zfr

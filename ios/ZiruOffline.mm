@@ -1170,7 +1170,7 @@ static DataFolders prepareDataFolderLinks() {
   zfr::LogFn log = [](const std::string& line) { ZLog(@"[DATA_LINK] %s", line.c_str()); };
   DataFolders f;
   f.pak = zfr::resolve(docs, pakSpec(), log);
-  if (f.pak.hasBase) f.dataParent = zfr::dataParent(docs, "pak");
+  f.dataParent = zfr::dataParent(f.pak);
   f.cpk = zfr::resolve(docs, cpkSpec(), log, f.dataParent);
   f.livedata = zfr::resolve(docs, livedataSpec(), log, f.dataParent);
   for (const char* n : {"pak", "cpk", "livedata"}) zfr::pruneDanglingLinks(docs + "/" + n, log);

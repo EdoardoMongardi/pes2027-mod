@@ -213,7 +213,7 @@ static Launch newLaunch(const World& w, bool verbose = false) {
   Launch L;
   // Same order as prepareDataFolderLinks: cpk and livedata prefer the data folder the pak folder came from.
   L.pak = zfr::resolve(w.docs, pakSpec(), log);
-  std::string near = L.pak.hasBase ? zfr::dataParent(w.docs, "pak") : "";
+  std::string near = zfr::dataParent(L.pak);
   L.cpk = zfr::resolve(w.docs, cpkSpec(), log, near);
   L.live = zfr::resolve(w.docs, livedataSpec(), log, near);
   for (auto n : {"pak", "cpk", "livedata"}) zfr::pruneDanglingLinks(w.docs + "/" + n, log);
@@ -496,8 +496,24 @@ int main(int argc, char** argv) {
     CHECK(readlinkStr(w.docs + "/livedata") == "PES2027-data/livedata", "Documents/livedata -> PES2027-data/livedata");
     CHECK(readlinkStr(w.docs + "/cpk") == "PES2027-data/cpk" && a.ready, "cpk from the same folder, ready");
     zfr::Spec dl{"download", {}, false};
-    auto c = zfr::candidates(w.docs, dl, 3, w.docs + "/Download", zfr::dataParent(w.docs, "pak"));
+    auto c = zfr::candidates(w.docs, dl, 3, w.docs + "/Download", zfr::dataParent(a.pak));
     CHECK(!c.empty() && c[0].path == w.docs + "/PES2027-data/Download", "Download candidate is PES2027-data/Download");
+  }
+
+  std::cout << "\n[16b] the same when pak is filled file by file (a mod file kept in Documents/pak)\n";
+  {
+    World w = makeWorld("new-near-merge");
+    newLaunch(w);  // the mod makes Documents/pak and Documents/livedata (links only)
+    writeFile(w.docs + "/pak/pc9000_mobile_ios.pak", 2000, 'm');  // a user mod installed before the data
+    addUserData(w.docs, "PES2027-data");
+    writeFile(w.docs + "/AMod/livedata/dt870_mobile_and.cpk", 2000, 'm');
+    Launch a = newLaunch(w);
+    CHECK(a.pak.action == zfr::Action::Merged && a.pak.dataFolder == w.docs + "/PES2027-data/pak", "pak filled from PES2027-data/pak");
+    CHECK(readlinkStr(w.docs + "/livedata") == "PES2027-data/livedata" && readlinkStr(w.docs + "/cpk") == "PES2027-data/cpk",
+          "livedata and cpk from the same data folder, not AMod/livedata");
+    Launch b = newLaunch(w);
+    CHECK(b.pak.action == zfr::Action::KeptReal && b.pak.dataFolder == w.docs + "/PES2027-data/pak",
+          "next launch (nothing new to link) still knows where pak is filled from");
   }
 
   std::cout << "\n[17] merge mode with a stadium pak in the data's pak folder stays stable\n";
