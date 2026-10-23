@@ -140,12 +140,14 @@ class OfflineServer {
   std::string readAsset(const std::string& name);      // throws IOEx
   Response newFixed(int status, const std::string& mime, Bytes body);
   Response newFixedText(int status, const std::string& text);
+  // Every response goes through here. The copy keeps cached and saved objects
+  // untouched; the card check runs on the save layout, before the iOS translation.
   Bytes encodeClientResponse(const Value& value) {
-    if (!cfg.iosPlayerLayout) return zc::encodeResponse(value);
     Value wire = value;
     if (value.t == Value::OBJ) wire = Value(Object::parse(value.o->toString()));
     else if (value.t == Value::ARR) wire = Value(Array::parse(value.a->toString()));
-    adaptIosPlayerData(wire, true);
+    z27CheckOutgoingCards(wire);
+    if (cfg.iosPlayerLayout) adaptIosPlayerData(wire, true);
     return zc::encodeResponse(wire);
   }
   void logRequest(const std::string& a, const std::string& b);

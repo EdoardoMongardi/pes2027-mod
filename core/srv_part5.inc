@@ -21,11 +21,12 @@ struct ZiruCardIdentity {
 std::unordered_map<int64_t, ObjP> ziruStarterCards, ziruRentalCards;
 bool ziruStarterCardsLoaded = false, ziruRentalCardsLoaded = false;
 
-// Exact-id index of the cards in one static list. Stays unloaded (and is retried
-// later) when the file cannot be read.
+// Exact-id index of the cards in one static list, built once. A file that cannot
+// be read gives an empty index (logged once).
 void z27IndexCards(const char* name, const char* listKey, const char* inner, bool& loaded,
                    std::unordered_map<int64_t, ObjP>& out) {
   if (loaded) return;
+  loaded = true;
   try {
     ObjP root = Object::parse(readAsset(name));
     ObjP entry = root->optJSONObject("entry_info");
@@ -37,7 +38,6 @@ void z27IndexCards(const char* name, const char* listKey, const char* inner, boo
       int64_t id = gid ? gid->optLong("id", 0) : 0;
       if (id > 0 && !out.count(id)) out[id] = card;  // the same card listed twice: the first entry counts
     }
-    loaded = true;
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[Z27_CARD_INDEX_ERR] ") + name + " " + e.what());
   }
@@ -190,6 +190,84 @@ void z27RepairBoosterSlots(const ObjP& cur) {
       int owned = boosters ? boosters->optInt(b, 0) : 0;
       if (values->optInt(142 + b, 0) == 1 && owned != 1) values->put(142 + b, owned);
     }
+  }
+}
+
+// ---- Last check before a response leaves the server ----
+// The client applies a playing style in a match only when it is the only style
+// on its side (attack or defence); the card still shows it otherwise. Side per
+// pesdb value (Playstyle.bin): Box-to-Box (7) and Anchor Man (8) count on both
+// sides; The Destroyer (9), Attacking/Defensive GK (16/17) and 23..33 are
+// defence; every other style 1..35 is attack.
+static int ziruStyleSide(int style) {
+  if (style == 7 || style == 8) return 2;
+  if (style == 9 || style == 16 || style == 17 || (style >= 23 && style <= 33)) return 1;
+  return 0;
+}
+static bool ziruStylePairApplies(int first, int second) {
+  if (first < 0 || first > 35 || second < 0 || second > 35) return false;
+  if (first != 0 && first == second) return false;
+  int attack = 0, defence = 0;
+  for (int style : {first, second}) {
+    if (style == 0) continue;
+    int side = ziruStyleSide(style);
+    if (side != 1) attack++;
+    if (side != 0) defence++;
+  }
+  return attack <= 1 && defence <= 1;
+}
+
+std::set<int64_t> ziruStyleRuleLogged;  // cards already reported, so each is logged once
+
+// One player object in an outgoing response.
+void z27CheckOutgoingCard(const ObjP& o) {
+  ObjP gid = o->optJSONObject("gameplayer_id");
+  int64_t id = gid ? gid->optLong("id", 0) : 0;
+  if (id <= 0) return;
+  ArrP values = o->optJSONArray("parameters");
+  int n = values ? values->length() : 0;
+  bool cardParameters = n == 145 || n == 147 || n == 149;
+  ArrP styles = o->optJSONArray("play_style");
+  if (!cardParameters && !styles) return;
+  ZiruCardIdentity card;
+  if (z27CardIdentity(id, card)) {
+    o->put("play_style", newArr()->put(card.style[0])->put(card.style[1]));
+    for (const char* key : {"parameters", "original_parameters"}) {
+      ArrP arr = o->optJSONArray(key);
+      if (!arr || arr->length() < 70) continue;
+      arr->put(61, card.style[0])->put(62, card.style[1]);
+      for (int i = 0; i < 7; ++i) arr->put(63 + i, card.ai[i]);
+    }
+  } else {
+    z27MirrorPlayStyle(o);
+  }
+  ArrP sent = o->optJSONArray("play_style");
+  int first = sent ? sent->optInt(0, 0) : 0, second = sent ? sent->optInt(1, 0) : 0;
+  if (!ziruStylePairApplies(first, second) && ziruStyleRuleLogged.insert(id).second) {
+    std::string msg = "[Z27_STYLE_NOT_APPLIED] card " + str(id) + " play_style [" + str(first) + "," + str(second) +
+                      "]: more than one style on one side, the match applies none there";
+    zs::logw("OFFLINE_SERVER", msg);
+    logRequest("Z27_STYLE_NOT_APPLIED", msg);
+  }
+}
+
+// Every card object (gameplayer_id plus a parameter list, or plus play_style),
+// including every squad player_list entry, leaves with its own playing styles:
+// from its identity source when one knows the exact card id, else
+// parameters[61]/[62] follow play_style (or play_style is taken from them).
+// Never throws.
+void z27CheckOutgoingCards(Value& v, int depth = 0) {
+  if (depth > 64) return;
+  try {
+    if (v.t == Value::ARR) {
+      for (auto& item : v.a->v) z27CheckOutgoingCards(item, depth + 1);
+    } else if (v.t == Value::OBJ) {
+      z27CheckOutgoingCard(v.o);
+      for (auto& kv : v.o->kv)
+        if (kv.second.t == Value::OBJ || kv.second.t == Value::ARR) z27CheckOutgoingCards(kv.second, depth + 1);
+    }
+  } catch (const std::exception& e) {
+    zs::loge("OFFLINE_SERVER", std::string("[Z27_OUTGOING_CHECK_ERR] ") + e.what());
   }
 }
 

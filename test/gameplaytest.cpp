@@ -149,6 +149,19 @@ static void cardIdentityTests(const std::string& top) {
       ->put("player_list", newArr()->put(templatePlayer(A, 3, 26))->put(templatePlayer(C, 9, 30))->put(templatePlayer(Y, 11, 29)))
       ->put("coach", newObj()->put("coach_id", newObj()->put("id", 999)->put("serial", 999)))->put("squad_gameplan", newObj()))
       ->put("commentary_info", newObj()));
+  // A static list served as is: a known card with stale styles, unknown cards whose
+  // parameters 61/62 and play_style disagree or are missing, and a card with two attack styles.
+  const long long U = 501 + (3LL << 40), V = 502 + (3LL << 40), W = 503 + (3LL << 40), Q = 504 + (3LL << 40);
+  auto stale = card(A, 0, 12, 3, 26, all, {29}, 0, 0, 149);
+  auto mismatched = card(U, 0, 12, 5, 9, none, {}, 0, 0, 149);
+  mismatched->getJSONArray("parameters")->put(61, 0)->put(62, 0);
+  auto noStyle = card(V, 0, 12, 22, 27, none, {}, 0, 0, 149);
+  noStyle->remove("play_style");
+  auto twoAttack = card(W, 0, 12, 14, 6, none, {}, 0, 0, 149);
+  auto squadEntry = templatePlayer(Q, 1, 24);
+  asset(root, "get_mailbox_info.json", newObj()->put("mail_list", newArr()->put(newObj()->put("gameplayer", stale))
+      ->put(newObj()->put("gameplayer", mismatched))->put(newObj()->put("gameplayer", noStyle))
+      ->put(newObj()->put("gameplayer", twoAttack)))->put("squad_data_home", newObj()->put("player_list", newArr()->put(squadEntry))));
   asset(root, "CMD_USE_MYCLUB_ITEM.json", obj(R"({"result":"NOERR"})"));
   asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
   Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
@@ -213,6 +226,7 @@ static void cardIdentityTests(const std::string& top) {
   auto userSide = ml->getJSONObject("squad_data_home"), aiSide = ml->getJSONObject("squad_data_away");
   check(userSide->getJSONArray("player_list")->length() == 0, "MyLeague: no captured player_list on the user's side");
   auto aiPlayers = aiSide->getJSONArray("player_list");
+  auto aiSideTemplate = aiPlayers;
   check(aiPlayers->length() == 3 && sameStyles(byId(aiPlayers, A), 3, 0, aiA) && skillBit(byId(aiPlayers, A), 0) == 0 &&
         sameStyles(byId(aiPlayers, C), 9, 0, none), "MyLeague: the AI template's known cards carry their own identity");
   // MyLeague with a special squad: the user's own cards, a rental card, a card only the template knows,
@@ -347,6 +361,25 @@ static void cardIdentityTests(const std::string& top) {
   check(resetA->getJSONArray("parameters")->getInt(142) == 12, "progression reset keeps the boosters");
   check(sameStyles(resetA, 3, 0, aiA) && skillBit(resetA, 44) == 1, "progression reset keeps the styles and the learned skill");
   check(!s.z27Player(newObj()->put("id", 424242LL)->put("serial", 0LL)), "an unknown card is not built from another player");
+  // Last check on every response: each card leaves with its own styles.
+  for (bool ios : {false, true}) {
+    Config netCfg = cfg; netCfg.dataDir = root + (ios ? "/net-ios" : "/net"); netCfg.iosPlayerLayout = ios;
+    std::filesystem::create_directories(netCfg.dataDir);
+    OfflineServer n(netCfg);
+    auto mail = call(n, "CMD_GET_MAILBOX_INFO");
+    auto list = mail->getJSONArray("mail_list");
+    auto at = [&](int i) { return list->getJSONObject(i)->getJSONObject("gameplayer"); };
+    check(sameStyles(at(0), 3, 0, aiA), "outgoing: a known card in a static list gets its own styles and AI styles");
+    check(sameStyles(at(1), 5, 9, none), "outgoing: parameters 61/62 follow play_style");
+    check(sameStyles(at(2), 22, 27, none), "outgoing: a card without play_style gets it from parameters 61/62");
+    check(sameStyles(mail->getJSONObject("squad_data_home")->getJSONArray("player_list")->getJSONObject(0), 1, 24, all),
+        "outgoing: squad player_list entries get play_style from their parameters");
+    check(sameStyles(at(3), 14, 6, none) && n.ziruStyleRuleLogged.count(W) == 1 && n.ziruStyleRuleLogged.count(U) == 0,
+        "outgoing: two styles on one side are sent as printed and reported");
+    if (ios) check(at(0)->getJSONArray("parameters")->length() == 147, "outgoing: the check runs before the iOS translation");
+  }
+  auto aiY = byId(aiSideTemplate, Y);
+  check(sameStyles(aiY, 11, 29, all), "outgoing: an AI template card nobody knows keeps its parameters and gets a matching play_style");
   auto rental = s.z27Player(newObj()->put("id", R)->put("serial", 0LL));
   check(rental && sameStyles(rental, 20, 28, aiS) && skillBit(rental, 44) == 1 && rental->getInt("initial_base_team_id") == 61,
       "a MyLeague rental card uses its own rental entry");

@@ -375,14 +375,16 @@ void filterZiruSoldPlayersFromLogin(const ObjP& jo) {
   }
 }
 
-// The player records, read once. Null (logged) when the file is missing or unreadable.
+// The player records, read once. Null (logged once) when the file is missing or unreadable.
+bool ziruPlayerRecordsErrorLogged = false;
 ObjP ziruPlayerRecords() {
   if (ziruPlayerRecordsCache) return ziruPlayerRecordsCache;
   try {
     ziruPlayerRecordsCache = Object::parse(readAsset("responses/ZIRU_PLAYER_RECORDS.json"));
     zs::logi("OFFLINE_SERVER", "[ZIRU_V41_CACHE_READY] ZIRU_PLAYER_RECORDS loaded once");
   } catch (const std::exception& e) {
-    zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V41_CACHE_ERR] ZIRU_PLAYER_RECORDS ") + e.what());
+    if (!ziruPlayerRecordsErrorLogged) zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V41_CACHE_ERR] ZIRU_PLAYER_RECORDS ") + e.what());
+    ziruPlayerRecordsErrorLogged = true;
   }
   return ziruPlayerRecordsCache;
 }
