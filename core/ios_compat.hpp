@@ -15,6 +15,32 @@ inline bool isZiruSkillId(int id) { return id >= 0 && id < 74; }
 // The last two skills have no parameter slot in Android's save layout:
 // 142..144 are booster IDs there. Keep these skills in the explicit ID lists.
 inline bool isZiruSkillParameter(int index) { return index >= 70 && index < 142; }
+// Ziru/Android skill numbering. The unnamed "Dummy" skill cards cannot be learned.
+inline bool isZiruDummySkill(int id) {
+  return id == 9 || id == 14 || id == 42 || id == 50 || id == 51 || id == 72 || id == 73;
+}
+// Special skills (the client's skill table marks them special).
+inline bool isZiruSpecialSkill(int id) {
+  switch (id) {
+    case 8: case 11: case 12: case 13: case 16: case 18: case 24: case 25: case 29: case 30:
+    case 35: case 39: case 40: case 41: case 52: case 53: case 61: case 62: case 63: case 65:
+    case 66: case 68: case 71:
+      return true;
+    default:
+      return false;
+  }
+}
+// A learned skill read back from a save, or -1 when it must be dropped.
+// Older builds stored a learned Snap Strike (25) or Attack Trigger (68) as 72/73,
+// the iOS numbers of two Dummy cards; those are mapped back. Dummy skills and
+// unknown ids are dropped. Other learned skills, special ones included, are the
+// user's progress and are kept.
+inline int ziruRepairLearnedSkill(int id) {
+  if (id == 72) return 25;
+  if (id == 73) return 68;
+  if (!isZiruSkillId(id) || isZiruDummySkill(id)) return -1;
+  return id;
+}
 inline zj::ArrP ziruSkillList(const zj::ArrP& params) {
   auto result = zj::Array::make();
   if (!params) return result;
@@ -82,18 +108,9 @@ inline bool adaptIosPlayerData(zj::Value& value, bool outgoing) {
         if ((outgoing && (n == 145 || n == 149)) || (!outgoing && n == 147)) {
           auto dst = zj::Array::make();
           for (int i = 0; i < 142; ++i) dst->put(src->get(i));
-          if (outgoing) {
-            int b142 = 0, b143 = 0;
-            auto ask = value.o->optJSONArray("additional_skill_id");
-            if (ask) {
-              for (int si = 0; si < ask->length(); ++si) {
-                int sv = ask->optInt(si, -1);
-                if (sv == 73 || sv == 68) b142 = 1;
-                if (sv == 72 || sv == 25) b143 = 1;
-              }
-            }
-            dst->put(b142)->put(b143);
-          }
+          // iOS 142/143 are the flags of the two Dummy skill cards (iOS 68/25). No card has
+          // them and they cannot be learned; a learned Snap Strike or Attack Trigger has its own flag.
+          if (outgoing) dst->put(0)->put(0);
           for (int i = 0; i < 3; ++i) dst->put(src->get((outgoing ? 142 : 144) + i));
           value.o->put(key, dst);
           changed = true;

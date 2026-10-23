@@ -150,6 +150,49 @@ bool z27ApplyCardIdentity(const ObjP& cur) {
   return true;
 }
 
+// Learned skills as older builds saved them: Snap Strike (25) and Attack Trigger
+// (68) stored as 72/73 are mapped back, Dummy skills and duplicates are dropped.
+// A dropped skill's flag is cleared unless the card has it by itself.
+void z27RepairLearnedSkills(const ObjP& cur) {
+  ArrP extra = cur ? cur->optJSONArray("additional_skill_id") : nullptr;
+  if (!extra) return;
+  std::vector<int32_t> kept, dropped;
+  for (int i = 0; i < extra->length(); ++i) {
+    int stored = extra->optInt(i, -1);
+    int skill = ziruRepairLearnedSkill(stored);
+    if (skill >= 0 && !vcontains(kept, skill) && kept.size() < 5) kept.push_back(skill);
+    else if (skill < 0 && isZiruSkillId(stored)) dropped.push_back(stored);
+  }
+  bool same = (int)kept.size() == extra->length();
+  for (int i = 0; same && i < extra->length(); ++i) same = extra->optInt(i, -1) == kept[i];
+  if (same) return;
+  ArrP repaired = newArr();
+  for (int skill : kept) repaired->put(skill);
+  cur->put("additional_skill_id", repaired);
+  ArrP values = cur->optJSONArray("parameters");
+  ArrP printed = cur->optJSONArray("original_parameters");
+  for (int skill : dropped) {
+    int index = kZiruSkillParameters[skill];
+    if (!values || !isZiruSkillParameter(index) || index >= values->length()) continue;
+    if (!printed || printed->optInt(index, 0) != 1) values->put(index, 0);
+  }
+}
+
+// Older builds wrote the flag of a learned 25/68 into parameters[143]/[142], which
+// are booster slots in this layout, leaving booster id 1 there. No booster has id 1
+// unless initial_booster_id_list says so; put the owned booster back.
+void z27RepairBoosterSlots(const ObjP& cur) {
+  ArrP boosters = cur ? cur->optJSONArray("initial_booster_id_list") : nullptr;
+  for (const char* key : {"parameters", "original_parameters"}) {
+    ArrP values = cur ? cur->optJSONArray(key) : nullptr;
+    if (!values || values->length() < 145) continue;
+    for (int b = 0; b < 3; ++b) {
+      int owned = boosters ? boosters->optInt(b, 0) : 0;
+      if (values->optInt(142 + b, 0) == 1 && owned != 1) values->put(142 + b, owned);
+    }
+  }
+}
+
 void z27ApplyAppearanceAndClub(const ObjP& cur) {
   if (!cur) return;
   ObjP gid = cur->optJSONObject("gameplayer_id");
@@ -160,6 +203,8 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
 
   // 1. Playing styles, AI playing styles, club, nation and the card's own skills
   //    come from the card itself (exact id), never from a guess.
+  z27RepairLearnedSkills(cur);
+  z27RepairBoosterSlots(cur);
   z27ApplyCardIdentity(cur);
 
   // 2. Fix skin tone parameter 49 if 0 (chalk-white albino bug)
@@ -365,7 +410,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
         if (!s.empty()) {
           for (auto& part : split(s, ',')) {
             try {
-              int v = parseInt(part);
+              int v = ziruRepairLearnedSkill(parseInt(part));
               if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
             } catch (...) {}
           }
@@ -374,7 +419,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           ArrP addSkills = cur->optJSONArray("additional_skill_id");
           if (addSkills) {
             for (int i = 0; i < addSkills->length(); i++) {
-              int v = addSkills->optInt(i, -1);
+              int v = ziruRepairLearnedSkill(addSkills->optInt(i, -1));
 
               if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
             }
@@ -701,3 +746,58 @@ int32_t ziruLeaguePromotionThreshold(int i) {
 int32_t ziruLeagueRoundLimit(int i) { return (i == 10 || i == 9) ? 8 : 10; }
 
 void ziruLeagueSaveInt(const std::string& k, int32_t v) { ziruDb->saveMeta(k, str(v)); }
+
+// Saves from builds before card identity keep player copies outside the players
+// table. Correct them once: the learned-skill lists in prefs, the recruited
+// players list, and the match squad cached for the active division match (it is
+// rebuilt at the next match start). The players table itself is corrected and
+// re-saved by the normal login path.
+void z27MigrateSavedCards() {
+  if (loadMeta("z27_card_identity_v1")) return;
+  try {
+    zs::Prefs& prefs = sp("almanac_state");
+    auto edit = prefs.edit();
+    bool changed = false;
+    for (const auto& key : prefs.data->keys()) {
+      if (!startsWith(key, "ziru_skills_")) continue;
+      std::string stored = prefs.getString(key, "");
+      std::vector<int32_t> kept;
+      for (auto& part : split(stored, ',')) {
+        try {
+          int skill = ziruRepairLearnedSkill(parseInt(part));
+          if (skill >= 0 && !vcontains(kept, skill) && kept.size() < 5) kept.push_back(skill);
+        } catch (const std::exception&) {}
+      }
+      std::string repaired = joinInts(kept);
+      if (repaired != stored) {
+        if (kept.empty()) edit.remove(key);
+        else edit.putString(key, repaired);
+        changed = true;
+      }
+    }
+    std::string recruited = prefs.getString("recruited_players", "");
+    if (!recruited.empty()) {
+      ArrP list = Array::parse(recruited);
+      for (int i = 0; i < list->length(); i++) {
+        ObjP o = list->optJSONObject(i);
+        ObjP gp = o ? o->optJSONObject("gameplayer") : nullptr;
+        z27ApplyAppearanceAndClub(gp ? gp : o);
+      }
+      std::string repaired = list->toString();
+      if (repaired != recruited) {
+        edit.putString("recruited_players", repaired);
+        changed = true;
+      }
+    }
+    if (changed) edit.commit();
+    ObjP active = z27Meta("z27_active_match");
+    if (active && active->has("home_squad")) {
+      active->remove("home_squad");
+      z27PutMeta("z27_active_match", active->toString());
+    }
+    ziruDb->saveMeta("z27_card_identity_v1", "1");
+    logRequest("Z27_CARD_MIGRATION", "[Z27_CARD_MIGRATION] saved card copies corrected");
+  } catch (const std::exception& e) {
+    zs::loge("OFFLINE_SERVER", std::string("[Z27_CARD_MIGRATION_ERR] ") + e.what());
+  }
+}

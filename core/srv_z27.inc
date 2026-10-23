@@ -592,7 +592,7 @@ void z27Restore(const ObjP& jo) {
             if (!prefSkills.empty()) {
               for (auto& part : split(prefSkills, ',')) {
                 try {
-                  int val = parseInt(part);
+                  int val = ziruRepairLearnedSkill(parseInt(part));
                   if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
                 } catch (const NumberFormat&) {}
               }
@@ -600,7 +600,7 @@ void z27Restore(const ObjP& jo) {
             ArrP existingSkills = sv->optJSONArray("additional_skill_id");
             if (existingSkills) {
               for (int sIdx = 0; sIdx < existingSkills->length(); ++sIdx) {
-                int val = existingSkills->optInt(sIdx);
+                int val = ziruRepairLearnedSkill(existingSkills->optInt(sIdx));
 
                 if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
               }
@@ -637,7 +637,7 @@ void z27Restore(const ObjP& jo) {
           if (!prefSkills.empty()) {
             for (auto& part : split(prefSkills, ',')) {
               try {
-                int val = parseInt(part);
+                int val = ziruRepairLearnedSkill(parseInt(part));
                 if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
               } catch (const NumberFormat&) {}
             }
@@ -645,7 +645,7 @@ void z27Restore(const ObjP& jo) {
           ArrP existingSkills = p->optJSONArray("additional_skill_id");
           if (existingSkills) {
             for (int sIdx = 0; sIdx < existingSkills->length(); ++sIdx) {
-              int val = existingSkills->optInt(sIdx);
+              int val = ziruRepairLearnedSkill(existingSkills->optInt(sIdx));
 
               if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
             }
@@ -940,7 +940,7 @@ ObjP z27Player(const ObjP& gid) {
     if (!s.empty()) {
       for (auto& part : split(s, ',')) {
         try {
-          int v = parseInt(part);
+          int v = ziruRepairLearnedSkill(parseInt(part));
           if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
         } catch (...) {}
       }
@@ -950,7 +950,7 @@ ObjP z27Player(const ObjP& gid) {
     ArrP addSkills = p->optJSONArray("additional_skill_id");
     if (addSkills) {
       for (int i = 0; i < addSkills->length(); i++) {
-        int v = addSkills->optInt(i, -1);
+        int v = ziruRepairLearnedSkill(addSkills->optInt(i, -1));
         if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
       }
     }
@@ -1014,7 +1014,10 @@ ObjP z27Home(const ObjP& active) {
       if (!prefSkills.empty()) {
         sk = newArr();
         for (auto& part : split(prefSkills, ',')) {
-          try { sk->put(parseInt(part)); } catch (const NumberFormat&) {}
+          try {
+            int v = ziruRepairLearnedSkill(parseInt(part));
+            if (v >= 0) sk->put(v);
+          } catch (const NumberFormat&) {}
         }
       }
     }

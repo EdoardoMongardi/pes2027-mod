@@ -527,7 +527,7 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
       if (!s.empty()) {
         for (auto& part : split(s, ',')) {
           try {
-            int v = parseInt(part);
+            int v = ziruRepairLearnedSkill(parseInt(part));
             if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
           } catch (const NumberFormat&) {
           }
@@ -537,7 +537,7 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
         ArrP sk = p->optJSONArray("additional_skill_id");
         if (sk) {
           for (int i2 = 0; i2 < sk->length(); i2++) {
-            int v = sk->optInt(i2);
+            int v = ziruRepairLearnedSkill(sk->optInt(i2));
 
             if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
           }
@@ -597,7 +597,7 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     }
     if (sk) {
       for (int i = 0; i < sk->length(); i++) {
-        int v = sk->optInt(i);
+        int v = ziruRepairLearnedSkill(sk->optInt(i));
 
         if (isZiruSkillId(v)) {
           if (vcontains(al, v)) continue;
@@ -609,7 +609,7 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     if (!s.empty()) {
       for (auto& part : split(s, ',')) {
         try {
-          int v = parseInt(part);
+          int v = ziruRepairLearnedSkill(parseInt(part));
           if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
         } catch (const NumberFormat&) {
         }

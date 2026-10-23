@@ -87,6 +87,8 @@ static void cardIdentityTests(const std::string& top) {
   const long long D = 55 + (1LL << 40);   // saved only: no record, starter or rental entry
   const long long R = 66 + (1LL << 40);   // MyLeague rental card only
   const long long C = 77, G = 78, Z = 79; // AI cards: The Destroyer + Basic, Basic + Defensive GK, Basic + Basic
+  const long long E = 88 + (1LL << 40);   // record with two boosters
+  const long long F = 99 + (1LL << 40);   // saved only, like D
   const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0}, all = {1, 1, 1, 1, 1, 1, 1};
   const std::vector<int> aiA = {0, 0, 1, 0, 0, 0, 0}, aiS = {1, 0, 0, 0, 0, 0, 1}, aiK = {0, 1, 0, 0, 0, 0, 0};
   auto recordA = card(A, 0, 12, 3, 0, aiA, {29}, 0, 0, 149);
@@ -96,6 +98,10 @@ static void cardIdentityTests(const std::string& top) {
       ->put(std::to_string(C), newObj()->put("gameplayer", card(C, 0, 2, 9, 0, none, {57}, 108, 0, 149)))
       ->put(std::to_string(G), newObj()->put("gameplayer", card(G, 0, 0, 0, 17, none, {}, 108, 0, 149)))
       ->put(std::to_string(Z), newObj()->put("gameplayer", card(Z, 0, 2, 0, 0, none, {}, 108, 0, 149)));
+  auto recordE = card(E, 0, 6, 20, 0, none, {3}, 108, 0, 149);
+  recordE->put("initial_booster_id_list", newArr()->put(186)->put(136)->put(0));
+  recordE->getJSONArray("parameters")->put(142, 186)->put(143, 136);
+  records->put(std::to_string(E), newObj()->put("gameplayer", recordE));
   asset(root, "ZIRU_PLAYER_RECORDS.json", records);
   // Starter entries carry their owners' learned skills inside the parameters, like Konami's login data.
   auto starterS = card(S, 503, 7, 14, 0, aiS, {1, 6}, 50, 5, 145);
@@ -177,6 +183,64 @@ static void cardIdentityTests(const std::string& top) {
       "match start: the user's players carry the same styles as their cards");
   check(sameStyles(byId(away, C), 9, 0, none) && sameStyles(byId(away, G), 0, 17, none), "match start: AI cards as printed");
 
+
+  // Saves written by older builds: a learned Snap Strike (25) / Attack Trigger (68)
+  // stored as 72/73 with booster slots overwritten by 1, a learned Dummy skill,
+  // recruited-player copies and a cached match squad.
+  auto oldSave = [&](Config c) {
+    std::filesystem::create_directories(c.dataDir);
+    auto srv = std::make_unique<OfflineServer>(c);
+    auto e = card(E, 601, 6, 20, 27, all, {3}, 0, 0, 145);
+    e->put("additional_skill_id", newArr()->put(72)->put(73)->put(9));
+    e->put("initial_booster_id_list", newArr()->put(186)->put(136)->put(0));
+    e->getJSONArray("parameters")->put(142, 1)->put(143, 1)->put(kZiruSkillParameters[9], 1);
+    srv->ziruDb->savePlayer(601, E, e->toString());
+    auto f = card(F, 602, 6, 20, 0, none, {3, 9}, 0, 0, 145);
+    f->put("additional_skill_id", newArr()->put(9))->put("original_parameters", Array::parse(card(F, 602, 6, 20, 0, none, {3}, 0, 0, 145)->getJSONArray("parameters")->toString()));
+    srv->ziruDb->savePlayer(602, F, f->toString());
+    auto recruited = card(E, 603, 6, 20, 27, all, {3}, 0, 0, 145);
+    recruited->put("additional_skill_id", newArr()->put(73));
+    srv->sp("almanac_state").edit().putString("ziru_skills_601", "72,73,9")
+        .putString("recruited_players", newArr()->put(newObj()->put("gameplayer", recruited))->toString()).commit();
+    srv->ziruDb->saveMeta("z27_active_match", R"({"game_id":5,"home_squad":{"player_list":[{"gameplayer_id":{"id":1,"serial":601},"parameters":[0]}]}})");
+    return srv;
+  };
+  {
+    Config repairCfg = cfg; repairCfg.dataDir = root + "/repair";
+    auto srv = oldSave(repairCfg);
+    auto list = call(*srv, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    auto e = bySerial(list, 601), f = bySerial(list, 602);
+    auto learned = e->getJSONArray("additional_skill_id");
+    check(learned->length() == 2 && learned->getInt(0) == 25 && learned->getInt(1) == 68,
+        "old save: learned 72/73 are Snap Strike and Attack Trigger again, the Dummy skill is gone");
+    check(skillBit(e, 25) == 1 && skillBit(e, 68) == 1 && skillBit(e, 9) == 0 && skillBit(e, 3) == 1,
+        "old save: learned skills keep working, the Dummy skill flag is cleared");
+    auto values = e->getJSONArray("parameters");
+    check(values->getInt(142) == 186 && values->getInt(143) == 136 && values->getInt(144) == 0,
+        "old save: booster slots written as 1 get the owned boosters back");
+    check(sameStyles(e, 20, 0, none), "old save: invented styles are replaced by the record's");
+    check(srv->sp("almanac_state").getString("ziru_skills_601", "") == "25,68", "old save: the learned-skill list in prefs is repaired");
+    check(f->getJSONArray("additional_skill_id")->length() == 0 && skillBit(f, 9) == 0 && skillBit(f, 3) == 1,
+        "old save: a card without a record loses the learned Dummy skill, not its own skill");
+    auto recruited = Array::parse(srv->sp("almanac_state").getString("recruited_players", "[]"))->getJSONObject(0)->getJSONObject("gameplayer");
+    check(sameStyles(recruited, 20, 0, none) && recruited->getJSONArray("additional_skill_id")->getInt(0) == 68,
+        "old save: recruited player copies are corrected too");
+    check(!srv->z27Meta("z27_active_match")->has("home_squad"), "old save: the cached match squad is dropped and rebuilt at match start");
+    auto saved = Object::parse(*srv->loadPlayer(601));
+    check(saved->getJSONArray("parameters")->getInt(142) == 186 && saved->getJSONArray("additional_skill_id")->getInt(0) == 25,
+        "old save: the repaired player is saved");
+  }
+  {
+    Config wireCfg = cfg; wireCfg.dataDir = root + "/repair-ios"; wireCfg.iosPlayerLayout = true;
+    auto srv = oldSave(wireCfg);
+    auto e = bySerial(call(*srv, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list"), 601);
+    auto wire = e->getJSONArray("parameters");
+    check(wire->length() == 147 && wire->getInt(142) == 0 && wire->getInt(143) == 0 && wire->getInt(144) == 186 && wire->getInt(145) == 136,
+        "iOS wire: Dummy skill flags stay off and the boosters are in their iOS slots");
+    auto learned = e->getJSONArray("additional_skill_id");
+    check(learned->getInt(0) == iosSkillId(25, true) && learned->getInt(1) == iosSkillId(68, true), "iOS wire: learned skills use the client's numbers");
+    check(wire->getInt(kZiruSkillParameters[25]) == 1 && wire->getInt(kZiruSkillParameters[68]) == 1, "iOS wire: the learned skills' own flags are on");
+  }
   check(!s.z27Player(newObj()->put("id", 424242LL)->put("serial", 0LL)), "an unknown card is not built from another player");
   auto rental = s.z27Player(newObj()->put("id", R)->put("serial", 0LL));
   check(rental && sameStyles(rental, 20, 28, aiS) && skillBit(rental, 44) == 1 && rental->getInt("initial_base_team_id") == 61,
