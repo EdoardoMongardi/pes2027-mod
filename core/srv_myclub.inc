@@ -522,8 +522,17 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
       int64_t serial = gid->optLong("serial", 0);
       if (serial == 0) continue;
       int64_t pid = gid->optLong("id", 0);
+      // The learned skills and the row under this serial belong to the card saved
+      // there; a listed card that is another card keeps only its own skills.
+      JStr saved = loadPlayer(serial);
+      bool serialState = !saved || saved->empty();
+      if (!serialState) {
+        ObjP row = Object::parse(*saved);
+        if (row->optJSONObject("gameplayer")) row = row->getJSONObject("gameplayer");
+        serialState = z27IsCard(row, pid);
+      }
       std::vector<int32_t> al;
-      std::string s = prefs.getString("ziru_skills_" + str(serial), "");
+      std::string s = serialState ? prefs.getString("ziru_skills_" + str(serial), "") : std::string();
       if (!s.empty()) {
         for (auto& part : split(s, ',')) {
           try {
@@ -560,10 +569,10 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
       }
       // The card's own skills plus the learned ones (exact card only).
       z27ApplyCardIdentity(p);
+      if (!serialState) continue;
       if (!al.empty() && prefs.getString("ziru_skills_" + str(serial), "") != joinInts(al)) {
         prefs.edit().putString("ziru_skills_" + str(serial), joinInts(al)).commit();
       }
-      JStr saved = loadPlayer(serial);
       if (!saved || *saved != p->toString()) saveZiruPlayerToDb(p);
     }
   } catch (const std::exception& e) {

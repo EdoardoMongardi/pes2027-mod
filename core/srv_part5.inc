@@ -404,6 +404,10 @@ void z27ApplyProgressionPoints(const ArrP& params, const ObjP& prog, const ArrP&
   }
 }
 
+// The listed card `jo` as the client gets it. Everything saved under its serial
+// (row, careerplan points, learned skills) is used, and the result saved, only
+// when the serial holds this card or nothing yet. When another card is saved
+// there, the listed card is normalised as itself and nothing is written.
 ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
   if (!jo) return jo;
   try {
@@ -414,13 +418,14 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
       if (id > 0) {
         ObjP cur = jo;
         JStr lp;
+        bool own = false, fresh = serial > 0;
         if (serial > 0 && (lp = loadPlayer(serial)) && !lp->empty()) {
-          cur = Object::parse(*lp);
-          ObjP gp = cur->optJSONObject("gameplayer");
-          if (gp) cur = gp;
-          ObjP g2 = cur->optJSONObject("gameplayer_id");
-          if (!g2 || g2->optLong("id") != id) cur = jo;
+          fresh = false;
+          ObjP row = Object::parse(*lp);
+          if (row->optJSONObject("gameplayer")) row = row->getJSONObject("gameplayer");
+          if (z27IsCard(row, id)) { cur = row; own = true; }
         }
+        bool serialState = own || fresh;
         // Only this exact card's record counts; another version of the player is another card.
         ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
         ObjP base = w ? w->optJSONObject("gameplayer") : nullptr;
@@ -485,7 +490,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           li->put("exp_current_level", 0);
           li->put("exp_to_next_level", 0);
           int cp = ziruProgressionBudget(lim);
-          if (serial > 0) {
+          if (serialState) {
             JStr pr = loadProgression(serial);
             if (pr && !pr->empty()) {
               cp -= Object::parse(*pr)->optInt("_spent_total", 0);
@@ -495,7 +500,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           li->put("customize_point", cp);
         }
         std::vector<int32_t> al;
-        std::string s = sp("almanac_state").getString("ziru_skills_" + str(serial), "");
+        std::string s = serialState ? sp("almanac_state").getString("ziru_skills_" + str(serial), "") : std::string();
         if (!s.empty()) {
           for (auto& part : split(s, ',')) {
             try {
@@ -527,9 +532,9 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           }
         }
         z27NormalizeOwnedCard(cur);
-        if (serial > 0) {
+        if (serialState) {
           std::string text = cur->toString();
-          if (!lp || text != *lp) ziruDb->savePlayer(serial, id, text);
+          if (!own || text != *lp) ziruDb->savePlayer(serial, cur->getJSONObject("gameplayer_id")->optLong("id", id), text);
         }
         return cur;
       }

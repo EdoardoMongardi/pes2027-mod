@@ -563,6 +563,110 @@ static void cardIdentityTests(const std::string& top) {
       "a MyLeague rental card uses its own rental entry");
 }
 
+// ---- One card per serial -----------------------------------------------------
+// Every card the user owns has its own serial, as in Konami's data. Everything
+// saved under a serial (the row, careerplan points, learned skills, the sold
+// flag) belongs to the card saved there and to no other card.
+static std::string fileBytes(const std::string& path) {
+  std::ifstream f(path, std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+}
+static int playerWrites = 0;
+static void countPlayerWrites(void*, int, const char*, const char* table, sqlite3_int64) {
+  if (std::string(table) == "players") playerWrites++;
+}
+
+static void serialTests(const std::string& top) {
+  const std::string root = top + "/serials";
+  std::filesystem::create_directories(root + "/responses");
+  const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0}, aiQ = {0, 0, 0, 1, 0, 0, 0};
+  const long long P1 = 14 + (1LL << 40);   // record; the card saved at 801
+  const long long P2 = 14 + (2LL << 40);   // another version of the same player, record only
+  const long long Q = 14 + (3LL << 40);    // starter entry only, at 802; a third version of that player
+  const long long G = 30 + (1LL << 40);    // record; at 805
+  const long long H = 31 + (1LL << 40);    // record; at 807, sold below
+  const long long S1 = 40 + (1LL << 40), S2 = 41 + (1LL << 40);  // two cards listed under one serial (810), as build 138 shipped them
+  const long long Z = 40002;               // known only to the start-game template
+  auto records = newObj();
+  for (auto c : {card(P1, 0, 12, 3, 0, none, {29}, 108, 0, 149), card(P2, 0, 12, 11, 0, none, {5}, 108, 0, 149),
+                 card(G, 0, 9, 14, 0, none, {33}, 108, 0, 149), card(H, 0, 9, 14, 0, none, {33}, 108, 0, 149),
+                 card(S1, 0, 9, 1, 0, none, {2}, 108, 0, 149), card(S2, 0, 9, 2, 0, none, {3}, 108, 0, 149)})
+    records->put(std::to_string(c->getJSONObject("gameplayer_id")->getLong("id")), newObj()->put("gameplayer", c));
+  asset(root, "ZIRU_PLAYER_RECORDS.json", records);
+  auto starters = newArr(), refs = newArr();
+  auto list = [&](const ObjP& c) {
+    starters->put(c);
+    refs->put(newObj()->put("gameplayer_id", Object::parse(c->getJSONObject("gameplayer_id")->toString()))->put("uniform_number", refs->length() + 1));
+  };
+  list(card(P1, 801, 12, 3, 0, none, {29}, 108, 0, 145));
+  list(card(Q, 802, 12, 22, 0, aiQ, {7}, 108, 0, 145));
+  list(card(G, 805, 9, 14, 0, none, {33}, 108, 0, 145));
+  list(card(H, 807, 9, 14, 0, none, {33}, 108, 0, 145));
+  list(card(S1, 810, 9, 1, 0, none, {2}, 108, 0, 145));
+  list(card(S2, 810, 9, 2, 0, none, {3}, 108, 0, 145));
+  refs->put(newObj()->put("gameplayer_id", newObj()->put("id", Z)->put("serial", 820))->put("uniform_number", 23));
+  auto squad = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
+  asset(root, "CmdLogin.json", newObj()->put("entry_info", newObj()->put("main_squad_id", 9)->put("gameplayer_list", starters)
+      ->put("coach_list", newArr()->put(coachRef(100, 1000)))
+      ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squad)
+          ->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))))));
+  asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline"})"));
+  asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
+  asset(root, "ZIRU_MATCH_PROFILES.json", obj(R"({"profiles":[{"profile_id":1,"player_ids":[],"coordinates":[],"team_style":0,"base_team_id":108}]})"));
+  asset(root, "ZIRU_GET_VSCOM_OPPONENT.json", obj(R"({"squad_data":{"squad_gameplan":{"formation":[],"match_plan_settings":{}}},"user_info":[{}]})"));
+  auto templateZ = card(Z, 820, 2, 1, 0, none, {0}, 0, 0, 145);
+  asset(root, "ZIRU_START_GAME.json", newObj()->put("squad_data_home", newObj()->put("coach", newObj()->put("coach_id", newObj()->put("id", 999)->put("serial", 999)))
+      ->put("player_list", newArr()->put(newObj()->put("gameplayer_id", templateZ->getJSONObject("gameplayer_id"))
+          ->put("parameters", templateZ->getJSONArray("parameters"))->put("averaged_overall", 0))))->put("commentary_info", newObj()));
+  // Konami's item answer carries a successful skill result of its own.
+  asset(root, "CMD_USE_MYCLUB_ITEM.json", obj(R"({"skill_training_result":{"additional_skill_id":22,"is_success":"YES"},"item_list":[{"item":{"item_type":"SKILL_TRAINING","grade":0,"effect":0},"inventory_num":5}],"result":"NOERR"})"));
+  asset(root, "ZIRU_RANDOM_BOOSTERS.json", obj(R"({"ability_ids":[12,20,30]})"));
+  asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
+  std::filesystem::create_directories(cfg.dataDir);
+  OfflineServer s(cfg);
+  auto rowText = [&](long long serial) { JStr row = s.loadPlayer(serial); return row ? *row : std::string(); };
+  auto listed = [](const ObjP& r) { return r->getJSONObject("entry_info")->getJSONArray("gameplayer_list"); };
+
+  // Serial 802 holds P2, another version of Q's player, with P2's learned skill
+  // and careerplan points (as a build that shared serials could leave it).
+  auto savedP2 = card(P2, 802, 12, 11, 0, none, {5, 44}, 108, 0, 145);
+  savedP2->put("additional_skill_id", newArr()->put(44));
+  s.ziruDb->savePlayer(802, P2, savedP2->toString());
+  s.ziruDb->saveProgression(802, R"({"SHOOT":10,"_spent_total":10})");
+  s.sp("almanac_state").edit().putString("ziru_skills_802", "44").commit();
+  std::string p2Row = rowText(802);
+  call(s, "CMD_CREATE_USER");
+  for (const char* cmd : {"CMD_LOGIN", "CMD_GET_MYCLUB_ENTRY_INFO"}) {
+    auto shown = bySerial(listed(call(s, cmd)), 802);
+    std::string what = std::string(cmd) + ": ";
+    check(shown->getJSONObject("gameplayer_id")->getLong("id") == Q && sameStyles(shown, 22, 0, aiQ),
+        (what + "the listed card is sent as itself, not the other version saved under its serial").c_str());
+    check(shown->getJSONArray("additional_skill_id")->length() == 0 && skillBit(shown, 44) == 0,
+        (what + "the listed card does not get the skill learned by the other card").c_str());
+    if (std::string(cmd) == "CMD_LOGIN")
+      check(shown->getJSONObject("level_info")->getInt("customize_point") == 60, "login: the listed card does not get the other card's careerplan points");
+    check(rowText(802) == p2Row, (what + "the other card saved under the serial is left as it is").c_str());
+  }
+  s.refreshZiruGameplayerFromCanonical(card(Q, 802, 12, 22, 0, aiQ, {7}, 108, 0, 145));
+  check(rowText(802) == p2Row, "refresh: the other card saved under the serial is left as it is");
+  auto qDetail = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", Q)->put("serial", 802)));
+  auto plan = qDetail->getJSONArray("careerplan_list")->getJSONObject(0)->getJSONArray("data_list")->getJSONObject(0);
+  check(plan->getString("parameter_type") == "SHOOT" && plan->getInt("count") == 0, "player detail: careerplan points of another card are not shown");
+  auto p2Detail = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", P2)->put("serial", 802)));
+  check(p2Detail->getJSONArray("careerplan_list")->getJSONObject(0)->getJSONArray("data_list")->getJSONObject(0)->getInt("count") == s.ziruCountFromSpent(10),
+      "player detail: the saved card shows its own careerplan points");
+  // Two cards listed under one serial (810): the login keeps the first one saved there, and
+  // listing the second one does not write it over the first one's row.
+  sqlite3_update_hook(s.ziruDb->db, countPlayerWrites, nullptr);
+  playerWrites = 0;
+  call(s, "CMD_LOGIN");
+  call(s, "CMD_GET_MYCLUB_ENTRY_INFO");
+  check(playerWrites == 0, ("a login and entry info on an unchanged save write no player row, wrote " + std::to_string(playerWrites)).c_str());
+  sqlite3_update_hook(s.ziruDb->db, nullptr, nullptr);
+  check(Object::parse(rowText(810))->getJSONObject("gameplayer_id")->getLong("id") == S1, "the first card listed under a shared serial keeps its row");
+}
+
 int main() {
   try {
     zs::setVerbose(false);
@@ -919,6 +1023,7 @@ int main() {
       check(resp->getJSONArray("receive_result_list")->getJSONObject(0)->getString("is_success") == "YES", "reward claimed successfully");
     }
     cardIdentityTests(root);
+    serialTests(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
     check(child >= 0, "spawn abrupt-exit save test");

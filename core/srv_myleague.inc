@@ -58,7 +58,8 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
         int lim = li ? li->optInt("level_limit", 1) : 1;
         ArrP career = Array::parse(
             "[{\"type\":\"PARAMETER\",\"effect\":1,\"data_list\":[{\"parameter_type\":\"SHOOT\",\"count\":0,\"parameter_list\":[\"ABILITY_SHOT\",\"ABILITY_PLACE_KICKING\",\"ABILITY_BALL_SPIN_CONTROL\"],\"point\":1},{\"parameter_type\":\"PASS\",\"count\":0,\"parameter_list\":[\"ABILITY_SHORT_PASS\",\"ABILITY_LONG_PASS\"],\"point\":1},{\"parameter_type\":\"DRIBLE\",\"count\":0,\"parameter_list\":[\"ABILITY_DRIBBLE\",\"ABILITY_BALL_CONTROL\",\"ABILITY_BALL_TOUCH\"],\"point\":1},{\"parameter_type\":\"QUICKNESS\",\"count\":0,\"parameter_list\":[\"ABILITY_OFFENSE_DECISION\",\"ABILITY_EXPLOSIVE_POWER\",\"ABILITY_BODY_CONTROL\"],\"point\":1},{\"parameter_type\":\"STRENGTH\",\"count\":0,\"parameter_list\":[\"ABILITY_KICKING_POWER\",\"ABILITY_SPEED\",\"ABILITY_STAMINA\"],\"point\":1},{\"parameter_type\":\"AERIAL\",\"count\":0,\"parameter_list\":[\"ABILITY_HEADING\",\"ABILITY_JUMP\",\"ABILITY_BODY_BALANCE\"],\"point\":1},{\"parameter_type\":\"DEFENCE\",\"count\":0,\"parameter_list\":[\"ABILITY_DEFENSE_DECISION\",\"ABILITY_INTERCEPT\",\"ABILITY_AGGRESSIVENESS\",\"ABILITY_CONSCIOUS_DEFENSE\"],\"point\":1},{\"parameter_type\":\"GK1\",\"count\":0,\"parameter_list\":[\"ABILITY_GK_DECISION\",\"ABILITY_JUMP\"],\"point\":1},{\"parameter_type\":\"GK2\",\"count\":0,\"parameter_list\":[\"ABILITY_CLEARANCES\",\"ABILITY_DEFLECTING\"],\"point\":1},{\"parameter_type\":\"GK3\",\"count\":0,\"parameter_list\":[\"ABILITY_CATCHING\",\"ABILITY_COLLAPSING\"],\"point\":1}]}]");
-        applyZiruProgressionToCareerList(career, ziruPlayerDataSerial);
+        // Careerplan points are saved per serial: only the card saved there has them.
+        if (owned) applyZiruProgressionToCareerList(career, ziruPlayerDataSerial);
         ArrP expl = newArr();
         ObjP e = newObj();
         e->put("level", lim + 1);

@@ -462,6 +462,8 @@ Response z27SquadAck() {
   }
 }
 
+std::set<int64_t> ziruRowOtherCardLogged;  // serials already reported, so each is logged once
+
 void z27Restore(const ObjP& jo) {
   try {
     ObjP ei = jo->optJSONObject("entry_info");
@@ -558,7 +560,6 @@ void z27Restore(const ObjP& jo) {
           pPid = upPid;
           p->getJSONObject("gameplayer_id")->put("id", pPid);
         }
-        int32_t bid = (int32_t)(pPid & 0xFFFFFF);
         JStr lp = loadPlayer(serial);
         if (lp) {
           ObjP sv = Object::parse(*lp);
@@ -571,7 +572,9 @@ void z27Restore(const ObjP& jo) {
             sv->getJSONObject("gameplayer_id")->put("id", svPid);
             ziruDb->savePlayer(serial, svPid, sv->toString());
           }
-          if (svPid == pPid || (svPid & 0xFFFFFF) == bid) {
+          // Only the same card is restored from the save. Another version of the
+          // player is another card, even though it has the same player number.
+          if (svPid == pPid) {
             z27ApplyAppearanceAndClub(sv);
             ObjP w = getZiruPlayerWrapper(Value((long long)sv->getJSONObject("gameplayer_id")->getLong("id")), false);
             ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
@@ -660,7 +663,10 @@ void z27Restore(const ObjP& jo) {
             if (text != *lp) ziruDb->savePlayer(serial, sv->getJSONObject("gameplayer_id")->getLong("id"), text);
             gl->put(i, sv);
           } else {
-            // This serial now holds another card; the listed entry is still sent, with its own identity.
+            // This serial holds another card. The listed card is sent as itself, with
+            // nothing taken from the save, and the saved card is left as it is.
+            if (ziruRowOtherCardLogged.insert(serial).second)
+              logRequest("Z27_ROW_OTHER_CARD", "[Z27_ROW_OTHER_CARD] serial=" + str(serial) + " holds " + str(svPid) + ", listed " + str(pPid));
             z27NormalizeOwnedCard(p);
           }
         } else {
@@ -935,11 +941,15 @@ ObjP z27SavedCardFor(int64_t serial, int64_t id) {
   if (!lp || lp->empty()) return nullptr;
   ObjP p = Object::parse(*lp);
   if (p->optJSONObject("gameplayer")) p = p->getJSONObject("gameplayer");
-  ObjP sid = p->optJSONObject("gameplayer_id");
+  return z27IsCard(p, id) ? p : nullptr;
+}
+
+// True when `saved` is the card `id`, or the card this id is upgraded to.
+bool z27IsCard(const ObjP& saved, int64_t id) {
+  ObjP sid = saved ? saved->optJSONObject("gameplayer_id") : nullptr;
   int64_t savedId = sid ? sid->optLong("id", 0) : 0;
-  if (savedId <= 0) return nullptr;
-  if (savedId == id || savedId == z27UpgradeIosCardPid(id, p->optInt("initial_base_team_id", 0))) return p;
-  return nullptr;
+  if (savedId <= 0 || id <= 0) return false;
+  return savedId == id || savedId == z27UpgradeIosCardPid(id, saved->optInt("initial_base_team_id", 0));
 }
 
 // The player as the match uses it. Looked up by exact card id only:
