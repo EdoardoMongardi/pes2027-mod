@@ -101,6 +101,7 @@ static void cardIdentityTests(const std::string& top) {
   const long long F = 99 + (1LL << 40);   // saved only, like D
   const long long T = 7511 + (5LL << 40); // starter entry sharing serial 501 with A; player 7511 has a weak-foot fix
   const long long A2 = 14 + (6LL << 40);  // another version of player 14 (A's player), record only
+  const long long E2 = 88 + (7LL << 40);  // starter entry only; the first record of its player (E) has boosters
   const long long X = 120 + (1LL << 40);  // record: has 2 of the 7 normal defensive skills
   const long long FULL1 = 121 + (1LL << 40), FULL2 = 122 + (1LL << 40);  // records holding (nearly) every normal skill
   const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0}, all = {1, 1, 1, 1, 1, 1, 1};
@@ -132,11 +133,14 @@ static void cardIdentityTests(const std::string& top) {
     refs->put(newObj()->put("gameplayer_id", newObj()->put("id", id)->put("serial", serial)));
   }
   refs->put(newObj()->put("gameplayer_id", newObj()->put("id", T)->put("serial", 501)));
+  auto starterE2 = card(E2, 509, 6, 20, 0, none, {3}, 108, 0, 145);
+  starterE2->put("initial_booster_id_list", newArr()->put(12)->put(0)->put(0));
+  starterE2->getJSONArray("parameters")->put(142, 12);
   auto squadData = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
   auto starter = newObj()->put("main_squad_id", 9)
       ->put("gameplayer_list", newArr()->put(card(A, 501, 12, 3, 26, all, {29}, 157, 5, 145))
           ->put(card(B, 502, 12, 0, 0, none, {}, 0, 0, 145))->put(starterS)
-          ->put(card(K, 504, 9, 14, 0, aiK, {33}, 173, 0, 145))->put(card(T, 501, 10, 4, 0, none, {7}, 0, 0, 145)))
+          ->put(card(K, 504, 9, 14, 0, aiK, {33}, 173, 0, 145))->put(card(T, 501, 10, 4, 0, none, {7}, 0, 0, 145))->put(starterE2))
       ->put("coach_list", newArr()->put(coachRef(100, 1000)))
       ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squadData)
           ->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))));
@@ -337,6 +341,15 @@ static void cardIdentityTests(const std::string& top) {
     srv->sp("almanac_state").edit().putString("ziru_skills_601", "72,73,9")
         .putString("recruited_players", newArr()->put(newObj()->put("gameplayer", recruited))->toString()).commit();
     srv->ziruDb->saveMeta("z27_active_match", R"({"game_id":5,"home_squad":{"player_list":[{"gameplayer_id":{"id":1,"serial":601},"parameters":[0]}]}})");
+    // E2 has no record: 75288ee filled its empty booster slot 1 from E, the first record of the same
+    // player (136); slot 0 kept E2's own booster 12 and the player later trained 77 into slot 2.
+    auto e2 = card(E2, 509, 6, 20, 0, none, {3}, 108, 0, 145);
+    e2->put("initial_booster_id_list", newArr()->put(12)->put(136)->put(77));
+    e2->getJSONArray("parameters")->put(142, 12)->put(143, 136)->put(144, 77);
+    e2->put("original_parameters", Array::parse(e2->getJSONArray("parameters")->toString()));
+    srv->ziruDb->savePlayer(509, E2, e2->toString());
+    // A device that already ran the first version of this repair still gets the booster step.
+    srv->ziruDb->saveMeta("z27_card_identity_v1", "1");
     return srv;
   };
   {
@@ -363,6 +376,16 @@ static void cardIdentityTests(const std::string& top) {
     auto saved = Object::parse(*srv->loadPlayer(601));
     check(saved->getJSONArray("parameters")->getInt(142) == 186 && saved->getJSONArray("additional_skill_id")->getInt(0) == 25,
         "old save: the repaired player is saved");
+    auto boosters = [](const ObjP& c, const char* key) {
+      auto v = c->getJSONArray(key);
+      return std::to_string(v->getInt(142)) + "," + std::to_string(v->getInt(143)) + "," + std::to_string(v->getInt(144));
+    };
+    auto e2 = bySerial(list, 509), savedE2 = Object::parse(*srv->loadPlayer(509));
+    check(e2->getJSONArray("initial_booster_id_list")->toString() == "[12,0,77]" && boosters(e2, "parameters") == "12,0,77",
+        "old save: a booster borrowed from another version of the player is removed; its own and the trained one stay");
+    check(savedE2->getJSONArray("initial_booster_id_list")->toString() == "[12,0,77]" && boosters(savedE2, "parameters") == "12,0,77" &&
+          boosters(savedE2, "original_parameters") == "12,0,77", "old save: the corrected boosters are saved");
+    check(boosters(e, "parameters") == "186,136,0", "old save: a card with its own record keeps its boosters");
   }
   {
     Config wireCfg = cfg; wireCfg.dataDir = root + "/repair-ios"; wireCfg.iosPlayerLayout = true;

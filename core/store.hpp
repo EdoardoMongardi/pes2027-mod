@@ -73,6 +73,7 @@ struct ZiruDb {
   ~ZiruDb();
   void deletePlayerState(int64_t serial);
   std::string loadAllPlayersJson();
+  std::vector<std::pair<int64_t, std::string>> loadAllPlayerRows();  // (serial, player_json)
   std::string loadLeagueHistory();
   bool loadMeta(const std::string& k, std::string& out);   // false = Java null
   bool loadPlayer(int64_t serial, std::string& out);

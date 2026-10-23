@@ -835,14 +835,83 @@ int32_t ziruLeagueRoundLimit(int i) { return (i == 10 || i == 9) ? 8 : 10; }
 
 void ziruLeagueSaveInt(const std::string& k, int32_t v) { ziruDb->saveMeta(k, str(v)); }
 
+// Builds up to 75288ee filled the empty booster slots of a card that has no
+// record of its own from the first record of the same player (same base id) in
+// the records file: initial_booster_id_list and parameters 142..144 (Android
+// layout). They only filled empty slots, so a booster the player trained stays
+// in the save. A slot that still holds exactly the borrowed booster is set back
+// to the card's own booster (its starter or rental entry); a slot holding
+// anything else is the player's and is kept. A trained booster that happens to
+// be the borrowed one cannot be told apart and is reset too (booster training
+// costs nothing here). Cards with their own record, or without any identity
+// source, never had anything borrowed and are left alone. Returns true when the
+// card changed.
+bool z27ResetBorrowedBoosters(const ObjP& card, const std::unordered_map<int32_t, ObjP>& firstRecordOfPlayer) {
+  ObjP gid = card ? card->optJSONObject("gameplayer_id") : nullptr;
+  int64_t id = gid ? gid->optLong("id", 0) : 0;
+  if (id <= 0) return false;
+  ObjP recs = ziruPlayerRecords();
+  if (recs && recs->has(str(id))) return false;
+  auto sibling = firstRecordOfPlayer.find((int32_t)(id & 0xFFFFFF));
+  if (sibling == firstRecordOfPlayer.end()) return false;
+  ObjP own = z27CardSource(id);
+  if (!own) return false;
+  auto boosterOf = [](const ObjP& c, int b) {
+    ArrP list = c->optJSONArray("initial_booster_id_list");
+    if (list && list->optInt(b, 0) > 0) return list->optInt(b, 0);
+    ArrP values = c->optJSONArray("parameters");
+    return values && values->length() >= 145 ? values->optInt(142 + b, 0) : 0;
+  };
+  bool changed = false;
+  ArrP list = card->optJSONArray("initial_booster_id_list");
+  for (int b = 0; b < 3; ++b) {
+    int borrowed = boosterOf(sibling->second, b);
+    ArrP ownList = own->optJSONArray("initial_booster_id_list");
+    int mine = ownList ? ownList->optInt(b, 0) : boosterOf(own, b);
+    if (borrowed <= 0 || borrowed == mine) continue;
+    if (list && list->length() > b && list->optInt(b, 0) == borrowed) { list->put(b, mine); changed = true; }
+    for (const char* key : {"parameters", "original_parameters"}) {
+      ArrP values = card->optJSONArray(key);
+      if (values && values->length() >= 145 && values->optInt(142 + b, 0) == borrowed) { values->put(142 + b, mine); changed = true; }
+    }
+  }
+  return changed;
+}
+
 // Saves from builds before card identity keep player copies outside the players
 // table. Correct them once: the learned-skill lists in prefs, the recruited
 // players list, and the match squad cached for the active division match (it is
 // rebuilt at the next match start). The players table itself is corrected and
-// re-saved by the normal login path.
+// re-saved by the normal login path, except for boosters borrowed from another
+// version of the player, which only this migration can tell apart
+// (z27ResetBorrowedBoosters). v2 adds the booster step; the other steps change
+// nothing on a save that v1 already corrected.
 void z27MigrateSavedCards() {
-  if (loadMeta("z27_card_identity_v1")) return;
+  if (loadMeta("z27_card_identity_v2")) return;
   try {
+    std::unordered_map<int32_t, ObjP> firstRecordOfPlayer;  // the record 75288ee picked for a base id
+    if (ObjP recs = ziruPlayerRecords()) {
+      for (const auto& kv : recs->kv) {
+        int64_t key = 0;
+        try { key = parseLong(kv.first); } catch (const std::exception&) { continue; }
+        int32_t base = (int32_t)(key & 0xFFFFFF);
+        ObjP gp = kv.second.t == Value::OBJ ? kv.second.o->optJSONObject("gameplayer") : nullptr;
+        if (base > 0 && gp && !firstRecordOfPlayer.count(base)) firstRecordOfPlayer[base] = gp;
+      }
+    }
+    {
+      for (auto& [serial, text] : ziruDb->loadAllPlayerRows()) {
+        try {
+          ObjP row = Object::parse(text);
+          ObjP card = row->optJSONObject("gameplayer") ? row->getJSONObject("gameplayer") : row;
+          if (!z27ResetBorrowedBoosters(card, firstRecordOfPlayer)) continue;
+          ziruDb->savePlayer(serial, card->getJSONObject("gameplayer_id")->getLong("id"), row->toString());
+          logRequest("Z27_CARD_MIGRATION", "[Z27_BOOSTER_RESET] serial=" + str(serial) + " boosters from another version removed");
+        } catch (const std::exception& e) {
+          zs::loge("OFFLINE_SERVER", std::string("[Z27_CARD_MIGRATION_ERR] player ") + str(serial) + " " + e.what());
+        }
+      }
+    }
     zs::Prefs& prefs = sp("almanac_state");
     auto edit = prefs.edit();
     bool changed = false;
@@ -869,6 +938,7 @@ void z27MigrateSavedCards() {
       for (int i = 0; i < list->length(); i++) {
         ObjP o = list->optJSONObject(i);
         ObjP gp = o ? o->optJSONObject("gameplayer") : nullptr;
+        z27ResetBorrowedBoosters(gp ? gp : o, firstRecordOfPlayer);
         z27ApplyAppearanceAndClub(gp ? gp : o);
       }
       std::string repaired = list->toString();
@@ -883,7 +953,7 @@ void z27MigrateSavedCards() {
       active->remove("home_squad");
       z27PutMeta("z27_active_match", active->toString());
     }
-    ziruDb->saveMeta("z27_card_identity_v1", "1");
+    ziruDb->saveMeta("z27_card_identity_v2", "1");
     logRequest("Z27_CARD_MIGRATION", "[Z27_CARD_MIGRATION] saved card copies corrected");
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[Z27_CARD_MIGRATION_ERR] ") + e.what());

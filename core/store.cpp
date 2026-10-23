@@ -189,6 +189,18 @@ std::string ZiruDb::loadAllPlayersJson() {
   }
   return arr->toString();
 }
+std::vector<std::pair<int64_t, std::string>> ZiruDb::loadAllPlayerRows() {
+  std::vector<std::pair<int64_t, std::string>> rows;
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db, "SELECT serial, player_json FROM players ORDER BY serial", -1, &st, nullptr) == SQLITE_OK) {
+    while (sqlite3_step(st) == SQLITE_ROW) {
+      const unsigned char* t = sqlite3_column_text(st, 1);
+      rows.push_back({(int64_t)sqlite3_column_int64(st, 0), t ? std::string((const char*)t) : std::string()});
+    }
+    sqlite3_finalize(st);
+  }
+  return rows;
+}
 std::string ZiruDb::loadLeagueHistory() {
   sqlite3_stmt* st = nullptr;
   std::string out = "[";
