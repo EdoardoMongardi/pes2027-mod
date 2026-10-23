@@ -1075,6 +1075,11 @@ static void setupGraphicsEnhancements() {
 
 // ---------------------------------------------------------------- launch gating
 static std::atomic<bool> gGameStarted{false};
+// Unreal opens Documents/pak and cpk once, while it starts up right after hookDidFinish returns. If the data was not
+// ready then, data that turns up later (copied in, or imported from a ZIP) is only used after the app is reopened.
+static std::atomic<bool> gUnrealStarted{false};
+static std::atomic<bool> gBootedWithData{false};
+static bool dataNeedsRestart() { return gUnrealStarted && !gBootedWithData; }
 static IMP gOrigDidFinish, gOrigBecomeActive, gOrigResignActive, gOrigEnterBg, gOrigEnterFg;
 static __strong id gLaunchApp;
 static __strong NSDictionary* gLaunchOptions;
@@ -1499,10 +1504,16 @@ static BOOL checkDirectFolderData(NSString** why) {
 }
 
 static BOOL dataReady(NSString** why) {
-  if (checkDirectFolderData(why)) return YES;
+  NSString* folderWhy = nil;
+  if (checkDirectFolderData(&folderWhy)) return YES;
   std::string err;
   zd::Layout L = layout();
   std::string id = zd::activeId(L);
+  if (id.empty()) {
+    // No ZIP pack imported: the folder check says what is missing (quickVerify would only say "Chưa nhập data").
+    if (why) *why = folderWhy;
+    return NO;
+  }
   NSString* appVer = [NSBundle.mainBundle.infoDictionary objectForKey:@"CFBundleShortVersionString"] ?: @"";
   NSString* appBuild = [NSBundle.mainBundle.infoDictionary objectForKey:@"CFBundleVersion"] ?: @"";
   bool ok = zd::quickVerify(L, id, appVer.UTF8String ?: "", appBuild.UTF8String ?: "", ZIRU_MOD_VERSION, err);
@@ -1929,9 +1940,24 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
   return nil;
 }
 
+static NSString* const kRestartForData =
+    @"Đã phát hiện dữ liệu game! Hãy tắt hẳn ứng dụng (vuốt lên trong Trình chuyển đổi ứng dụng) rồi mở lại để vào game.";
+
+// The data is in place now, but the game engine started without it when the app opened: only a restart helps.
+- (void)showRestartNeeded {
+  self.local.hidden = YES;
+  self.bar.hidden = YES;
+  self.status.text = kRestartForData;
+  self.detail.text = [NSString stringWithFormat:@"Bản mod %s", ZIRU_MOD_VERSION];
+}
+
 - (void)refresh {
   NSString* why = nil;
   if (dataReady(&why)) {
+    if (dataNeedsRestart()) {
+      [self showRestartNeeded];
+      return;
+    }
     self.status.text = @"Đã phát hiện dữ liệu game! Đang vào game…";
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       startGame();
@@ -1951,6 +1977,14 @@ static PESPressButton* makeButton(NSString* title, BOOL primary) {
   [self checkTamper];
   NSString* why = nil;
   if (dataReady(&why)) {
+    if (dataNeedsRestart()) {
+      [self showRestartNeeded];
+      UIAlertController* a = [UIAlertController alertControllerWithTitle:@"Cần mở lại ứng dụng" message:kRestartForData
+                                                          preferredStyle:UIAlertControllerStyleAlert];
+      [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+      [self presentViewController:a animated:YES completion:nil];
+      return;
+    }
     self.status.text = @"Đã phát hiện dữ liệu game! Đang khởi động…";
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       startGame();
@@ -2049,7 +2083,16 @@ static uint64_t freeBytes() {
       self.busy = NO;
       self.pick.enabled = YES;
       self.local.enabled = YES;
-      if (ok) {
+      if (ok && dataNeedsRestart()) {
+        // The engine started without data when the app opened; the imported pack is used after a restart.
+        [self showRestartNeeded];
+        UIAlertController* a = [UIAlertController alertControllerWithTitle:@"Hoàn tất"
+                                                                   message:@"Dữ liệu đã nhập thành công. Hãy tắt hẳn ứng dụng rồi mở lại để vào game. "
+                                                                           @"Có thể xóa file .zip gốc để giải phóng dung lượng."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+      } else if (ok) {
         self.status.text = @"Đã nhập xong dữ liệu. Đang vào game…";
         UIAlertController* a = [UIAlertController alertControllerWithTitle:@"Hoàn tất"
                                                                    message:@"Dữ liệu đã nhập thành công. Có thể xóa file .zip gốc để giải phóng dung lượng."
@@ -2164,7 +2207,13 @@ static BOOL hookDidFinish(id self, SEL _cmd, UIApplication* app, NSDictionary* o
 
   // Check if direct data exists
   NSString* why = nil;
-  if (dataReady(&why)) {
+  BOOL ready = dataReady(&why);
+  // Unreal's game thread waits for bCommandLineReady (set by the NoUrlCommandLine timer the original method
+  // scheduled), so it starts up and opens Documents/pak and cpk only after this method returns, with whatever
+  // is there now. The importer uses this to ask for a restart when the data turns up later.
+  gBootedWithData = ready;
+  gUnrealStarted = true;
+  if (ready) {
     ZLog(@"Data ready, launching game directly");
     gGameStarted = true;
     return res;
