@@ -191,8 +191,11 @@ inline void z27BoostAllCoaches(const ObjP& entry) {
 struct ZiruStarters {
   bool loaded = false;
   ObjP entry;
-  std::map<std::pair<int64_t, int64_t>, ObjP> bySerialId;  // (serial, id) -> listed card
-  std::unordered_map<int64_t, ObjP> byId;                   // id -> first card listed with it
+  // (serial, id) -> listed card; also under the id the iOS client knows the card by
+  // (z27UpgradeIosCardPid, e.g. 40352 -> 89133993205152)
+  std::map<std::pair<int64_t, int64_t>, ObjP> bySerialId;
+  std::unordered_map<int64_t, ObjP> byId;          // id -> first card listed with it
+  std::unordered_map<int64_t, ObjP> byUpgradedId;  // upgraded id -> first card listed with the old id
 };
 ZiruStarters ziruStarters;
 int ziruLoginParses = 0;  // how often CmdLogin.json was parsed (checked by the tests)
@@ -212,8 +215,13 @@ const ZiruStarters& z27Starters() {
     ObjP gid = card ? card->optJSONObject("gameplayer_id") : nullptr;
     if (!gid) continue;
     int64_t id = gid->optLong("id", 0), serial = gid->optLong("serial", 0);
+    int64_t upgraded = z27UpgradeIosCardPid(id, card->optInt("initial_base_team_id", 0));
     ziruStarters.bySerialId.emplace(std::make_pair(serial, id), card);
     ziruStarters.byId.emplace(id, card);
+    if (upgraded != id) {
+      ziruStarters.bySerialId.emplace(std::make_pair(serial, upgraded), card);
+      ziruStarters.byUpgradedId.emplace(upgraded, card);
+    }
   }
   return ziruStarters;
 }
@@ -988,7 +996,8 @@ ObjP z27TrainingTarget(int64_t serial, int64_t id) {
   return entry;
 }
 
-// The player as the match uses it. Looked up by exact card id only:
+// The player as the match uses it. Looked up by exact card id only (a starter
+// card also by the id the client knows it by after z27UpgradeIosCardPid):
 // the saved player, the starter entry for this serial, the card's record, a
 // MyLeague rental card, the starter entry for this card. A rental card
 // (serial 0) takes its rental entry before its record: the rental list shows
@@ -1011,6 +1020,8 @@ ObjP z27Player(const ObjP& gid) {
     if (!p && serial != 0) p = z27RentalCard(id);
     auto any = starters.byId.find(id);
     if (!p && any != starters.byId.end()) p = z27Clone(any->second);
+    auto upgraded = starters.byUpgradedId.find(id);
+    if (!p && upgraded != starters.byUpgradedId.end()) p = z27Clone(upgraded->second);
     if (!p) {
       logRequest("Z27_PLAYER_UNKNOWN", "[Z27_PLAYER_UNKNOWN] no card data for id=" + str(id) + " serial=" + str(serial));
       return nullptr;
@@ -1099,19 +1110,9 @@ ObjP z27Home(const ObjP& active) {
                        ->put("uniform_number", squadNum);
     ArrP ib = p->optJSONArray("initial_booster_id_list");
     if (ib) pObj->put("initial_booster_id_list", Array::parse(ib->toString()));
+    // Learned skills come with the card (z27Player reads them for the card saved
+    // under its serial only); a card known only to the template has none.
     ArrP sk = p->optJSONArray("additional_skill_id");
-    if (!sk) {
-      std::string prefSkills = sp("almanac_state").getString("ziru_skills_" + str(gid->optLong("serial", 0)), "");
-      if (!prefSkills.empty()) {
-        sk = newArr();
-        for (auto& part : split(prefSkills, ',')) {
-          try {
-            int v = ziruRepairLearnedSkill(parseInt(part));
-            if (v >= 0) sk->put(v);
-          } catch (const NumberFormat&) {}
-        }
-      }
-    }
     if (sk) pObj->put("additional_skill_id", Array::parse(sk->toString()));
     ArrP ps = p->optJSONArray("play_style");
     if (ps) pObj->put("play_style", Array::parse(ps->toString()));

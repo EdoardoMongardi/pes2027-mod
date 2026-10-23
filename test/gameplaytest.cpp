@@ -588,11 +588,19 @@ static void serialTests(const std::string& top) {
   const long long H = 31 + (1LL << 40);    // record; at 807, sold below
   const long long S1 = 40 + (1LL << 40), S2 = 41 + (1LL << 40);  // two cards listed under one serial (810), as build 138 shipped them
   const long long Z = 40002;               // known only to the start-game template
+  const long long U = 40352, U2 = 89133993205152LL;    // the iOS client knows starter card 40352 as U2 (it has a record)
+  const long long K0 = 44379, K = 106788187843931LL;   // and 44379 as K (it has a record)
   auto records = newObj();
   for (auto c : {card(P1, 0, 12, 3, 0, none, {29}, 108, 0, 149), card(P2, 0, 12, 11, 0, none, {5}, 108, 0, 149),
                  card(G, 0, 9, 14, 0, none, {33}, 108, 0, 149), card(H, 0, 9, 14, 0, none, {33}, 108, 0, 149),
                  card(S1, 0, 9, 1, 0, none, {2}, 108, 0, 149), card(S2, 0, 9, 2, 0, none, {3}, 108, 0, 149)})
     records->put(std::to_string(c->getJSONObject("gameplayer_id")->getLong("id")), newObj()->put("gameplayer", c));
+  for (long long id : {U2, K}) {  // the records of the upgraded ids differ from the starter entries
+    auto rec = card(id, 0, 1, 14, 0, none, {33}, 0, 0, 149);
+    rec->getJSONArray("parameters")->put(14, 99)->put(20, 99);
+    rec->put("level_info", Object::parse(R"({"level":1,"level_limit":32,"customize_point":0})"));
+    records->put(std::to_string(id), newObj()->put("gameplayer", rec));
+  }
   asset(root, "ZIRU_PLAYER_RECORDS.json", records);
   auto starters = newArr(), refs = newArr();
   auto list = [&](const ObjP& c) {
@@ -601,10 +609,12 @@ static void serialTests(const std::string& top) {
   };
   list(card(P1, 801, 12, 3, 0, none, {29}, 108, 0, 145));
   list(card(Q, 802, 12, 22, 0, aiQ, {7}, 108, 0, 145));
+  list(card(K0, 803, 1, 14, 0, none, {33}, 0, 0, 145));
   list(card(G, 805, 9, 14, 0, none, {33}, 108, 0, 145));
   list(card(H, 807, 9, 14, 0, none, {33}, 108, 0, 145));
   list(card(S1, 810, 9, 1, 0, none, {2}, 108, 0, 145));
   list(card(S2, 810, 9, 2, 0, none, {3}, 108, 0, 145));
+  list(card(U, 810, 1, 14, 0, none, {33}, 0, 0, 145));
   refs->put(newObj()->put("gameplayer_id", newObj()->put("id", Z)->put("serial", 820))->put("uniform_number", 23));
   auto squad = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
   asset(root, "CmdLogin.json", newObj()->put("entry_info", newObj()->put("main_squad_id", 9)->put("gameplayer_list", starters)
@@ -666,6 +676,36 @@ static void serialTests(const std::string& top) {
   check(playerWrites == 0, ("a login and entry info on an unchanged save write no player row, wrote " + std::to_string(playerWrites)).c_str());
   sqlite3_update_hook(s.ziruDb->db, nullptr, nullptr);
   check(Object::parse(rowText(810))->getJSONObject("gameplayer_id")->getLong("id") == S1, "the first card listed under a shared serial keeps its row");
+
+  // ---- Starter cards the client knows by an upgraded id; learned skills of template cards ----
+  {
+    auto entryList = listed(call(s, "CMD_GET_MYCLUB_ENTRY_INFO"));
+    auto loginList = listed(call(s, "CMD_LOGIN"));
+    auto shownU = byId(entryList, U2), shownK = byId(loginList, K);
+    check(shownU->getJSONObject("gameplayer_id")->getLong("serial") == 810 && shownK->getJSONObject("gameplayer_id")->getLong("serial") == 803,
+        "the upgraded starter cards are listed under their own ids");
+    // Learned skills saved for serial 820 belong to no card the user owns there.
+    s.sp("almanac_state").edit().putString("ziru_skills_820", "44").commit();
+    auto game = call(s, "CMD_GET_VSCOM_OPPONENT")->getLong("game_id");
+    auto played = call(s, "CMD_START_GAME", newObj()->put("game_id", (long long)game))->getJSONObject("squad_data_home")->getJSONArray("player_list");
+    auto playedZ = byId(played, Z);
+    check(!playedZ->has("additional_skill_id") && skillBit(playedZ, 44) == 0,
+        "match start: a card known only to the template gets no learned skills from its serial");
+    s.sp("almanac_state").edit().remove("ziru_skills_820").commit();
+    // U2's serial holds S1: the card is not saved, so the match and the detail screen use its starter entry, as listed.
+    std::string diff = paramDiff(shownU, byId(played, U2));
+    check(diff.empty(), ("match start: an upgraded starter card plays as listed, not as the record of its new id, " + diff).c_str());
+    auto detailU = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", U2)->put("serial", 810)));
+    check(detailU->getJSONArray("parameters")->toString() == shownU->getJSONArray("parameters")->toString(),
+        "player detail: an upgraded starter card shows the listed card, not the record of its new id");
+    // K is saved under its own serial: match and detail use the saved card, level included.
+    diff = paramDiff(shownK, byId(played, K));
+    check(diff.empty(), ("match start: a saved upgraded card plays as the login shows it, " + diff).c_str());
+    auto detailK = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", K)->put("serial", 803)));
+    check(detailK->getJSONArray("parameters")->toString() == shownK->getJSONArray("parameters")->toString() &&
+          s.z27Player(newObj()->put("id", K)->put("serial", 803))->getJSONObject("level_info")->getInt("level") ==
+              shownK->getJSONObject("level_info")->getInt("level"), "player detail and match: a saved upgraded card as the login shows it");
+  }
 
   // ---- Training changes exactly the card the client picked ----
   // Everything saved: player rows, careerplan points and prefs, by key.
