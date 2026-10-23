@@ -227,15 +227,44 @@ bool installPack(const std::string& zipPath, const Layout& L, uint64_t freeBytes
   return true;
 }
 
+// Clears a real folder out of the way of a link without losing anything in it. A folder holding only
+// symbolic links (the one this mod makes on a launch before any data exists) is removed: removing a
+// link never removes the file it points to. Anything else (the player's own files) is moved to the first
+// free name <folder>.old, <folder>.old2, ... so an earlier moved-aside folder is never replaced or deleted.
+static bool moveFolderAside(const std::string& dir, std::string& err) {
+  bool onlyLinks = true;
+  std::vector<std::string> links;
+  if (DIR* d = opendir(dir.c_str())) {
+    while (dirent* e = readdir(d)) {
+      std::string n = e->d_name;
+      if (n == "." || n == "..") continue;
+      struct stat st;
+      if (lstat((dir + "/" + n).c_str(), &st) == 0 && S_ISLNK(st.st_mode)) links.push_back(dir + "/" + n);
+      else onlyLinks = false;
+    }
+    closedir(d);
+  }
+  if (onlyLinks) {
+    for (auto& l : links) unlink(l.c_str());
+    if (rmdir(dir.c_str()) == 0) return true;
+  }
+  for (int i = 1; i < 1000; i++) {
+    std::string aside = dir + ".old" + (i == 1 ? "" : std::to_string(i));
+    struct stat st;
+    if (lstat(aside.c_str(), &st) == 0) continue;
+    if (rename(dir.c_str(), aside.c_str()) == 0) return true;
+    break;
+  }
+  err = "Không dời được thư mục cũ " + dir + " sang chỗ khác";
+  return false;
+}
+
 static bool relink(const std::string& link, const std::string& target, std::string& err) {
   struct stat st;
   if (lstat(link.c_str(), &st) == 0) {
-    if (S_ISLNK(st.st_mode)) unlink(link.c_str());
-    else if (S_ISDIR(st.st_mode)) {
-      // a real directory left by an older build: move it aside instead of deleting user files
-      std::string aside = link + ".old";
-      removeTree(aside);
-      rename(link.c_str(), aside.c_str());
+    if (S_ISDIR(st.st_mode)) {
+      // a real directory left by an older build or by the player: never delete their files
+      if (!moveFolderAside(link, err)) return false;
     } else unlink(link.c_str());
   }
   if (symlink(target.c_str(), link.c_str()) != 0) { err = "Không tạo được liên kết " + link; return false; }
