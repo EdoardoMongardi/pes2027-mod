@@ -86,6 +86,9 @@ struct ZiruDb {
   void saveProgression(int64_t serial, const std::string& json);
   void saveSquad(int32_t id, const std::string& json);
   void deleteSquad(int32_t id);
+  void deleteMeta(const std::string& k);
+  bool loadPlayerId(int64_t serial, int64_t& id);                     // the player_id column
+  std::vector<std::pair<int32_t, std::string>> loadAllSquadRows();    // (squad_id, squad_json)
   // Groups writes so they reach the file together. Calls nest: only the
   // outermost commit writes; rollback undoes everything since the matching begin.
   void begin();

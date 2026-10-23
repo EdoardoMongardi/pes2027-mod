@@ -143,6 +143,7 @@ std::string OfflineServer::redirectUrl(const std::string& url) {
 Response OfflineServer::serve(Request& r) {
   std::lock_guard<std::recursive_mutex> g(mu);
   try {
+    z27MigrateSave();  // once per process, before any handler reads the save
     if (cfg.iosPlayerLayout && r.readPos == 0) {
       Bytes mp;
       if (zc::decodeRequestToMsgpack(r.body, mp)) {

@@ -263,5 +263,24 @@ void ZiruDb::saveSquad(int32_t id, const std::string& json) {
 void ZiruDb::deleteSquad(int32_t id) {
   run(db, "DELETE FROM squads WHERE squad_id=?", {zj::Value((int)id)});
 }
+void ZiruDb::deleteMeta(const std::string& k) { run(db, "DELETE FROM meta WHERE k=?", {zj::Value(k)}); }
+bool ZiruDb::loadPlayerId(int64_t s, int64_t& id) {
+  std::string out;
+  if (!queryOne("SELECT player_id FROM players WHERE serial=?", {std::to_string(s)}, out)) return false;
+  id = std::stoll(out);
+  return true;
+}
+std::vector<std::pair<int32_t, std::string>> ZiruDb::loadAllSquadRows() {
+  std::vector<std::pair<int32_t, std::string>> rows;
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db, "SELECT squad_id, squad_json FROM squads ORDER BY squad_id", -1, &st, nullptr) != SQLITE_OK)
+    throw std::runtime_error(std::string("Save read prepare failed: ") + sqlite3_errmsg(db));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    const unsigned char* t = sqlite3_column_text(st, 1);
+    rows.push_back({(int32_t)sqlite3_column_int(st, 0), t ? std::string((const char*)t) : std::string()});
+  }
+  sqlite3_finalize(st);
+  return rows;
+}
 
 }  // namespace zs

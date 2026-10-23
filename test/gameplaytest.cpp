@@ -818,6 +818,294 @@ static void serialTests(const std::string& top) {
   }
 }
 
+// ---- Saves written while the starter cards shared 11 serials ----------------------
+// Synthetic starter list made from the compiled table (kZiruStarterSerials): the 70 real
+// card ids, either under build 138's shared serials or under Konami's own serials.
+static const int kSquadPositions[23] = {66, 33, 35, 56, 54, 23, 67, 40, 53, 37, 59, 52, 41, 29, 30, 18, 69, 60, 31, 63, 65, 48, 58};
+static const int kStarters = (int)(sizeof(kZiruStarterSerials) / sizeof(kZiruStarterSerials[0]));
+static long long starterSerial(int pos, bool konami) { return konami ? kZiruStarterSerials[pos].now : kZiruStarterSerials[pos].before; }
+static ObjP starterCard(int pos, bool konami) {
+  const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0};
+  auto c = card(kZiruStarterSerials[pos].id, starterSerial(pos, konami), 9, 0, 0, none, {}, 108, 0, 145);
+  c->getJSONArray("parameters")->put(47, 40 + pos);  // every entry differs, also the two copies of one card
+  c->put("level_info", Object::parse("{\"level\":" + std::to_string(1 + pos % 30) + ",\"level_limit\":" + std::to_string(1 + pos % 30) + ",\"customize_point\":0}"));
+  return c;
+}
+// The ids the iOS client knows two starter cards by (z27UpgradeIosCardPid).
+static long long shownId(long long id) { return id == 40352 ? 89133993205152LL : id == 44379 ? 106788187843931LL : id; }
+static void writeStarterAssets(const std::string& root, bool konami) {
+  std::filesystem::create_directories(root + "/responses");
+  auto list = newArr(), refs = newArr();
+  for (int pos = 0; pos < kStarters; ++pos) list->put(starterCard(pos, konami));
+  for (int slot = 0; slot < 23; ++slot) {
+    int pos = kSquadPositions[slot];
+    refs->put(newObj()->put("gameplayer_id", newObj()->put("id", kZiruStarterSerials[pos].id)->put("serial", starterSerial(pos, konami)))->put("uniform_number", slot + 1));
+  }
+  auto squad = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
+  asset(root, "CmdLogin.json", newObj()->put("entry_info", newObj()->put("main_squad_id", 9)->put("gameplayer_list", list)
+      ->put("coach_list", newArr()->put(coachRef(100, 1000)))
+      ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squad)->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))))));
+  asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline"})"));
+  asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
+  const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0};
+  auto records = newObj();
+  for (long long id : {106788187843931LL, 89133993205152LL, 88045755827028LL, 87962272515241LL})
+    records->put(std::to_string(id), newObj()->put("gameplayer", card(id, 0, 9, 0, 0, none, {}, 108, 0, 149)));
+  asset(root, "ZIRU_PLAYER_RECORDS.json", records);
+  asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
+}
+// Every row, careerplan point, squad, meta value (but the backup) and pref of a save.
+static std::map<std::string, std::string> saveDump(OfflineServer& s) {
+  std::map<std::string, std::string> out;
+  for (const char* q : {"SELECT 'player ' || serial, player_id || ' ' || player_json FROM players",
+                        "SELECT 'progression ' || serial, progression_json FROM progression",
+                        "SELECT 'squad ' || squad_id, squad_json FROM squads",
+                        "SELECT 'meta ' || k, v FROM meta WHERE k != 'z27_starter_serials_backup'"}) {
+    sqlite3_stmt* st = nullptr;
+    sqlite3_prepare_v2(s.ziruDb->db, q, -1, &st, nullptr);
+    while (sqlite3_step(st) == SQLITE_ROW) out[(const char*)sqlite3_column_text(st, 0)] = (const char*)sqlite3_column_text(st, 1);
+    sqlite3_finalize(st);
+  }
+  auto& prefs = s.sp("almanac_state");
+  for (const auto& k : prefs.data->keys()) out["prefs " + k] = prefs.data->optJSONObject(k)->toString();
+  return out;
+}
+static std::string firstDifference(const std::map<std::string, std::string>& a, const std::map<std::string, std::string>& b) {
+  for (auto& kv : a) if (!b.count(kv.first) || b.at(kv.first) != kv.second) return kv.first;
+  for (auto& kv : b) if (!a.count(kv.first)) return kv.first;
+  return "";
+}
+
+static void starterSerialTests(const std::string& top) {
+  const long long DUP1 = 17592454614461LL, DUP2 = 88035823874881LL, OLD = 359042717000000000LL;
+  auto oldSerial = [&](int last) { return OLD + last; };
+  // ---- A new save with Konami's serials: every starter card is its own card ----
+  {
+    std::string root = top + "/serials-fresh";
+    writeStarterAssets(root, true);
+    Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
+    std::filesystem::create_directories(cfg.dataDir);
+    OfflineServer s(cfg);
+    call(s, "CMD_CREATE_USER");
+    auto login = call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    auto entry = call(s, "CMD_GET_MYCLUB_ENTRY_INFO")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    for (auto list : {login, entry}) {
+      std::set<long long> serials;
+      check(list->length() == kStarters, ("every starter card is listed, got " + std::to_string(list->length())).c_str());
+      for (int pos = 0; pos < kStarters && pos < list->length(); ++pos) {
+        auto gid = list->getJSONObject(pos)->getJSONObject("gameplayer_id");
+        serials.insert(gid->getLong("serial"));
+        check(gid->getLong("serial") == kZiruStarterSerials[pos].now && gid->getLong("id") == shownId(kZiruStarterSerials[pos].id) &&
+              list->getJSONObject(pos)->getJSONArray("parameters")->getInt(47) == 40 + pos,
+            ("starter card " + std::to_string(pos) + " is sent as itself under its own serial").c_str());
+      }
+      check((int)serials.size() == kStarters, "70 cards, 70 serials");
+    }
+    check((int)s.ziruDb->loadAllPlayerRows().size() == kStarters, "a row for every starter card");
+    check(s.loadMeta("z27_starter_serials_v1") && !s.loadMeta("z27_starter_serials_backup"), "a new save only gets the done flag");
+  }
+  // ---- A save written by build 138, with the shared serials ----
+  std::string root = top + "/serials-old";
+  writeStarterAssets(root, true);
+  const long long PACK = 87962272515241LL;  // a pack card with a starter card's id, at pack serial 31
+  auto writeOldSave = [&](const std::string& dir) {
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    Config cfg; cfg.assetsDir = root; cfg.dataDir = dir;
+    OfflineServer s(cfg);
+    auto& prefs = s.sp("almanac_state");
+    auto edit = prefs.edit();
+    std::set<long long> done;
+    int k = 0;
+    for (int pos = 0; pos < kStarters; ++pos) {
+      long long serial = kZiruStarterSerials[pos].before;
+      if (!done.insert(serial).second || serial == oldSerial(260)) continue;  // the first card listed under a serial is the row card
+      auto row = starterCard(pos, false);
+      row->getJSONObject("gameplayer_id")->put("id", shownId(kZiruStarterSerials[pos].id));
+      row->put("additional_skill_id", newArr()->put(44)->put(k % 2 ? 45 : 46));
+      row->put("initial_booster_id_list", newArr()->put(100 + k)->put(0)->put(0));
+      row->getJSONArray("parameters")->put(142, 100 + k)->put(kZiruSkillParameters[44], 1);
+      row->put("additional_position", newArr()->put("CF"));
+      s.ziruDb->savePlayer(serial, shownId(kZiruStarterSerials[pos].id), row->toString());
+      edit.putString("ziru_skills_" + std::to_string(serial), "44," + std::to_string(k % 2 ? 45 : 46));
+      k++;
+    }
+    s.ziruDb->saveProgression(oldSerial(0), R"({"SHOOT":6,"_spent_total":6})");
+    s.ziruDb->saveProgression(oldSerial(600), R"({"PASS":4,"_spent_total":4})");
+    // 260 was sold: build 138 removed its row, the learned skills stayed in prefs.
+    s.ziruDb->saveMeta("sold_player_" + std::to_string(oldSerial(260)), "1");
+    edit.putString("ziru_skills_" + std::to_string(oldSerial(260)), "33");
+    auto pack = card(PACK, 31, 9, 0, 0, {0, 0, 0, 0, 0, 0, 0}, {}, 108, 0, 145);
+    s.ziruDb->savePlayer(31, PACK, pack->toString());
+    edit.putString("recruited_players", newArr()->put(newObj()->put("gameplayer", pack))->toString()).putLong("ziru_next_serial", 31)
+        .putString("ziru_skills_31", "12");
+    edit.commit();
+    // Squads as build 138 saved them (ids already upgraded): the default squad, and one with
+    // both copies of the two cards listed twice under one serial, upgraded ids, a pack card,
+    // a rental and a card no starter list has.
+    auto squadOf = [](std::vector<std::pair<long long, long long>> refs) {
+      auto list = newArr();
+      for (auto& r : refs) list->put(newObj()->put("gameplayer_id", newObj()->put("id", r.first)->put("serial", r.second))->put("uniform_number", list->length() + 1));
+      return newObj()->put("player_list", list)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
+    };
+    std::vector<std::pair<long long, long long>> main;
+    for (int pos : kSquadPositions) main.push_back({shownId(kZiruStarterSerials[pos].id), kZiruStarterSerials[pos].before});
+    s.ziruDb->saveSquad(9, squadOf(main)->toString());
+    s.ziruDb->saveSquad(1, newObj()->put("squad_data", squadOf({{DUP1, oldSerial(200)}, {DUP2, oldSerial(600)}, {DUP2, oldSerial(600)}, {DUP1, oldSerial(200)},
+        {106788187843931LL, oldSerial(60)}, {89133993205152LL, oldSerial(100)}, {17592454614509LL, oldSerial(60)}, {PACK, 31},
+        {88032334187994LL, 0}, {990000000003LL, oldSerial(640)}}))->toString());
+    s.ziruDb->saveMeta("ziru_myleague_special_squad", newObj()->put("squad_data", squadOf({{88045755827028LL, oldSerial(640)}, {DUP2, oldSerial(600)},
+        {DUP2, oldSerial(600)}, {88032334187994LL, 0}}))->toString());
+    s.ziruDb->saveMeta("z27_active_match", newObj()->put("game_id", 5)->put("home_squad", squadOf(main))->toString());
+  };
+  auto newSerialOf = [&](int pos) { return kZiruStarterSerials[pos].now; };
+  auto refsOf = [](const ObjP& squad) {
+    ObjP data = squad->optJSONObject("squad_data") ? squad->getJSONObject("squad_data") : squad;
+    std::vector<std::pair<long long, long long>> out;
+    auto list = data->getJSONArray("player_list");
+    for (int i = 0; i < list->length(); ++i) {
+      auto g = list->getJSONObject(i)->getJSONObject("gameplayer_id");
+      out.push_back({g->getLong("id"), g->getLong("serial")});
+    }
+    return out;
+  };
+  {
+    std::string dir = root + "/save";
+    writeOldSave(dir);
+    Config cfg; cfg.assetsDir = root; cfg.dataDir = dir;
+    std::map<long long, std::string> oldRows, oldSkills;
+    std::string pack31, recruited;
+    {
+      OfflineServer s(cfg);
+      s.z27MigrateSavedCards();  // the repair of older saves runs first; compare with what it leaves
+      for (auto& [serial, text] : s.ziruDb->loadAllPlayerRows()) {
+        oldRows[serial] = text;
+        oldSkills[serial] = s.sp("almanac_state").getString("ziru_skills_" + std::to_string(serial), "");
+      }
+      pack31 = *s.loadPlayer(31);
+      recruited = s.sp("almanac_state").getString("recruited_players", "");
+    }
+    OfflineServer s(cfg);
+    call(s, "CMD_GET_MANNER_WARN");  // any request: the save is moved before it is handled
+    check(s.loadMeta("z27_starter_serials_v1") && s.loadMeta("z27_starter_serials_backup") && !s.loadMeta("z27_starter_serials_prefs"),
+        "old save: moved once, with a backup, the prefs written");
+    auto& prefs = s.sp("almanac_state");
+    // The row card of each old serial is now under its own serial, exactly as it was saved, and
+    // its learned skills and careerplan points went with it.
+    std::set<long long> done;
+    for (int pos = 0; pos < kStarters; ++pos) {
+      long long before = kZiruStarterSerials[pos].before;
+      if (!done.insert(before).second || before == oldSerial(260)) continue;
+      auto expected = Object::parse(oldRows.at(before));
+      expected->getJSONObject("gameplayer_id")->put("serial", (long long)newSerialOf(pos));
+      JStr moved = s.loadPlayer(newSerialOf(pos));
+      check(moved && *moved == expected->toString(), ("old save: the row card of " + std::to_string(before) + " is under " + std::to_string(newSerialOf(pos))).c_str());
+      check(!oldSkills.at(before).empty() && prefs.getString("ziru_skills_" + std::to_string(newSerialOf(pos)), "") == oldSkills.at(before),
+            "old save: the learned skills moved with the card");
+    }
+    for (long long last : {0, 60, 100, 200, 260, 300, 400, 450, 500, 600, 640}) {
+      bool newHome = last == 60 || last == 600;  // also Konami's serial of another starter card, which starts fresh
+      check(!s.loadPlayer(oldSerial(last)) && !s.loadProgression(oldSerial(last)) && !prefs.hasString("ziru_skills_" + std::to_string(oldSerial(last))),
+          ("old save: nothing is left under old serial " + std::to_string(last) + (newHome ? " (now another card's serial)" : "")).c_str());
+    }
+    check(*s.loadProgression(newSerialOf(0)) == R"({"SHOOT":6,"_spent_total":6})" && *s.loadProgression(newSerialOf(47)) == R"({"PASS":4,"_spent_total":4})",
+        "old save: careerplan points moved with the card");
+    check(!s.isZiruPlayerSold(oldSerial(260)) && s.isZiruPlayerSold(newSerialOf(26)) && s.isZiruPlayerSold(newSerialOf(27)) &&
+          !s.loadPlayer(newSerialOf(26)) && !prefs.hasString("ziru_skills_" + std::to_string(newSerialOf(26))),
+        "old save: the cards listed under a sold serial stay hidden; the sold serial's leftovers are dropped");
+    check(*s.loadPlayer(31) == pack31 && prefs.getString("recruited_players", "") == recruited && prefs.getLong("ziru_next_serial", 0) == 31 &&
+          prefs.getString("ziru_skills_31", "") == "12", "old save: pack cards are not touched, also one with a starter card's id");
+    // Squads: every reference to an old serial points at the new one.
+    std::vector<std::pair<long long, long long>> mainNew;
+    for (int pos : kSquadPositions) mainNew.push_back({shownId(kZiruStarterSerials[pos].id), newSerialOf(pos)});
+    check(refsOf(Object::parse(*s.loadSquad(9))) == mainNew, "old save: the main squad holds the same cards under their new serials");
+    auto custom = refsOf(Object::parse(*s.loadSquad(1)));
+    std::vector<std::pair<long long, long long>> customNew = {{DUP1, newSerialOf(23)}, {DUP2, newSerialOf(54)}, {DUP2, newSerialOf(50)}, {DUP1, newSerialOf(22)},
+        {106788187843931LL, newSerialOf(4)}, {89133993205152LL, newSerialOf(10)}, {17592454614509LL, newSerialOf(5)}, {PACK, 31},
+        {88032334187994LL, 0}, {990000000003LL, oldSerial(640)}};
+    check(custom == customNew, "old save: a card listed twice gets Konami's squad copy first, the other copy second; upgraded ids, pack, rental and unknown references as expected");
+    auto special = refsOf(Object::parse(*s.loadMeta("ziru_myleague_special_squad")));
+    check(special == std::vector<std::pair<long long, long long>>({{88045755827028LL, newSerialOf(66)}, {DUP2, newSerialOf(54)}, {DUP2, newSerialOf(50)}, {88032334187994LL, 0}}),
+        "old save: the MyLeague special squad points at the new serials");
+    check(!s.z27Meta("z27_active_match")->has("home_squad"), "old save: the cached match squad is rebuilt at the next match start");
+    // A second start changes nothing.
+    auto moved = saveDump(s);
+    {
+      OfflineServer again(cfg);
+      call(again, "CMD_GET_MANNER_WARN");
+      std::string diff = firstDifference(moved, saveDump(again));
+      check(diff.empty(), ("old save: a second start changes nothing, " + diff).c_str());
+    }
+    // The login lists every starter card under its own serial: the moved cards with everything they had.
+    auto login = call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    check(login->length() == kStarters - 2 + 1, ("old save: the login lists 68 starter cards and the pack card, got " + std::to_string(login->length())).c_str());
+    auto movedCard = bySerial(login, newSerialOf(4));
+    check(movedCard->getJSONObject("gameplayer_id")->getLong("id") == 106788187843931LL && movedCard->getJSONArray("additional_skill_id")->getInt(0) == 44 &&
+          movedCard->getJSONArray("initial_booster_id_list")->getInt(0) == 101 && movedCard->getJSONArray("additional_position")->getString(0) == "CF",
+        "old save: a moved card keeps its learned skills, booster and position");
+    auto fresh = bySerial(login, newSerialOf(5));
+    check(fresh->getJSONObject("gameplayer_id")->getLong("id") == 17592454614509LL && fresh->getJSONArray("additional_skill_id")->length() == 0 &&
+          fresh->getJSONArray("initial_booster_id_list")->getInt(0) == 0 && !fresh->has("additional_position"),
+        "old save: the card Konami lists under an old serial starts with its starter values");
+    check(bySerial(login, newSerialOf(22))->getJSONArray("parameters")->getInt(47) == 62 && bySerial(login, newSerialOf(23))->getJSONArray("parameters")->getInt(47) == 63,
+        "old save: both copies of a card listed twice are listed, each as itself");
+  }
+  // ---- Stopped between the database and the prefs: the prefs part is applied at the next start ----
+  {
+    std::string dir = root + "/save-replay";
+    writeOldSave(dir);
+    Config cfg; cfg.assetsDir = root; cfg.dataDir = dir;
+    std::string before;
+    {
+      OfflineServer s(cfg);
+      before = s.sp("almanac_state").getString("ziru_skills_" + std::to_string(oldSerial(0)), "");
+      call(s, "CMD_GET_MANNER_WARN");
+      s.ziruDb->saveMeta("z27_starter_serials_prefs", newObj()->put("ziru_skills_" + std::to_string(newSerialOf(0)), "44,46")
+          ->put("ziru_skills_" + std::to_string(oldSerial(0)), Value::null())->toString());
+      s.sp("almanac_state").edit().putString("ziru_skills_" + std::to_string(oldSerial(0)), before)
+          .remove("ziru_skills_" + std::to_string(newSerialOf(0))).commit();
+    }
+    OfflineServer s(cfg);
+    call(s, "CMD_GET_MANNER_WARN");
+    check(!s.loadMeta("z27_starter_serials_prefs") && s.sp("almanac_state").getString("ziru_skills_" + std::to_string(newSerialOf(0)), "") == "44,46" &&
+          !s.sp("almanac_state").hasString("ziru_skills_" + std::to_string(oldSerial(0))), "a prefs plan left behind is applied at the next start");
+  }
+  // ---- A failure inside the move leaves the save as it was; the next request tries again ----
+  {
+    std::string dir = root + "/save-fail";
+    writeOldSave(dir);
+    Config cfg; cfg.assetsDir = root; cfg.dataDir = dir;
+    OfflineServer s(cfg);
+    s.ziruDb->saveMeta("z27_card_identity_v2", "1");
+    auto before = saveDump(s);
+    check(sqlite3_exec(s.ziruDb->db, "CREATE TRIGGER fail_move BEFORE INSERT ON meta WHEN NEW.k='z27_starter_serials_v1' BEGIN SELECT RAISE(ABORT, 'test'); END",
+                       nullptr, nullptr, nullptr) == SQLITE_OK, "install the failing write");
+    call(s, "CMD_GET_MANNER_WARN");
+    std::string diff = firstDifference(before, saveDump(s));
+    check(diff.empty() && !s.loadMeta("z27_starter_serials_backup"), ("a failed move leaves the save as it was, " + diff).c_str());
+    sqlite3_exec(s.ziruDb->db, "DROP TRIGGER fail_move", nullptr, nullptr, nullptr);
+    call(s, "CMD_GET_MANNER_WARN");
+    check(s.loadMeta("z27_starter_serials_v1") && s.loadPlayer(newSerialOf(0)), "the next request moves the save");
+  }
+  // ---- Old starter data: the save waits, unchanged ----
+  {
+    std::string oldRoot = top + "/serials-old-data";
+    writeStarterAssets(oldRoot, false);
+    std::string dir = oldRoot + "/save";
+    writeOldSave(dir);
+    Config cfg; cfg.assetsDir = oldRoot; cfg.dataDir = dir;
+    OfflineServer s(cfg);
+    s.ziruDb->saveMeta("z27_card_identity_v2", "1");
+    auto before = saveDump(s);
+    call(s, "CMD_GET_MANNER_WARN");
+    std::string diff = firstDifference(before, saveDump(s));
+    check(diff.empty(), ("old starter data: the save is not moved, " + diff).c_str());
+    auto login = call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    check(!s.loadMeta("z27_starter_serials_v1") && bySerial(login, oldSerial(60))->getJSONObject("gameplayer_id")->getLong("id") == 106788187843931LL,
+        "old starter data: the login works on the old serials as before");
+  }
+}
+
 int main() {
   try {
     zs::setVerbose(false);
@@ -1175,6 +1463,7 @@ int main() {
     }
     cardIdentityTests(root);
     serialTests(root);
+    starterSerialTests(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
     check(child >= 0, "spawn abrupt-exit save test");

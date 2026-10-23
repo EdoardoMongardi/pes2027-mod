@@ -20,7 +20,6 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     }
   }
   bool resumesSave = name == "responses/CmdLogin.json" || name == "responses/CmdCreateUser.json";
-  if (resumesSave) z27MigrateSavedCards();
   ObjP req;
   if (jo && ziruLastRequestBody && (req = decodeZiruRequestJson(ziruLastRequestBody))) {
     jo->put("rqid", (long long)req->optLong("rqid", 0));

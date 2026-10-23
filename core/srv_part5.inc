@@ -855,7 +855,7 @@ bool z27ResetBorrowedBoosters(const ObjP& card, const std::unordered_map<int32_t
 }
 
 // Saves from builds before card identity keep player copies outside the players
-// table. Correct them once: the learned-skill lists in prefs, the recruited
+// table. Correct them once (z27MigrateSave, before any request is handled): the learned-skill lists in prefs, the recruited
 // players list, and the match squad cached for the active division match (it is
 // rebuilt at the next match start). The players table itself is corrected and
 // re-saved by the normal login path, except for boosters borrowed from another

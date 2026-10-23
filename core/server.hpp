@@ -91,6 +91,7 @@ struct Config {
 };
 
 #include "appearance_presets_gen.inc"
+#include "starter_serials.inc"
 
 class OfflineServer {
  public:
@@ -165,6 +166,7 @@ class OfflineServer {
 #include "srv_part5.inc"
 #include "srv_part6.inc"
 #include "srv_z27.inc"
+#include "srv_serials.inc"
 #include "srv_serve.inc"
 };
 
