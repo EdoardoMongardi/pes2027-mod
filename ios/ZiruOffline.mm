@@ -1107,6 +1107,10 @@ static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
         ZLog(@"[DATA_PRESERVE] keeping existing file %@", linkPath.lastPathComponent);
         return;
       }
+      // A small real file with the same bytes as the target already gives what the link would: keep the
+      // player's own file (their data folder stays complete) instead of replacing it with a link.
+      NSDictionary* targetAttrs = [fm attributesOfItemAtPath:targetPath.stringByResolvingSymlinksInPath error:nil];
+      if ([targetAttrs fileSize] == sz && [fm contentsEqualAtPath:linkPath andPath:targetPath]) return;
       // Remove tiny dummy/stub files (<= 1024 bytes) so real symlinks can take over
       [fm removeItemAtPath:linkPath error:nil];
     }
