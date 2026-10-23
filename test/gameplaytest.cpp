@@ -853,6 +853,21 @@ static void writeStarterAssets(const std::string& root, bool konami) {
     records->put(std::to_string(id), newObj()->put("gameplayer", card(id, 0, 9, 0, 0, none, {}, 108, 0, 149)));
   asset(root, "ZIRU_PLAYER_RECORDS.json", records);
   asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
+  // Konami's captured MyLeague match and result are of the same account: they name
+  // starter cards under Konami's serials.
+  auto captured = newArr(), stats = newArr();
+  for (int pos : {66, 54, 23}) {
+    auto c = card(kZiruStarterSerials[pos].id, kZiruStarterSerials[pos].now, 9, 0, 0, none, {}, 108, 0, 145);
+    captured->put(newObj()->put("gameplayer_id", c->getJSONObject("gameplayer_id"))->put("parameters", c->getJSONArray("parameters")));
+    stats->put(newObj()->put("gameplayer_id", Object::parse(c->getJSONObject("gameplayer_id")->toString()))->put("games", newArr()->put(198))
+        ->put("goal", newArr()->put(24))->put("assist", newArr()->put(39)));
+  }
+  asset(root, "ZIRU_ML_START_GAME.json", newObj()->put("squad_data_home", newObj()->put("player_list", captured)
+      ->put("coach", newObj()->put("coach_id", newObj()->put("id", 100)->put("serial", 1000)))->put("squad_gameplan", newObj()))->put("commentary_info", newObj()));
+  auto advice = newArr()->put(newObj()->put("advice_info_list", newArr()->put(newObj()->put("gameplayer_id", Object::parse(stats->getJSONObject(0)->getJSONObject("gameplayer_id")->toString())))));
+  asset(root, "ZIRU_ML_GAME_RESULT.json", newObj()->put("game_end_result", newObj()->put("match_result", newObj()->put("score_data", newObj()))
+      ->put("extra_match_result", newObj()->put("gameplayer_update_info", stats))
+      ->put("analyst_get_game_result_info", newObj()->put("advice_info_match_list", advice))));
 }
 // Every row, careerplan point, squad, meta value (but the backup) and pref of a save.
 static std::map<std::string, std::string> saveDump(OfflineServer& s) {
@@ -903,6 +918,26 @@ static void starterSerialTests(const std::string& top) {
     }
     check((int)s.ziruDb->loadAllPlayerRows().size() == kStarters, "a row for every starter card");
     check(s.loadMeta("z27_starter_serials_v1") && !s.loadMeta("z27_starter_serials_backup"), "a new save only gets the done flag");
+    // MyLeague: the CPU team plays Konami's captured squad. Those cards are not the user's,
+    // and the captured result's per-card stats and advice are not about the user's cards.
+    std::set<std::pair<long long, long long>> mine;
+    for (int i = 0; i < login->length(); ++i) {
+      auto g = login->getJSONObject(i)->getJSONObject("gameplayer_id");
+      mine.insert({g->getLong("id"), g->getLong("serial")});
+    }
+    s.ziruMyLeagueSetActive(1);
+    auto cpu = call(s, "CMD_START_GAME", newObj()->put("game_id", 7))->getJSONObject("squad_data_away")->getJSONArray("player_list");
+    check(cpu->length() == 3, "MyLeague: the CPU team plays the captured squad");
+    for (int i = 0; i < cpu->length(); ++i) {
+      auto g = cpu->getJSONObject(i)->getJSONObject("gameplayer_id");
+      check(!mine.count({g->getLong("id"), g->getLong("serial")}), "MyLeague: no CPU card has the id and serial of a card the user owns");
+    }
+    auto result = call(s, "CMD_GET_VSCOM_GAME_RESULT", newObj()->put("game_id", 7)
+        ->put("score", newArr()->put(newObj()->put("score_1st", 1))->put(newObj()->put("score_1st", 0))))->getJSONObject("game_end_result");
+    check(result->getJSONObject("extra_match_result")->getJSONArray("gameplayer_update_info")->length() == 0 &&
+          result->getJSONObject("analyst_get_game_result_info")->getJSONArray("advice_info_match_list")->length() == 0,
+        "MyLeague result: no captured stats or advice for the user's cards");
+    s.ziruMyLeagueSetActive(0);
   }
   // ---- A save written by build 138, with the shared serials ----
   std::string root = top + "/serials-old";

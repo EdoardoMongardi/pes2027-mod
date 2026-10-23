@@ -60,6 +60,7 @@ Response handleZiruMyLeagueResultV71() {
     ObjP jo = loadZiruJsonAssetObject("responses/ZIRU_ML_GAME_RESULT.json");
     patchZiruMyLeagueCommonState(jo);
     patchZiruMyLeaguePostMatchSeasonV82(jo);
+    z27DropCapturedCardResults(jo);
     if (req) {
       nn(jo)->put("rqid", (long long)rqid);
       ObjP ge = jo->optJSONObject("game_end_result");
@@ -84,6 +85,22 @@ Response handleZiruMyLeagueResultV71() {
     return handleZiruLeagueStatic("responses/ZIRU_ML_GAME_RESULT.json");
   }
 }
+
+// Konami's captured MyLeague result is of this same account: its per-card match
+// stats (games, goals, assists) and analyst advice name the user's own starter
+// cards, which did not play this match. Sent empty, as the division result does.
+void z27DropCapturedCardResults(const ObjP& jo) {
+  ObjP ge = jo ? jo->optJSONObject("game_end_result") : nullptr;
+  ObjP extra = ge ? ge->optJSONObject("extra_match_result") : nullptr;
+  if (extra && extra->has("gameplayer_update_info")) extra->put("gameplayer_update_info", newArr());
+  ObjP analyst = ge ? ge->optJSONObject("analyst_get_game_result_info") : nullptr;
+  if (analyst && analyst->has("advice_info_match_list")) analyst->put("advice_info_match_list", newArr());
+}
+
+// The CPU team in MyLeague plays Konami's captured squad, which is of this same
+// account: its cards carry the user's own starter serials. They are the CPU's
+// cards, so they get serials of their own, as division opponents do.
+static constexpr int64_t kZiruMyLeagueCpuSerial = 810000000000000LL;
 
 Response handleZiruMyLeagueScheduleV74() {
   try {
@@ -264,7 +281,12 @@ Response handleZiruMyLeagueStartGameV71() {
     ObjP aiSquad = templateAiSquad ? z27Copy(templateAiSquad) : z27Copy(jo->optJSONObject("squad_data_home"));
     if (aiSquad) {
       ArrP aiPlayers = aiSquad->optJSONArray("player_list");
-      for (int i = 0; aiPlayers && i < aiPlayers->length(); i++) z27ApplyCardIdentity(aiPlayers->optJSONObject(i));
+      for (int i = 0; aiPlayers && i < aiPlayers->length(); i++) {
+        ObjP cpu = aiPlayers->optJSONObject(i);
+        z27ApplyCardIdentity(cpu);
+        ObjP gid = cpu ? cpu->optJSONObject("gameplayer_id") : nullptr;
+        if (gid) gid->put("serial", (long long)(kZiruMyLeagueCpuSerial + i));
+      }
       aiSquad->put("team_id", aiTeam);
       aiSquad->put("base_team", newArr()->put(z27Team(aiTeam)));
       ObjP aiCoach = aiSquad->optJSONObject("coach");
