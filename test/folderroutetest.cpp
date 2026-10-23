@@ -148,9 +148,11 @@ static std::string oldFind(const std::string& root, const std::string& name, int
   }
   return "";
 }
-// ensureSymlink (ZiruOffline.mm:1084-1136), same decisions, absolute link text.
+// ensureSymlink (ZiruOffline.mm), same decisions, absolute link text. gHardened: a small real file
+// with the target's bytes is kept. gBackups: a small real file with other bytes is moved to
+// PES2027-repair-backups instead of being deleted (the current app does both).
 static std::vector<std::string> gDeletedByEnsure;
-static bool gHardened = false;
+static bool gHardened = false, gBackups = false;
 static void oldEnsure(const std::string& link, const std::string& target) {
   if (link == target || !exists(target)) return;
   if (zfr::sameFile(link, target) && !zfr::isLink(link)) return;
@@ -162,8 +164,14 @@ static void oldEnsure(const std::string& link, const std::string& target) {
     if (!isDir && cur.empty()) {
       if (st.st_size > 1024) return;  // DATA_PRESERVE
       if (gHardened && readAll(link) == readAll(target)) return;  // optional hardening: same bytes, keep the real file
-      gDeletedByEnsure.push_back(link);
-      unlink(link.c_str());
+      if (gBackups) {
+        std::string docs = link.substr(0, link.find("/Documents/") + 10);
+        std::string folder = link.substr(0, link.rfind('/'));
+        if (zfr::moveToBackups(docs, link, folder.substr(folder.rfind('/') + 1)).empty()) return;
+      } else {
+        gDeletedByEnsure.push_back(link);
+        unlink(link.c_str());
+      }
     }
     if (isDir && cur.empty()) {
       if (!zfr::listDir(link).empty()) return;  // "non-empty directory, will not overwrite"
@@ -569,6 +577,44 @@ int main(int argc, char** argv) {
     for (auto& n : zfr::listDir(w.docs + "/PES2027-repair-backups"))
       for (int i = 0; i < 2; i++) kept += exists(w.docs + "/PES2027-repair-backups/" + n + "/mine" + std::to_string(i) + ".pak");
     CHECK(kept == 2 && !exists(w.docs + "/.pak.ziru-convert"), "both leftovers kept in separate backup folders");
+  }
+
+  std::cout << "\n[20] a player's small livedata file that differs from the bundled one is kept in PES2027-repair-backups\n";
+  {
+    gHardened = gBackups = true;
+    World w = makeWorld("new-small-own");
+    addUserData(w.docs, "PES2027-data");
+    writeFile(w.docs + "/PES2027-data/livedata/pc9242_mobile_and.pak", 365, 'q');  // the player's own small file
+    std::map<std::string, std::string> before;
+    realFiles(w.docs, before);
+    Launch a = newLaunch(w);
+    std::map<std::string, std::string> after;
+    realFiles(w.docs, after);
+    std::multiset<std::string> was, now;
+    for (auto& [p, c] : before) was.insert(c);
+    for (auto& [p, c] : after) now.insert(c);
+    bool kept = false;
+    for (auto& n : zfr::listDir(w.docs + "/PES2027-repair-backups"))
+      if (n.find("livedata-") == 0 && n.size() > 22 && n.compare(n.size() - 22, 22, "-pc9242_mobile_and.pak") == 0 &&
+          readAll(w.docs + "/PES2027-repair-backups/" + n) == std::string(365, 'q')) kept = true;
+    CHECK(kept && was == now, "the player's file is moved to PES2027-repair-backups, no file content is lost");
+    CHECK(zfr::isLink(w.docs + "/PES2027-data/livedata/pc9242_mobile_and.pak") && readAll(w.docs + "/livedata/pc9242_mobile_and.pak") == std::string(365, 'p'),
+          "the bundled file is linked in its place");
+    CHECK(a.ready && engineBoots(w.docs), "boots");
+    std::map<std::string, std::string> t1, t2;
+    tree(w.root, t1);
+    newLaunch(w);
+    tree(w.root, t2);
+    CHECK(t1 == t2, "next launch changes nothing");
+    std::string d = w.docs + "/Download";
+    mkdirs(d);
+    writeFile(d + "/same.bin", 10, '1');
+    std::string k1 = zfr::moveToBackups(w.docs, d + "/same.bin", "Download");
+    writeFile(d + "/same.bin", 10, '2');
+    std::string k2 = zfr::moveToBackups(w.docs, d + "/same.bin", "Download");
+    CHECK(!k1.empty() && !k2.empty() && k1 != k2 && readAll(k1) == std::string(10, '1') && readAll(k2) == std::string(10, '2'),
+          "two files of the same name moved in the same second get separate backups");
+    gHardened = gBackups = false;
   }
 
   std::cout << "\n[21] broken Documents/livedata link with no data folder: becomes an empty folder for the bundled files\n";

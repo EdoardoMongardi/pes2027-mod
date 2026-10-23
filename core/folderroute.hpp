@@ -256,6 +256,25 @@ inline int mergeLinks(const std::string& docs, const std::string& into, const st
   return made;
 }
 
+// A free path in Documents/PES2027-repair-backups: <stem><suffix>, or <stem>-2<suffix>, -3 ...
+// when that is taken, so a backup never lands on an earlier one.
+inline std::string backupPath(const std::string& docs, const std::string& stem, const std::string& suffix = "") {
+  std::string backups = docs + "/PES2027-repair-backups";
+  mkdir(backups.c_str(), 0755);
+  std::string keep = backups + "/" + stem + suffix;
+  struct stat st;
+  for (int i = 2; lstatOk(keep, st) && i < 1000; i++) keep = backups + "/" + stem + "-" + std::to_string(i) + suffix;
+  return keep;
+}
+
+// Moves a player's file into PES2027-repair-backups (named <folder>-<time>-<file name>) instead
+// of deleting it. Returns where it went, or "" when it could not be moved (it is then left alone).
+inline std::string moveToBackups(const std::string& docs, const std::string& path, const std::string& folder) {
+  std::string name = path.substr(path.rfind('/') + 1);
+  std::string keep = backupPath(docs, folder + "-" + std::to_string((long long)time(nullptr)), "-" + name);
+  return rename(path.c_str(), keep.c_str()) == 0 ? keep : "";
+}
+
 // Removes the links of a moved-aside mod folder. Anything else found there is kept in a
 // visible backup folder instead of being deleted.
 inline void retireStaging(const std::string& docs, const std::string& staging, const std::string& name, const LogFn& log) {
@@ -264,12 +283,7 @@ inline void retireStaging(const std::string& docs, const std::string& staging, c
     if (isLink(p)) unlink(p.c_str());
   }
   if (rmdir(staging.c_str()) == 0) return;
-  std::string backups = docs + "/PES2027-repair-backups";
-  mkdir(backups.c_str(), 0755);
-  const std::string base = backups + "/" + name + "-kept-" + std::to_string((long long)time(nullptr));
-  std::string keep = base;
-  struct stat st;
-  for (int i = 2; lstatOk(keep, st) && i < 100; i++) keep = base + "-" + std::to_string(i);  // never onto an earlier backup
+  std::string keep = backupPath(docs, name + "-kept-" + std::to_string((long long)time(nullptr)));
   if (rename(staging.c_str(), keep.c_str()) == 0) {
     if (log) log("kept unexpected files from the old " + name + " folder in " + keep);
   } else if (log) {

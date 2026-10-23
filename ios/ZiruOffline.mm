@@ -1116,8 +1116,15 @@ static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
       // player's own file (their data folder stays complete) instead of replacing it with a link.
       NSDictionary* targetAttrs = [fm attributesOfItemAtPath:targetPath.stringByResolvingSymlinksInPath error:nil];
       if ([targetAttrs fileSize] == sz && [fm contentsEqualAtPath:linkPath andPath:targetPath]) return;
-      // Remove tiny dummy/stub files (<= 1024 bytes) so real symlinks can take over
-      [fm removeItemAtPath:linkPath error:nil];
+      // A small file with other bytes can be the player's own (Documents/livedata can be a link into
+      // their data folder): move it to PES2027-repair-backups, never delete it, then link the target.
+      std::string kept = zfr::moveToBackups(gDocs.fileSystemRepresentation, linkPath.fileSystemRepresentation,
+                                            linkPath.stringByDeletingLastPathComponent.lastPathComponent.UTF8String);
+      if (kept.empty()) {
+        ZLog(@"[DATA_PRESERVE] could not move %@ aside; keeping it", linkPath.lastPathComponent);
+        return;
+      }
+      ZLog(@"[DATA_PRESERVE] moved %@ to %s", linkPath.lastPathComponent, kept.c_str());
     }
     if (isDir && curDest == nil) {
       NSArray* contents = [fm contentsOfDirectoryAtPath:linkPath error:nil];
