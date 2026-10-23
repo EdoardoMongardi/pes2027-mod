@@ -34,6 +34,155 @@ static ObjP result(OfflineServer& s, int64_t id, int a, int b, bool giveup = fal
   if (giveup) req->put("intentional_give_up", "YES");
   return call(s, "CMD_GET_VSCOM_GAME_RESULT", req);
 }
+
+// ---- Card identity fixtures --------------------------------------------------
+// A card's playing styles, AI playing styles, club, nation and own skills come
+// from that exact card id only: its record, else its starter-squad entry, else
+// its MyLeague rental entry. Nothing is invented and nothing is borrowed from
+// another version of the same player.
+static ObjP card(long long id, long long serial, int position, int style1, int style2, std::vector<int> ai,
+                 std::vector<int> skills, int club, int nation, int size) {
+  auto values = newArr(); for (int i = 0; i < size; ++i) values->put(0);
+  values->put(0, position)->put(14, 70)->put(61, style1)->put(62, style2);
+  for (int i = 0; i < 7; ++i) values->put(63 + i, ai[i]);
+  for (int skill : skills) values->put(kZiruSkillParameters[skill], 1);
+  return newObj()->put("gameplayer_id", newObj()->put("id", id)->put("serial", serial))
+      ->put("play_style", newArr()->put(style1)->put(style2))
+      ->put("initial_base_team_id", club)->put("initial_base_national_team_id", nation)
+      ->put("parameters", values)->put("initial_booster_id_list", newArr()->put(0)->put(0)->put(0))
+      ->put("additional_skill_id", newArr())
+      ->put("level_info", Object::parse(R"({"level":1,"level_limit":1,"customize_point":0})"));
+}
+static ObjP bySerial(const ArrP& list, long long serial) {
+  for (int i = 0; list && i < list->length(); ++i) {
+    auto p = list->getJSONObject(i);
+    if (p->optJSONObject("gameplayer")) p = p->getJSONObject("gameplayer");
+    if (p->getJSONObject("gameplayer_id")->optLong("serial", -1) == serial) return p;
+  }
+  throw std::runtime_error("player " + std::to_string(serial) + " missing from response");
+}
+static ObjP byId(const ArrP& list, long long id) {
+  for (int i = 0; list && i < list->length(); ++i) {
+    auto p = list->getJSONObject(i);
+    if (p->getJSONObject("gameplayer_id")->getLong("id") == id) return p;
+  }
+  throw std::runtime_error("card " + std::to_string(id) + " missing from response");
+}
+static int skillBit(const ObjP& p, int skill) { return p->getJSONArray("parameters")->getInt(kZiruSkillParameters[skill]); }
+static bool sameStyles(const ObjP& p, int first, int second, const std::vector<int>& ai) {
+  auto styles = p->optJSONArray("play_style"), values = p->getJSONArray("parameters");
+  if (!styles || styles->length() != 2 || styles->getInt(0) != first || styles->getInt(1) != second) return false;
+  if (values->getInt(61) != first || values->getInt(62) != second) return false;
+  for (int i = 0; i < 7; ++i) if (values->getInt(63 + i) != ai[i]) return false;
+  return true;
+}
+
+static void cardIdentityTests(const std::string& top) {
+  const std::string root = top + "/card-identity";
+  std::filesystem::create_directories(root + "/responses");
+  const long long A = 14 + (1LL << 40);   // record: Fox in the Box + Basic, one AI style, Phenomenal Finishing
+  const long long B = 14 + (2LL << 40);   // another version of player 14, starter entry only
+  const long long S = 33 + (1LL << 40);   // starter entry only
+  const long long K = 106788187843931LL;  // a card of player 44379 (De Bruyne), with a record
+  const long long D = 55 + (1LL << 40);   // saved only: no record, starter or rental entry
+  const long long R = 66 + (1LL << 40);   // MyLeague rental card only
+  const long long C = 77, G = 78, Z = 79; // AI cards: The Destroyer + Basic, Basic + Defensive GK, Basic + Basic
+  const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0}, all = {1, 1, 1, 1, 1, 1, 1};
+  const std::vector<int> aiA = {0, 0, 1, 0, 0, 0, 0}, aiS = {1, 0, 0, 0, 0, 0, 1}, aiK = {0, 1, 0, 0, 0, 0, 0};
+  auto recordA = card(A, 0, 12, 3, 0, aiA, {29}, 0, 0, 149);
+  auto recordK = card(K, 0, 9, 14, 0, aiK, {33}, 9, 0, 149);
+  auto records = newObj()->put(std::to_string(A), newObj()->put("gameplayer", recordA))
+      ->put(std::to_string(K), newObj()->put("gameplayer", recordK))
+      ->put(std::to_string(C), newObj()->put("gameplayer", card(C, 0, 2, 9, 0, none, {57}, 108, 0, 149)))
+      ->put(std::to_string(G), newObj()->put("gameplayer", card(G, 0, 0, 0, 17, none, {}, 108, 0, 149)))
+      ->put(std::to_string(Z), newObj()->put("gameplayer", card(Z, 0, 2, 0, 0, none, {}, 108, 0, 149)));
+  asset(root, "ZIRU_PLAYER_RECORDS.json", records);
+  // Starter entries carry their owners' learned skills inside the parameters, like Konami's login data.
+  auto starterS = card(S, 503, 7, 14, 0, aiS, {1, 6}, 50, 5, 145);
+  starterS->put("additional_skill_id", newArr()->put(6));
+  auto refs = newArr();
+  for (long long serial : {501, 502, 503, 504, 505}) {
+    long long id = serial == 501 ? A : serial == 502 ? B : serial == 503 ? S : serial == 504 ? K : D;
+    refs->put(newObj()->put("gameplayer_id", newObj()->put("id", id)->put("serial", serial)));
+  }
+  auto squadData = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
+  auto starter = newObj()->put("main_squad_id", 9)
+      ->put("gameplayer_list", newArr()->put(card(A, 501, 12, 3, 26, all, {29}, 157, 5, 145))
+          ->put(card(B, 502, 12, 0, 0, none, {}, 0, 0, 145))->put(starterS)
+          ->put(card(K, 504, 9, 14, 0, aiK, {33}, 173, 0, 145)))
+      ->put("coach_list", newArr()->put(coachRef(100, 1000)))
+      ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squadData)
+          ->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))));
+  asset(root, "CmdLogin.json", newObj()->put("entry_info", starter));
+  asset(root, "ZIRU_ML_RENTAL_LIST.json", newObj()->put("rental_player_list", newArr()->put(newObj()->put("point", 10)
+      ->put("player_info", card(R, 0, 5, 20, 28, aiS, {44}, 61, 0, 145)))));
+  asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline"})"));
+  asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
+  asset(root, "ZIRU_MATCH_PROFILES.json", newObj()->put("profiles", newArr()->put(obj(R"({"profile_id":1,"coordinates":[],"team_style":0,"base_team_id":108})")
+      ->put("player_ids", newArr()->put(C)->put(G)->put(Z)))));
+  asset(root, "ZIRU_GET_VSCOM_OPPONENT.json", obj(R"({"squad_data":{"squad_gameplan":{"formation":[],"match_plan_settings":{}}},"user_info":[{}]})"));
+  asset(root, "ZIRU_START_GAME.json", obj(R"({"squad_data_home":{"coach":{"coach_id":{"id":999,"serial":999}}},"commentary_info":{}})"));
+  asset(root, "CMD_USE_MYCLUB_ITEM.json", obj(R"({"result":"NOERR"})"));
+  asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
+  std::filesystem::create_directories(cfg.dataDir);
+  OfflineServer s(cfg);
+  // Rows as an older build saved them: an invented defensive style, every AI
+  // style, a guessed club and a skill borrowed from another version of the player.
+  s.ziruDb->savePlayer(501, A, card(A, 501, 12, 3, 26, all, {29, 0}, 157, 5, 145)->toString());
+  s.ziruDb->savePlayer(502, B, card(B, 502, 12, 3, 26, all, {29}, 157, 0, 145)->toString());
+  s.ziruDb->savePlayer(504, K, card(K, 504, 9, 14, 30, all, {33}, 173, 0, 145)->toString());
+  auto savedD = card(D, 505, 4, 0, 9, aiK, {2}, 33, 0, 145);
+  savedD->getJSONArray("parameters")->put(61, 5)->put(62, 5);
+  s.ziruDb->savePlayer(505, D, savedD->toString());
+
+  auto roster = call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+  auto loginA = bySerial(roster, 501), loginB = bySerial(roster, 502), loginS = bySerial(roster, 503);
+  auto loginK = bySerial(roster, 504), loginD = bySerial(roster, 505);
+  check(sameStyles(loginA, 3, 0, aiA), "login: the record's styles and AI styles replace invented ones");
+  check(skillBit(loginA, 29) == 1 && skillBit(loginA, 0) == 0, "login: the card's own skills only, no borrowed skill");
+  check(loginA->getInt("initial_base_team_id") == 0 && loginA->getInt("initial_base_national_team_id") == 0,
+      "login: club and nation come from the record, even when it has none");
+  check(sameStyles(loginB, 0, 0, none) && skillBit(loginB, 29) == 0 && loginB->getInt("initial_base_team_id") == 0,
+      "login: a card without a record uses its own starter entry, never another version of the player");
+  check(sameStyles(loginS, 14, 0, aiS) && loginS->getInt("initial_base_team_id") == 50 && loginS->getInt("initial_base_national_team_id") == 5,
+      "login: a starter-only card keeps its starter styles, AI styles, club and nation");
+  check(skillBit(loginS, 1) == 1 && skillBit(loginS, 6) == 1 && loginS->getJSONArray("additional_skill_id")->getInt(0) == 6,
+      "login: a starter card keeps its own skill and the skill its owner learned");
+  auto params = loginK->getJSONArray("parameters");
+  check(sameStyles(loginK, 14, 0, aiK) && loginK->getInt("initial_base_team_id") == 9, "login: card of player 44379 uses its record");
+  check(params->getInt(5) == 0 && params->getInt(9) == 0 && params->getInt(14) == 70,
+      "login: no position or rating change for player 44379");
+  check(sameStyles(loginD, 0, 9, aiK) && skillBit(loginD, 2) == 1 && loginD->getInt("initial_base_team_id") == 33,
+      "login: a card nobody knows keeps its saved Basic + defensive style; parameters 61/62 follow play_style");
+  check(sameStyles(Object::parse(*s.loadPlayer(501)), 3, 0, aiA) && Object::parse(*s.loadPlayer(501))->getInt("initial_base_team_id") == 0,
+      "save: the corrected card is written back");
+  check(sameStyles(Object::parse(*s.loadPlayer(502)), 0, 0, none), "save: the borrowed styles are removed from the save");
+  auto detail = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", A)->put("serial", 501)));
+  detail->put("play_style", newArr()->put(3)->put(0));
+  check(sameStyles(detail, 3, 0, aiA) && skillBit(detail, 0) == 0, "player detail: the record's styles, AI styles and skills");
+  auto entry = call(s, "CMD_GET_MYCLUB_ENTRY_INFO")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+  check(sameStyles(bySerial(entry, 501), 3, 0, aiA) && sameStyles(bySerial(entry, 503), 14, 0, aiS), "entry info: same cards as login");
+
+  auto opponent = call(s, "CMD_GET_VSCOM_OPPONENT");
+  auto ai = opponent->getJSONArray("player_list");
+  check(sameStyles(byId(ai, C), 9, 0, none), "opponent: The Destroyer + Basic stays as printed, no invented AI styles");
+  check(sameStyles(byId(ai, G), 0, 17, none), "opponent: Basic + Defensive GK is a real pair and is sent as is");
+  check(sameStyles(byId(ai, Z), 0, 0, none), "opponent: Basic + Basic is sent as is");
+  auto start = call(s, "CMD_START_GAME", newObj()->put("game_id", (long long)opponent->getLong("game_id")));
+  auto home = start->getJSONObject("squad_data_home")->getJSONArray("player_list");
+  auto away = start->getJSONObject("squad_data_away")->getJSONArray("player_list");
+  check(sameStyles(bySerial(home, 501), 3, 0, aiA) && sameStyles(bySerial(home, 502), 0, 0, none) &&
+        sameStyles(bySerial(home, 503), 14, 0, aiS) && sameStyles(bySerial(home, 505), 0, 9, aiK),
+      "match start: the user's players carry the same styles as their cards");
+  check(sameStyles(byId(away, C), 9, 0, none) && sameStyles(byId(away, G), 0, 17, none), "match start: AI cards as printed");
+
+  check(!s.z27Player(newObj()->put("id", 424242LL)->put("serial", 0LL)), "an unknown card is not built from another player");
+  auto rental = s.z27Player(newObj()->put("id", R)->put("serial", 0LL));
+  check(rental && sameStyles(rental, 20, 28, aiS) && skillBit(rental, 44) == 1 && rental->getInt("initial_base_team_id") == 61,
+      "a MyLeague rental card uses its own rental entry");
+}
+
 int main() {
   try {
     zs::setVerbose(false);
@@ -356,6 +505,7 @@ int main() {
       check(resp->getJSONArray("receive_result_list")->length() > 0, "receive_result_list returned");
       check(resp->getJSONArray("receive_result_list")->getJSONObject(0)->getString("is_success") == "YES", "reward claimed successfully");
     }
+    cardIdentityTests(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
     check(child >= 0, "spawn abrupt-exit save test");

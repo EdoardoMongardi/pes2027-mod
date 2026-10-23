@@ -1,66 +1,153 @@
 // ---- part 5 (OfflineServer.java ~2805-3322) ----
 
-inline void z27ApplyComPlayStyles(const ArrP& p, int pos, int st1) {
-  if (!p || p->length() < 70) return;
-  // CF (13) / SS (12)
-  if (pos == 13 || pos == 12) {
-    p->put(65, 1); // Speeding Bullet
-    p->put(66, 1); // Incisive Run
-    p->put(69, 1); // Long Ranger
-    if (st1 == 1 || st1 == 6 || st1 == 10 || st1 == 5) p->put(64, 1); // Mazing Run
-    if (st1 == 5 || st1 == 9) p->put(63, 1); // Trickster
+// ---- Card identity ----
+// What a card is printed with never changes: its two playing styles (0 = Basic),
+// its AI playing styles (parameters 63..69), its club and nation, and the skills
+// it has by itself. Only the exact card id counts: another version of the same
+// player is a different card and is never used. Sources, first match wins:
+//   1. the player records (ZIRU_PLAYER_RECORDS.json),
+//   2. the starter squad (CmdLogin.json),
+//   3. the MyLeague rental list (ZIRU_ML_RENTAL_LIST.json).
+// A missing file is skipped, never an error.
+struct ZiruCardIdentity {
+  int style[2] = {0, 0};
+  int ai[7] = {0, 0, 0, 0, 0, 0, 0};  // parameters 63..69
+  bool hasClub = false, hasNation = false;
+  int club = 0, nation = 0;
+  bool hasSkills = false;             // false when the source has no skill flags
+  std::set<int> skills;               // parameter indices 70..141 the card has by itself
+};
+
+std::unordered_map<int64_t, ObjP> ziruStarterCards, ziruRentalCards;
+bool ziruStarterCardsLoaded = false, ziruRentalCardsLoaded = false;
+
+// Exact-id index of the cards in one static list. Stays unloaded (and is retried
+// later) when the file cannot be read.
+void z27IndexCards(const char* name, const char* listKey, const char* inner, bool& loaded,
+                   std::unordered_map<int64_t, ObjP>& out) {
+  if (loaded) return;
+  try {
+    ObjP root = Object::parse(readAsset(name));
+    ObjP entry = root->optJSONObject("entry_info");
+    ArrP list = entry ? entry->optJSONArray(listKey) : root->optJSONArray(listKey);
+    for (int i = 0; list && i < list->length(); i++) {
+      ObjP card = list->optJSONObject(i);
+      if (card && inner) card = card->optJSONObject(inner);
+      ObjP gid = card ? card->optJSONObject("gameplayer_id") : nullptr;
+      int64_t id = gid ? gid->optLong("id", 0) : 0;
+      if (id > 0 && !out.count(id)) out[id] = card;  // the same card listed twice: the first entry counts
+    }
+    loaded = true;
+  } catch (const std::exception& e) {
+    zs::loge("OFFLINE_SERVER", std::string("[Z27_CARD_INDEX_ERR] ") + name + " " + e.what());
   }
-  // Wingers: LWG (10) / RWG (11)
-  else if (pos == 10 || pos == 11) {
-    p->put(63, 1); // Trickster
-    p->put(64, 1); // Mazing Run
-    p->put(65, 1); // Speeding Bullet
-    p->put(66, 1); // Incisive Run
-    p->put(68, 1); // Early Cross
-    if (st1 == 6 || st1 == 7) p->put(69, 1); // Long Ranger
+}
+
+// The card as its source prints it, or null when no source knows this exact id.
+ObjP z27CardSource(int64_t id) {
+  if (id <= 0) return nullptr;
+  ObjP recs = ziruPlayerRecords();
+  ObjP rec = recs ? recs->optJSONObject(str(id)) : nullptr;
+  ObjP card = rec ? rec->optJSONObject("gameplayer") : nullptr;
+  if (card) return card;
+  z27IndexCards("responses/CmdLogin.json", "gameplayer_list", nullptr, ziruStarterCardsLoaded, ziruStarterCards);
+  auto it = ziruStarterCards.find(id);
+  if (it != ziruStarterCards.end()) return it->second;
+  z27IndexCards("responses/ZIRU_ML_RENTAL_LIST.json", "rental_player_list", "player_info", ziruRentalCardsLoaded, ziruRentalCards);
+  it = ziruRentalCards.find(id);
+  return it != ziruRentalCards.end() ? it->second : nullptr;
+}
+
+bool z27CardIdentity(int64_t id, ZiruCardIdentity& out) {
+  ObjP card = z27CardSource(id);
+  if (!card) return false;
+  ArrP styles = card->optJSONArray("play_style");
+  ArrP values = card->optJSONArray("parameters");
+  if (styles) {
+    out.style[0] = styles->optInt(0, 0);
+    out.style[1] = styles->optInt(1, 0);
+  } else if (values && values->length() > 62) {
+    out.style[0] = values->optInt(61, 0);
+    out.style[1] = values->optInt(62, 0);
   }
-  // AMF (9)
-  else if (pos == 9) {
-    p->put(63, 1); // Trickster
-    p->put(64, 1); // Mazing Run
-    p->put(67, 1); // Long Ball Expert
-    p->put(69, 1); // Long Ranger
-    if (st1 == 10) p->put(66, 1); // Hole Player -> Incisive Run
+  if (values && values->length() >= 70) {
+    for (int i = 0; i < 7; ++i) out.ai[i] = values->optInt(63 + i, 0);
   }
-  // LMF (7) / RMF (8)
-  else if (pos == 7 || pos == 8) {
-    p->put(64, 1); // Mazing Run
-    p->put(65, 1); // Speeding Bullet
-    p->put(67, 1); // Long Ball Expert
-    p->put(68, 1); // Early Cross
-    if (st1 == 8) p->put(68, 1); // Cross Specialist
-  }
-  // DMF (5) / CMF (6)
-  else if (pos == 5 || pos == 6) {
-    p->put(67, 1); // Long Ball Expert
-    p->put(69, 1); // Long Ranger
-    if (st1 == 11) { // Box-to-Box
-      p->put(65, 1); // Speeding Bullet
-      p->put(66, 1); // Incisive Run
-    } else if (st1 == 14) { // Orchestrator
-      p->put(63, 1); // Trickster
+  out.hasClub = card->has("initial_base_team_id");
+  out.club = card->optInt("initial_base_team_id", 0);
+  out.hasNation = card->has("initial_base_national_team_id");
+  out.nation = card->optInt("initial_base_national_team_id", 0);
+  if (values && values->length() >= 142) {
+    out.hasSkills = true;
+    for (int i = 70; i < 142; ++i) if (values->optInt(i, 0) == 1) out.skills.insert(i);
+    // A starter entry already carries the skills its owner learned; those are not the card's.
+    ArrP learned = card->optJSONArray("additional_skill_id");
+    for (int i = 0; learned && i < learned->length(); ++i) {
+      int skill = learned->optInt(i, -1);
+      if (isZiruSkillId(skill)) out.skills.erase(kZiruSkillParameters[skill]);
     }
   }
-  // LB (3) / RB (4)
-  else if (pos == 3 || pos == 4) {
-    p->put(65, 1); // Speeding Bullet
-    p->put(68, 1); // Early Cross
-    if (st1 == 17 || st1 == 18) { // Offensive Fullback / Fullback Finisher
-      p->put(66, 1); // Incisive Run
-      p->put(64, 1); // Mazing Run
-    }
+  return true;
+}
+
+// Parameter indices of the skills a player has learned (additional_skill_id).
+std::set<int> z27LearnedSkillParams(const ObjP& cur) {
+  std::set<int> out;
+  ArrP extra = cur ? cur->optJSONArray("additional_skill_id") : nullptr;
+  for (int i = 0; extra && i < extra->length(); ++i) {
+    int skill = extra->optInt(i, -1);
+    if (isZiruSkillId(skill) && isZiruSkillParameter(kZiruSkillParameters[skill])) out.insert(kZiruSkillParameters[skill]);
   }
-  // CB (2)
-  else if (pos == 2) {
-    if (st1 == 15 || st1 == 16) { // Build Up / Extra Frontman
-      p->put(67, 1); // Long Ball Expert
-    }
+  return out;
+}
+
+// parameters[61]/[62] are the two playing styles. Keep them equal to play_style;
+// an object without play_style gets it from those parameters.
+void z27MirrorPlayStyle(const ObjP& cur) {
+  if (!cur) return;
+  ArrP styles = cur->optJSONArray("play_style");
+  ArrP values = cur->optJSONArray("parameters");
+  int first, second;
+  if (styles) {
+    first = styles->optInt(0, 0);
+    second = styles->optInt(1, 0);
+  } else if (values && values->length() > 62) {
+    first = values->optInt(61, 0);
+    second = values->optInt(62, 0);
+  } else {
+    return;
   }
+  if (!styles || styles->length() != 2) cur->put("play_style", newArr()->put(first)->put(second));
+  for (const char* key : {"parameters", "original_parameters"}) {
+    ArrP arr = cur->optJSONArray(key);
+    if (arr && arr->length() > 62) arr->put(61, first)->put(62, second);
+  }
+}
+
+// Puts the card's identity on a player object. Learned skills stay on top of the
+// card's own skills; any other skill flag is cleared. Returns false, and only
+// mirrors the playing styles, when no source knows this exact card.
+bool z27ApplyCardIdentity(const ObjP& cur) {
+  ObjP gid = cur ? cur->optJSONObject("gameplayer_id") : nullptr;
+  ZiruCardIdentity card;
+  if (!gid || !z27CardIdentity(gid->optLong("id", 0), card)) {
+    z27MirrorPlayStyle(cur);
+    return false;
+  }
+  cur->put("play_style", newArr()->put(card.style[0])->put(card.style[1]));
+  if (card.hasClub) cur->put("initial_base_team_id", card.club);
+  if (card.hasNation) cur->put("initial_base_national_team_id", card.nation);
+  std::set<int> learned = z27LearnedSkillParams(cur);
+  for (const char* key : {"parameters", "original_parameters"}) {
+    ArrP values = cur->optJSONArray(key);
+    if (!values || values->length() < 70) continue;
+    bool owned = std::string(key) == "parameters";
+    values->put(61, card.style[0])->put(62, card.style[1]);
+    for (int i = 0; i < 7; ++i) values->put(63 + i, card.ai[i]);
+    if (!card.hasSkills || values->length() < 142) continue;
+    for (int i = 70; i < 142; ++i) values->put(i, (card.skills.count(i) || (owned && learned.count(i))) ? 1 : 0);
+  }
+  return true;
 }
 
 void z27ApplyAppearanceAndClub(const ObjP& cur) {
@@ -71,34 +158,9 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
   int32_t base_id = (int32_t)(pid & 0xFFFFFF);
   ArrP params = cur->optJSONArray("parameters");
 
-  // 1. Fix club kit if initial_base_team_id == 0
-  if (cur->optInt("initial_base_team_id", 0) == 0) {
-    auto it = kKnownClubTeams.find(base_id);
-    if (it != kKnownClubTeams.end()) {
-      cur->put("initial_base_team_id", it->second);
-    }
-  }
-
-  // Fix position proficiencies and minimum rating for Calhanoglu
-  if (base_id == 44379) {
-    if (params && params->length() >= 70) {
-      params->put(5, 2); // DMF full
-      params->put(6, 2); // CMF full
-      params->put(7, 2); // LMF full
-      params->put(8, 2); // RMF full
-      params->put(9, 2); // AMF full
-      if (params->optInt(14, 0) < 80) params->put(14, 84);
-    }
-    ArrP origParams = cur->optJSONArray("original_parameters");
-    if (origParams && origParams->length() >= 70) {
-      origParams->put(5, 2);
-      origParams->put(6, 2);
-      origParams->put(7, 2);
-      origParams->put(8, 2);
-      origParams->put(9, 2);
-      if (origParams->optInt(14, 0) < 80) origParams->put(14, 84);
-    }
-  }
+  // 1. Playing styles, AI playing styles, club, nation and the card's own skills
+  //    come from the card itself (exact id), never from a guess.
+  z27ApplyCardIdentity(cur);
 
   // 2. Fix skin tone parameter 49 if 0 (chalk-white albino bug)
   auto restoreAppearance = [&](const ArrP& values) {
@@ -130,30 +192,10 @@ void z27ApplyAppearanceAndClub(const ObjP& cur) {
     if (base_id != 133543 && base_id != 133580 && base_id != 40352 && params->optInt(49, 0) <= 0) params->put(49, 3);
   }
 
-  // 3. Synchronize parameters[61] (Offensive PlayStyle), parameters[62] (Defensive PlayStyle), and COM styles 63..69
-  ArrP ps = cur->optJSONArray("play_style");
-  if (ps && ps->length() > 0) {
-    int st1 = ps->optInt(0, 0);
-    int pos = params ? params->optInt(0, 0) : 0;
-    int st2 = ps->length() > 1 ? ps->optInt(1, 0) : 0;
-    if (st2 <= 0) {
-      st2 = z27GetDefensiveStyle(pos, st1);
-      if (ps->length() > 1) ps->put(1, st2);
-      else ps->put(st2);
-    }
-    if (params && params->length() >= 70) {
-      if (st1 > 0) params->put(61, st1);
-      params->put(62, st2);
-      z27ApplyComPlayStyles(params, pos, st1);
-    }
-    ArrP origParams = cur->optJSONArray("original_parameters");
-    restoreAppearance(origParams);
-    if (origParams && origParams->length() >= 70) {
-      if (base_id != 133543 && origParams->optInt(49, 0) <= 0) origParams->put(49, 3);
-      if (st1 > 0) origParams->put(61, st1);
-      origParams->put(62, st2);
-      z27ApplyComPlayStyles(origParams, origParams->optInt(0, 0), st1);
-    }
+  ArrP origParams = cur->optJSONArray("original_parameters");
+  restoreAppearance(origParams);
+  if (origParams && origParams->length() >= 70) {
+    if (base_id != 133543 && origParams->optInt(49, 0) <= 0) origParams->put(49, 3);
   }
 }
 
@@ -245,12 +287,10 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           ObjP g2 = cur->optJSONObject("gameplayer_id");
           if (!g2 || g2->optLong("id") != id) cur = jo;
         }
+        // Only this exact card's record counts; another version of the player is another card.
         ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
-        if (!w) {
-          w = getZiruPlayerWrapperByBaseId((int32_t)(id & 0xFFFFFF));
-        }
-        ObjP base;
-        if (w && (base = w->optJSONObject("gameplayer"))) {
+        ObjP base = w ? w->optJSONObject("gameplayer") : nullptr;
+        if (base) {
           ArrP ib = base->optJSONArray("initial_booster_id_list");
           ArrP curIb = cur->optJSONArray("initial_booster_id_list");
           if (!curIb) {
@@ -264,18 +304,12 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
               if (bidVal > 0 && curIb->optInt(b, 0) == 0) curIb->put(b, bidVal);
             }
           }
-          ArrP ps = base->optJSONArray("play_style");
-          if (ps && ps->length() > 0 && ps->optInt(0, 0) > 0) cur->put("play_style", ps);
+          // Playing styles, AI styles and the card's own skills are set by
+          // z27ApplyAppearanceAndClub below, from this same record.
           ArrP baseParams = base->optJSONArray("parameters");
           ArrP curParams = cur->optJSONArray("parameters");
           if (baseParams && curParams) {
             while (curParams->length() < 145) curParams->put(0);
-            for (int idx = 70; idx <= 141; ++idx) {
-              int baseSkill = baseParams->optInt(idx, 0);
-              if (baseSkill != 0) {
-                curParams->put(idx, baseSkill);
-              }
-            }
             for (int b = 0; b < 3; ++b) {
               int bVal = curIb->optInt(b, 0);
               if (bVal > 0 && curParams->optInt(142 + b, 0) == 0) curParams->put(142 + b, bVal);
@@ -291,19 +325,16 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           ArrP origParams = cur->optJSONArray("original_parameters");
           if (baseParams && origParams) {
             while (origParams->length() < 145) origParams->put(0);
-            for (int idx = 70; idx <= 141; ++idx) {
-              int baseSkill = baseParams->optInt(idx, 0);
-              if (baseSkill != 0) {
-                origParams->put(idx, baseSkill);
-              }
-            }
             for (int b = 0; b < 3; ++b) {
               int bVal = curIb->optInt(b, 0);
               if (bVal > 0 && origParams->optInt(142 + b, 0) == 0) origParams->put(142 + b, bVal);
             }
           }
-          ObjP bl = base->optJSONObject("level_info");
-          int lim = bl ? bl->optInt("level_limit", 1) : 1;
+        }
+        // Level limit: from the card's record, else the card's own level_info.
+        ObjP bl = base ? base->optJSONObject("level_info") : cur->optJSONObject("level_info");
+        if (bl) {
+          int lim = bl->optInt("level_limit", 1);
           if (lim == 1 && (((int32_t)id) & 16777215) == 134665) {
             lim = 33;
             logRequest("ZIRU_V16_LEVEL", "[ZIRU_V16_ADRIANO_FALLBACK] base_id=134665 level_limit=33");
@@ -328,10 +359,6 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
             }
           }
           li->put("customize_point", cp);
-        }
-        ArrP curPs = cur->optJSONArray("play_style");
-        if (!curPs || curPs->length() == 0 || curPs->optInt(0, 0) <= 0) {
-          cur->put("play_style", z27ResolvePlayStyle(id, cur));
         }
         std::vector<int32_t> al;
         std::string s = sp("almanac_state").getString("ziru_skills_" + str(serial), "");

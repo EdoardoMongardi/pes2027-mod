@@ -541,7 +541,6 @@ void z27Restore(const ObjP& jo) {
           if (svPid == pPid || (svPid & 0xFFFFFF) == bid) {
             z27ApplyAppearanceAndClub(sv);
             ObjP w = getZiruPlayerWrapper(Value((long long)sv->getJSONObject("gameplayer_id")->getLong("id")), false);
-            if (!w) w = getZiruPlayerWrapperByBaseId(bid);
             ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
             ArrP svParams = sv->optJSONArray("parameters");
             if (baseParams && svParams && baseParams->length() >= 142) {
@@ -623,16 +622,14 @@ void z27Restore(const ObjP& jo) {
               }
             }
 
-            ArrP svPs = sv->optJSONArray("play_style");
-            if (!svPs || svPs->length() == 0 || svPs->optInt(0, 0) <= 0) {
-              sv->put("play_style", z27ResolvePlayStyle(sv->getJSONObject("gameplayer_id")->getLong("id"), p));
-            }
             z27ApplyAppearanceAndClub(sv);
             ziruDb->savePlayer(serial, sv->getJSONObject("gameplayer_id")->getLong("id"), sv->toString());
             gl->put(i, sv);
+          } else {
+            // This serial now holds another card; the listed entry is still sent, with its own identity.
+            z27ApplyAppearanceAndClub(p);
           }
         } else {
-          z27ApplyAppearanceAndClub(p);
           zs::Prefs& statePrefs = sp("almanac_state");
           std::string prefKey = "ziru_skills_" + str(serial);
           std::string prefSkills = statePrefs.getString(prefKey, "");
@@ -668,10 +665,7 @@ void z27Restore(const ObjP& jo) {
               }
             }
           }
-          ArrP pPs = p->optJSONArray("play_style");
-          if (!pPs || pPs->length() == 0 || pPs->optInt(0, 0) <= 0) {
-            p->put("play_style", z27ResolvePlayStyle(p->getJSONObject("gameplayer_id")->getLong("id"), p));
-          }
+          z27ApplyAppearanceAndClub(p);
           ziruDb->savePlayer(serial, p->getJSONObject("gameplayer_id")->getLong("id"), p->toString());
         }
       }
@@ -782,20 +776,6 @@ ObjP z27Opponent(const ObjP& active) {
     gp->put("gameplayer_id", gid)->put("uniform_number", i + 1);
     z27ApplyAppearanceAndClub(gp);
     applyZiruWeakFootFix(gp);
-    ArrP ps = gp->optJSONArray("play_style");
-    if (!ps || ps->length() == 0 || ps->optInt(0, 0) <= 0) {
-      ps = z27ResolvePlayStyle(ids->getLong(i), gp);
-      gp->put("play_style", ps);
-    }
-    ArrP params = gp->optJSONArray("parameters");
-    if (params && params->length() >= 70 && ps && ps->length() > 0) {
-      int st1 = ps->optInt(0, 0);
-      int pos = params->optInt(0, 0);
-      int st2 = ps->length() > 1 ? ps->optInt(1, 0) : z27GetDefensiveStyle(pos, st1);
-      params->put(61, st1);
-      params->put(62, st2);
-      z27ApplyComPlayStyles(params, pos, st1);
-    }
     players->put(gp);
     refs->put(newObj()->put("gameplayer_id", z27Copy(gid))->put("uniform_number", i + 1));
   }
@@ -897,78 +877,63 @@ void z27SaveSkills(int64_t serial, const std::vector<int32_t>& list) {
   ziruDb->savePlayer(serial, p->getJSONObject("gameplayer_id")->getLong("id"), p->toString());
 }
 
+// A MyLeague rental card's own catalogue entry (rental cards are not owned).
+ObjP z27RentalCard(int64_t id) {
+  ObjP list = loadZiruJsonAssetObject("responses/ZIRU_ML_RENTAL_LIST.json");
+  ArrP rows = list ? list->optJSONArray("rental_player_list") : nullptr;
+  for (int i = 0; rows && i < rows->length(); i++) {
+    ObjP row = rows->optJSONObject(i);
+    ObjP info = row ? row->optJSONObject("player_info") : nullptr;
+    ObjP gid = info ? info->optJSONObject("gameplayer_id") : nullptr;
+    if (gid && gid->optLong("id", 0) == id) return z27Copy(info);
+  }
+  return nullptr;
+}
+
+// The player as the match uses it. Looked up by exact card id only:
+// the saved player, the starter entry for this serial, the card's record, a
+// MyLeague rental card, the starter entry for this card. A card none of these
+// know is logged and null is returned; it is never built from another player.
 ObjP z27Player(const ObjP& gid) {
   int64_t serial = gid->optLong("serial", 0);
   JStr lp = loadPlayer(serial);
   ObjP p = lp ? Object::parse(*lp) : nullptr;
   if (p && p->optJSONObject("gameplayer")) p = p->getJSONObject("gameplayer");
   if (!p || p->getJSONObject("gameplayer_id")->getLong("id") != gid->getLong("id")) {
+    p = nullptr;
+    int64_t id = gid->getLong("id");
     ArrP list = z27Entry()->getJSONArray("gameplayer_list");
-    int i = 0;
-    while (true) {
-      if (i >= list->length()) {
-        ObjP w = getZiruPlayerWrapper(Value((long long)gid->getLong("id")), false);
-        if (!w) w = getZiruPlayerWrapperByBaseId((int32_t)(gid->getLong("id") & 0xFFFFFF));
-        if (w && w->optJSONObject("gameplayer")) {
-          p = z27Copy(w->getJSONObject("gameplayer"));
-          p->put("gameplayer_id", z27Copy(gid));
-          break;
-        }
-        for (int j = 0; j < list->length(); ++j) {
-          ObjP cand = list->getJSONObject(j);
-          if (cand && cand->optJSONObject("gameplayer_id") &&
-              cand->getJSONObject("gameplayer_id")->getLong("id") == gid->getLong("id")) {
-            p = z27Copy(cand);
-            break;
-          }
-        }
-        if (!p && list->length() > 0) p = z27Copy(list->getJSONObject(0));
-        if (p) p->put("gameplayer_id", z27Copy(gid));
-        break;
-      }
-      p = list->getJSONObject(i);
-      if (p->getJSONObject("gameplayer_id")->optLong("serial", -1) == serial && p->getJSONObject("gameplayer_id")->getLong("id") == gid->getLong("id")) break;
-      i++;
+    for (int i = 0; !p && i < list->length(); i++) {
+      ObjP entry = list->optJSONObject(i);
+      ObjP eid = entry ? entry->optJSONObject("gameplayer_id") : nullptr;
+      if (eid && eid->optLong("serial", -1) == serial && eid->optLong("id", 0) == id) p = entry;
     }
+    if (!p) {
+      ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
+      if (w && w->optJSONObject("gameplayer")) p = z27Copy(w->getJSONObject("gameplayer"));
+    }
+    if (!p) p = z27RentalCard(id);
+    for (int i = 0; !p && i < list->length(); i++) {
+      ObjP entry = list->optJSONObject(i);
+      ObjP eid = entry ? entry->optJSONObject("gameplayer_id") : nullptr;
+      if (eid && eid->optLong("id", 0) == id) p = z27Copy(entry);
+    }
+    if (!p) {
+      logRequest("Z27_PLAYER_UNKNOWN", "[Z27_PLAYER_UNKNOWN] no card data for id=" + str(id) + " serial=" + str(serial));
+      return nullptr;
+    }
+    p->put("gameplayer_id", z27Copy(gid));
   }
   int64_t pid = gid->getLong("id");
-  int team = p ? p->optInt("initial_base_team_id", 0) : 0;
+  int team = p->optInt("initial_base_team_id", 0);
   int64_t upPid = z27UpgradeIosCardPid(pid, team);
   if (upPid != pid) {
     pid = upPid;
     gid->put("id", pid);
-    if (p && p->optJSONObject("gameplayer_id")) p->getJSONObject("gameplayer_id")->put("id", pid);
-  }
-  int32_t bid = (int32_t)(pid & 0xFFFFFF);
-  ArrP curPs = p->optJSONArray("play_style");
-  if (!curPs || curPs->length() == 0 || curPs->optInt(0, 0) <= 0) {
-    p->put("play_style", z27ResolvePlayStyle(pid, p));
-    if (serial > 0) ziruDb->savePlayer(serial, pid, p->toString());
-  }
-  z27ApplyAppearanceAndClub(p);
-  applyZiruRonaldoMaxProgression(p);
-  applyZiruWeakFootFix(p);
-  p = ziruSyncActiveBooster(p);
-
-  // Always restore base skills from template catalog and original_parameters
-  ObjP w = getZiruPlayerWrapper(Value((long long)pid), false);
-  if (!w) w = getZiruPlayerWrapperByBaseId(bid);
-  ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
-  ArrP origParams = p->optJSONArray("original_parameters");
-  ArrP params = p->optJSONArray("parameters");
-  if (params && params->length() >= 142) {
-    if (baseParams && baseParams->length() >= 142) {
-      for (int idx = 70; idx <= 141; idx++) {
-        if (baseParams->optInt(idx, 0) == 1) params->put(idx, 1);
-      }
-    }
-    if (origParams && origParams->length() >= 142) {
-      for (int idx = 70; idx <= 141; idx++) {
-        if (origParams->optInt(idx, 0) == 1) params->put(idx, 1);
-      }
-    }
+    if (p->optJSONObject("gameplayer_id")) p->getJSONObject("gameplayer_id")->put("id", pid);
   }
 
+  // Learned skills first, so the card identity below keeps them on top of the card's own skills.
   std::vector<int32_t> al;
   if (serial > 0) {
     std::string s = sp("almanac_state").getString("ziru_skills_" + str(serial), "");
@@ -986,7 +951,6 @@ ObjP z27Player(const ObjP& gid) {
     if (addSkills) {
       for (int i = 0; i < addSkills->length(); i++) {
         int v = addSkills->optInt(i, -1);
-
         if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
       }
     }
@@ -994,6 +958,7 @@ ObjP z27Player(const ObjP& gid) {
   ArrP ja = newArr();
   for (int v : al) ja->put(v);
   p->put("additional_skill_id", ja);
+  ArrP params = p->optJSONArray("parameters");
   if (params && params->length() >= 70) {
     for (int v : al) {
       if (isZiruSkillId(v)) {
@@ -1002,7 +967,27 @@ ObjP z27Player(const ObjP& gid) {
       }
     }
   }
-  return p;
+  // Same normalisation as the login roster, so the match uses what the card shows.
+  z27ApplyAppearanceAndClub(p);
+  applyZiruRonaldoMaxProgression(p);
+  applyZiruWeakFootFix(p);
+  return ziruSyncActiveBooster(p);
+}
+
+// The captured start-game template's entry for this card, under the requested
+// gameplayer_id. Used only when z27Player knows nothing about the card.
+ObjP z27TemplateSquadPlayer(const ObjP& squad, const ObjP& gid) {
+  ArrP list = squad ? squad->optJSONArray("player_list") : nullptr;
+  for (int i = 0; list && i < list->length(); i++) {
+    ObjP entry = list->optJSONObject(i);
+    ObjP eid = entry ? entry->optJSONObject("gameplayer_id") : nullptr;
+    if (eid && eid->optLong("id", 0) == gid->optLong("id", -1) && entry->optJSONArray("parameters")) {
+      ObjP copy = z27Copy(entry);
+      copy->put("gameplayer_id", z27Copy(gid));
+      return copy;
+    }
+  }
+  return nullptr;
 }
 
 ObjP z27Home(const ObjP& active) {
@@ -1013,6 +998,8 @@ ObjP z27Home(const ObjP& active) {
   for (int i = 0; i < pl->length(); i++) {
     ObjP gid = pl->getJSONObject(i)->getJSONObject("gameplayer_id");
     ObjP p = z27Player(gid);
+    if (!p) p = z27TemplateSquadPlayer(home, gid);
+    if (!p) continue;  // logged by z27Player; the match keeps this player's own card values
     int squadNum = pl->getJSONObject(i)->optInt("uniform_number", 0);
     if (squadNum <= 0) squadNum = p->optInt("uniform_number", i + 1);
     ObjP pObj = newObj()->put("gameplayer_id", z27Copy(gid))
@@ -1033,11 +1020,7 @@ ObjP z27Home(const ObjP& active) {
     }
     if (sk) pObj->put("additional_skill_id", Array::parse(sk->toString()));
     ArrP ps = p->optJSONArray("play_style");
-    if (!ps || ps->length() == 0 || ps->optInt(0, 0) <= 0) {
-      ps = z27ResolvePlayStyle(gid->getLong("id"), p);
-      p->put("play_style", ps);
-    }
-    pObj->put("play_style", ps);
+    if (ps) pObj->put("play_style", Array::parse(ps->toString()));
     ArrP params = pObj->getJSONArray("parameters");
     if (sk && params && params->length() >= 142) {
       for (int sIdx = 0; sIdx < sk->length(); ++sIdx) {
@@ -1063,14 +1046,6 @@ ObjP z27Home(const ObjP& active) {
         }
       }
       pObj->put("skillcard_id_list", baseSkills);
-    }
-    if (params && params->length() >= 70 && ps && ps->length() > 0) {
-      int st1 = ps->optInt(0, 0);
-      int pos = params->optInt(0, 0);
-      int st2 = ps->length() > 1 ? ps->optInt(1, 0) : z27GetDefensiveStyle(pos, st1);
-      params->put(61, st1);
-      params->put(62, st2);
-      z27ApplyComPlayStyles(params, pos, st1);
     }
     out->put(pObj);
   }

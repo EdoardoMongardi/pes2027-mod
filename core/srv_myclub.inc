@@ -549,16 +549,6 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
 
       ArrP params = p->optJSONArray("parameters");
       if (params && params->length() >= 70) {
-        ObjP w = getZiruPlayerWrapper(Value((long long)pid), false);
-        if (!w) w = getZiruPlayerWrapperByBaseId((int32_t)(pid & 0xFFFFFF));
-        ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
-        if (baseParams && baseParams->length() >= 70) {
-          for (int idx = 70; idx <= 141; idx++) {
-            if (baseParams->optInt(idx, 0) == 1) {
-              params->put(idx, 1);
-            }
-          }
-        }
         for (int v : al) {
           if (isZiruSkillId(v)) {
             int pIdx = kZiruSkillParameters[v];
@@ -568,6 +558,8 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
           }
         }
       }
+      // The card's own skills plus the learned ones (exact card only).
+      z27ApplyCardIdentity(p);
       if (!al.empty()) {
         prefs.edit().putString("ziru_skills_" + str(serial), joinInts(al)).commit();
       }
@@ -678,7 +670,6 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     int64_t pid = owned->optJSONObject("gameplayer_id") ? owned->getJSONObject("gameplayer_id")->optLong("id", 0) : 0;
     int32_t bid = (int32_t)(pid & 0xFFFFFF);
     ObjP w = getZiruPlayerWrapper(Value((long long)pid), false);
-    if (!w) w = getZiruPlayerWrapperByBaseId(bid);
     ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
     ArrP origParams = owned->optJSONArray("original_parameters");
     ArrP params = owned->optJSONArray("parameters");

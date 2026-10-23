@@ -196,6 +196,8 @@ Response handleZiruMyLeagueStartGameV71() {
             ObjP gid = item->optJSONObject("gameplayer_id");
             if (gid) {
               ObjP p = z27Player(gid);
+              if (!p) p = z27TemplateSquadPlayer(templateAiSquad, gid);
+              if (!p) continue;  // logged by z27Player; the match keeps this player's own card values
               ObjP pObj = newObj()->put("gameplayer_id", z27Copy(gid))
                                  ->put("parameters", Array::parse(p->getJSONArray("parameters")->toString()))
                                  ->put("averaged_overall", 0);
@@ -203,19 +205,7 @@ Response handleZiruMyLeagueStartGameV71() {
               ArrP ib = p->optJSONArray("initial_booster_id_list");
               if (ib) pObj->put("initial_booster_id_list", Array::parse(ib->toString()));
               ArrP ps = p->optJSONArray("play_style");
-              if (!ps || ps->length() == 0 || ps->optInt(0, 0) <= 0) {
-                ps = z27ResolvePlayStyle(gid->optLong("id", 0), p);
-              }
-              pObj->put("play_style", ps);
-              ArrP params = pObj->getJSONArray("parameters");
-              if (params && params->length() >= 70 && ps && ps->length() > 0) {
-                int st1 = ps->optInt(0, 0);
-                int pos = params->optInt(0, 0);
-                int st2 = ps->length() > 1 ? ps->optInt(1, 0) : z27GetDefensiveStyle(pos, st1);
-                params->put(61, st1);
-                params->put(62, st2);
-                z27ApplyComPlayStyles(params, pos, st1);
-              }
+              if (ps) pObj->put("play_style", Array::parse(ps->toString()));
               out->put(pObj);
             }
           }

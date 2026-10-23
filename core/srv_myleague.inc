@@ -15,7 +15,6 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
       ArrP params;
       if (j > 0) {
         w = getZiruPlayerWrapper(Value((long long)j), false);
-        if (!w) w = getZiruPlayerWrapperByBaseId((int32_t)(j & 0xFFFFFF));
       }
       if (w && (gp = w->optJSONObject("gameplayer"))) {
         params = gp->optJSONArray("parameters");

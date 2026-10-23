@@ -91,7 +91,6 @@ struct Config {
 };
 
 #include "appearance_presets_gen.inc"
-#include "known_teams_gen.inc"
 
 class OfflineServer {
  public:
