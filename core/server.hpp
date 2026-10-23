@@ -146,7 +146,7 @@ class OfflineServer {
     Value wire = value;
     if (value.t == Value::OBJ) wire = Value(Object::parse(value.o->toString()));
     else if (value.t == Value::ARR) wire = Value(Array::parse(value.a->toString()));
-    z27CheckOutgoingCards(wire);
+    z27CheckOutgoingCards(wire, 0);
     if (cfg.iosPlayerLayout) adaptIosPlayerData(wire, true);
     return zc::encodeResponse(wire);
   }
