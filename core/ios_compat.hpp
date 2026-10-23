@@ -12,6 +12,18 @@ inline constexpr int kZiruSkillParameters[74] = {
   143,142
 };
 inline bool isZiruSkillId(int id) { return id >= 0 && id < 74; }
+// The last two skills have no parameter slot in Android's save layout:
+// 142..144 are booster IDs there. Keep these skills in the explicit ID lists.
+inline bool isZiruSkillParameter(int index) { return index >= 70 && index < 142; }
+inline zj::ArrP ziruSkillList(const zj::ArrP& params) {
+  auto result = zj::Array::make();
+  if (!params) return result;
+  for (int id = 0; id < 72; ++id) {
+    int index = kZiruSkillParameters[id];
+    if (index < params->length() && params->optInt(index, 0) == 1) result->put(id);
+  }
+  return result;
+}
 inline int iosSkillId(int id, bool outgoing) {
   if (outgoing) {
     if (id == 72) return 25;
@@ -35,6 +47,13 @@ inline bool adaptIosPlayerData(zj::Value& value, bool outgoing) {
   if (value.t == zj::Value::ARR) {
     for (auto& item : value.a->v) changed |= adaptIosPlayerData(item, outgoing);
   } else if (value.t == zj::Value::OBJ) {
+    // Player-detail menus also read the owned-player object from entry_info.
+    // Emit the explicit skill list there, not only in START_GAME responses.
+    auto playerParams = value.o->optJSONArray("parameters");
+    if (outgoing && value.o->optJSONObject("gameplayer_id") && playerParams && playerParams->length() >= 142) {
+      value.o->put("skillcard_id_list", ziruSkillList(playerParams));
+      changed = true;
+    }
     // Verified against dt870 Coach.bin (176-byte records) and native
     // CoachBase::SetWorkFromPesdb at 0x104b93814: ability_id[3] is the
     // 10-bit field at bit 10 of the qword at record+16. Two injected coach
@@ -73,8 +92,6 @@ inline bool adaptIosPlayerData(zj::Value& value, bool outgoing) {
                 if (sv == 72 || sv == 25) b143 = 1;
               }
             }
-            if (!b142 && n > 142 && src->optInt(142, 0) == 1 && n != 145) b142 = 1;
-            if (!b143 && n > 143 && src->optInt(143, 0) == 1 && n != 145) b143 = 1;
             dst->put(b142)->put(b143);
           }
           for (int i = 0; i < 3; ++i) dst->put(src->get((outgoing ? 142 : 144) + i));

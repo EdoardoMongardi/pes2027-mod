@@ -348,7 +348,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           if (addSkills) {
             for (int i = 0; i < addSkills->length(); i++) {
               int v = addSkills->optInt(i, -1);
-              if (v == 25 || v == 68) v = iosSkillId(v, false);
+
               if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
             }
           }
@@ -361,7 +361,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
           for (int v : al) {
             if (isZiruSkillId(v)) {
               int pIdx = kZiruSkillParameters[v];
-              if (pIdx >= 0 && pIdx < params->length()) params->put(pIdx, 1);
+              if (isZiruSkillParameter(pIdx) && pIdx < params->length()) params->put(pIdx, 1);
             }
           }
         }

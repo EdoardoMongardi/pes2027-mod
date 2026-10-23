@@ -71,6 +71,23 @@ int main() {
     check(skillWire.o->getJSONObject("skill_training_result")->getInt("additional_skill_id") == 69, "training result maps skill scalar");
     adaptIosPlayerData(skillWire, false);
     for (int i = 0; i < 72; ++i) check(skillWire.o->getJSONArray("additional_skill_id")->getInt(i) == i, "all skill IDs roundtrip to stable save format");
+    {
+      auto params = newArr(); for (int i = 0; i < 149; ++i) params->put(0);
+      params->put(71, 1); params->put(142, 1); params->put(143, 1);
+      Value owned(newObj()->put("gameplayer_id", newObj()->put("id", 4073))
+          ->put("parameters", params)->put("additional_skill_id", newArr()));
+      adaptIosPlayerData(owned, true);
+      auto skills = owned.o->getJSONArray("skillcard_id_list");
+      check(skills->length() == 1 && skills->getInt(0) == 2,
+          "owned-player menu receives Double Touch in the native skill enum");
+      auto wire = owned.o->getJSONArray("parameters");
+      check(wire->getInt(142) == 0 && wire->getInt(143) == 0,
+          "booster ID one must not invent two extra skill flags");
+      check(wire->getInt(144) == 1 && wire->getInt(145) == 1,
+          "booster IDs survive skill-list reconstruction");
+      check(!isZiruSkillParameter(kZiruSkillParameters[72]) && !isZiruSkillParameter(kZiruSkillParameters[73]),
+          "new skills are represented by explicit IDs, never by overwriting save boosters");
+    }
     char temp[] = "/tmp/pes-gameplay-XXXXXX";
     check(mkdtemp(temp), "temporary directory");
     std::string root(temp);
@@ -135,6 +152,29 @@ int main() {
     asset(root, "ZIRU_PLAYER_RECORDS.json", newObj()->put("1", newObj()->put("gameplayer", p)));
     asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
     asset(root, "ZIRU_MATCH_PROFILES.json", obj(R"({"profiles":[{"profile_id":1,"player_ids":[1],"coordinates":[],"team_style":0,"base_team_id":108}]})"));
+    {
+      Config skillCfg = cfg; skillCfg.dataDir = root + "/skill-display";
+      std::filesystem::create_directories(skillCfg.dataDir);
+      OfflineServer server(skillCfg);
+      auto owned = Object::parse(p->toString());
+      auto params = Array::parse(parameters->toString());
+      params->put(14, 91); params->put(71, 1); params->put(142, 42);
+      owned->put("parameters", params)->put("additional_skill_id", newArr()->put(25)->put(68));
+      server.ziruDb->savePlayer(101, 1, owned->toString());
+      auto detail = call(server, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", 1)->put("serial", 101)));
+      check(detail->getJSONArray("parameters")->getInt(14) == 91,
+          "player-detail endpoint uses owned progression rather than catalog stats");
+      check(detail->getJSONArray("skillcard_id_list")->length() > 0,
+          "owned intrinsic skills appear outside matches");
+      auto extra = detail->getJSONArray("additional_skill_id");
+      check(extra->getInt(0) == 25 && extra->getInt(1) == 68,
+          "stored internal skill IDs 25/68 are not remapped a second time");
+      auto player = server.z27Player(newObj()->put("id", 1)->put("serial", 101));
+      check(player->getJSONArray("additional_skill_id")->getInt(0) == 25,
+          "match player retains the same internal learned skill identity");
+      check(player->getJSONArray("parameters")->getInt(142) == 42,
+          "skill synchronization preserves booster data");
+    }
     asset(root, "ZIRU_GET_VSCOM_OPPONENT.json", obj(R"({"squad_data":{"squad_gameplan":{"formation":[],"match_plan_settings":{}}},"user_info":[{}]})"));
     auto start = obj(R"({"squad_data_home":{"coach":{"coach_id":{"id":999,"serial":999}}},"commentary_info":{}})");
     asset(root, "ZIRU_START_GAME.json", start); asset(root, "ZIRU_ML_START_GAME.json", start);
