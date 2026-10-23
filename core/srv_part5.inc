@@ -228,7 +228,8 @@ void z27CheckOutgoingCard(const ObjP& o) {
   int n = values ? values->length() : 0;
   bool cardParameters = n == 145 || n == 147 || n == 149;
   ArrP styles = o->optJSONArray("play_style");
-  if (!cardParameters && !styles) return;
+  // Older list formats carry play_style as a single number, which the client reads as Basic/Basic.
+  if (!cardParameters && !styles && !o->has("play_style")) return;
   ZiruCardIdentity card;
   if (z27CardIdentity(id, card)) {
     o->put("play_style", newArr()->put(card.style[0])->put(card.style[1]));
@@ -251,7 +252,7 @@ void z27CheckOutgoingCard(const ObjP& o) {
   }
 }
 
-// Every card object (gameplayer_id plus a parameter list, or plus play_style),
+// Every card object (gameplayer_id plus a parameter list, or plus any play_style),
 // including every squad player_list entry, leaves with its own playing styles:
 // from its identity source when one knows the exact card id, else
 // parameters[61]/[62] follow play_style (or play_style is taken from them).

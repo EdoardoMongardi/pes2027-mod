@@ -161,7 +161,8 @@ static void cardIdentityTests(const std::string& top) {
   noStyle->remove("play_style");
   auto twoAttack = card(W, 0, 12, 14, 6, none, {}, 0, 0, 149);
   auto squadEntry = templatePlayer(Q, 1, 24);
-  asset(root, "get_mailbox_info.json", newObj()->put("mail_list", newArr()->put(newObj()->put("gameplayer", stale))
+  auto legacy = newObj()->put("gameplayer_id", newObj()->put("id", S)->put("serial", 0))->put("play_style", 20);
+  asset(root, "get_mailbox_info.json", newObj()->put("legacy", legacy)->put("mail_list", newArr()->put(newObj()->put("gameplayer", stale))
       ->put(newObj()->put("gameplayer", mismatched))->put(newObj()->put("gameplayer", noStyle))
       ->put(newObj()->put("gameplayer", twoAttack)))->put("squad_data_home", newObj()->put("player_list", newArr()->put(squadEntry))));
   asset(root, "CMD_USE_MYCLUB_ITEM.json", obj(R"({"result":"NOERR"})"));
@@ -382,6 +383,9 @@ static void cardIdentityTests(const std::string& top) {
     check(sameStyles(at(3), 14, 6, none) && n.ziruStyleRuleLogged.count(W) == 1 && n.ziruStyleRuleLogged.count(U) == 0,
         "outgoing: two styles on one side are sent as printed and reported");
     if (ios) check(at(0)->getJSONArray("parameters")->length() == 147, "outgoing: the check runs before the iOS translation");
+    auto legacyStyles = mail->getJSONObject("legacy")->optJSONArray("play_style");
+    check(legacyStyles && legacyStyles->getInt(0) == 14 && legacyStyles->getInt(1) == 0,
+        "outgoing: a single-number play_style of a known card is replaced by its two styles");
   }
   auto aiY = byId(aiSideTemplate, Y);
   check(sameStyles(aiY, 11, 29, all), "outgoing: an AI template card nobody knows keeps its parameters and gets a matching play_style");
