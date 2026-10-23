@@ -1,6 +1,7 @@
 // End-to-end encrypted commands, synthetic fixtures (no game assets required).
 #include "../core/server.hpp"
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <stdexcept>
 #include <unistd.h>
@@ -665,6 +666,116 @@ static void serialTests(const std::string& top) {
   check(playerWrites == 0, ("a login and entry info on an unchanged save write no player row, wrote " + std::to_string(playerWrites)).c_str());
   sqlite3_update_hook(s.ziruDb->db, nullptr, nullptr);
   check(Object::parse(rowText(810))->getJSONObject("gameplayer_id")->getLong("id") == S1, "the first card listed under a shared serial keeps its row");
+
+  // ---- Training changes exactly the card the client picked ----
+  // Everything saved: player rows, careerplan points and prefs, by key.
+  auto saveState = [&]() {
+    std::map<std::string, std::string> out;
+    for (auto& [serial, text] : s.ziruDb->loadAllPlayerRows()) out["player " + std::to_string(serial)] = text;
+    sqlite3_stmt* st = nullptr;
+    sqlite3_prepare_v2(s.ziruDb->db, "SELECT serial, progression_json FROM progression", -1, &st, nullptr);
+    while (sqlite3_step(st) == SQLITE_ROW) out["progression " + std::to_string(sqlite3_column_int64(st, 0))] = (const char*)sqlite3_column_text(st, 1);
+    sqlite3_finalize(st);
+    auto& prefs = s.sp("almanac_state");
+    for (const auto& k : prefs.data->keys()) out["prefs " + k] = prefs.data->optJSONObject(k)->toString();
+    return out;
+  };
+  auto changedKeys = [](const std::map<std::string, std::string>& a, const std::map<std::string, std::string>& b) {
+    std::set<std::string> keys;
+    for (auto& kv : a) if (!b.count(kv.first) || b.at(kv.first) != kv.second) keys.insert(kv.first);
+    for (auto& kv : b) if (!a.count(kv.first)) keys.insert(kv.first);
+    return keys;
+  };
+  auto item = [&](const char* type, long long id, long long serial, int index, ObjP extra) {
+    auto req = newObj()->put("gameplayer_id_list", newArr()->put(newObj()->put("id", id)->put("serial", serial)))->put("training_index", index)
+        ->put("item_list", newArr()->put(newObj()->put("present_num", 1)->put("item", newObj()->put("item_type", type))));
+    for (const auto& k : extra->keys()) req->put(k, extra->get(k));
+    return call(s, "CMD_USE_MYCLUB_ITEM", req);
+  };
+  auto career = [&](long long id, long long serial, int shoot) {
+    auto use = newArr();
+    if (shoot > 0) use->put(newObj()->put("parameter_type", "SHOOT")->put("point", shoot));
+    return call(s, "CMD_USE_MYCLUB_CAREERPLAN", newObj()->put("gameplayer_use_list", newArr()->put(
+        newObj()->put("gameplayer_id", newObj()->put("id", id)->put("serial", serial))->put("use_list", use))));
+  };
+  struct Training { const char* type; std::function<ObjP(long long, long long)> run; };
+  std::vector<Training> trainings = {
+    {"SKILL_TRAINING_SELECT", [&](long long id, long long serial) { return item("SKILL_TRAINING_SELECT", id, serial, 0, newObj()->put("skill_id", 44)); }},
+    {"SKILL_TRAINING", [&](long long id, long long serial) { return item("SKILL_TRAINING", id, serial, 1, newObj()); }},
+    {"SKILL_TRAINING_CATEGORY", [&](long long id, long long serial) { return item("SKILL_TRAINING_CATEGORY", id, serial, 2, newObj()->put("skill_training_category_type", "PASS")); }},
+    {"ABILITY_TRAINING_SELECT", [&](long long id, long long serial) { return item("ABILITY_TRAINING_SELECT", id, serial, 0, newObj()->put("ability_id", 186)); }},
+    {"ABILITY_TRAINING_RANDOM", [&](long long id, long long serial) { return item("ABILITY_TRAINING_RANDOM", id, serial, 1, newObj()); }},
+    {"POSITION_TRAINING", [&](long long id, long long serial) { return item("POSITION_TRAINING", id, serial, 0, newObj()); }},
+    {"POSITION_TRAINING_SELECT", [&](long long id, long long serial) { return item("POSITION_TRAINING_SELECT", id, serial, 1, newObj()->put("position_id", 5)); }},
+    {"CAREERPLAN", [&](long long id, long long serial) { return career(id, serial, 6); }},
+    {"CAREERPLAN reset", [&](long long id, long long serial) { return career(id, serial, 0); }},
+  };
+  // G has its own serial: each training changes G and nothing else.
+  auto loginBefore = listed(call(s, "CMD_LOGIN"));
+  for (auto& t : trainings) {
+    auto before = saveState();
+    auto r = t.run(G, 805);
+    std::set<std::string> mine = {"player 805", "progression 805", "prefs ziru_skills_805"};
+    for (const auto& k : changedKeys(before, saveState()))
+      check(mine.count(k) == 1, (std::string(t.type) + " on G changed " + k + ", which is not G's").c_str());
+    check(r->toString().find("\"is_success\":\"NO\"") == std::string::npos, (std::string(t.type) + " on G is not refused").c_str());
+  }
+  auto savedG = Object::parse(rowText(805));
+  check(savedG->getJSONArray("initial_booster_id_list")->toString() != "[0,0,0]" && savedG->optJSONArray("additional_position") &&
+        skillBit(savedG, 44) == 1 && s.loadProgression(805), "G keeps what it was trained: booster, position, skill, careerplan points");
+  // The login shows the trained G and every other card as before; the match plays every card as shown.
+  auto loginAfter = listed(call(s, "CMD_LOGIN"));
+  check(loginAfter->length() == loginBefore->length(), "training adds or removes no card");
+  for (int i = 0; i < loginAfter->length(); ++i) {
+    auto card = loginAfter->getJSONObject(i);
+    auto gid = card->getJSONObject("gameplayer_id");
+    auto was = bySerial(loginBefore, gid->getLong("serial"));
+    bool trained = gid->getLong("serial") == 805;
+    check((card->toString() == was->toString()) != trained,
+        ("login after training: card " + std::to_string(gid->getLong("id")) + (trained ? " shows its training" : " is unchanged")).c_str());
+  }
+  check(skillBit(bySerial(loginAfter, 805), 44) == 1, "login after training: G shows its learned skill");
+  auto game = call(s, "CMD_GET_VSCOM_OPPONENT")->getLong("game_id");
+  auto played = call(s, "CMD_START_GAME", newObj()->put("game_id", (long long)game))->getJSONObject("squad_data_home")->getJSONArray("player_list");
+  for (long long serial : {801, 802, 805, 807, 810}) {
+    std::string diff = paramDiff(bySerial(loginAfter, serial), bySerial(played, serial));
+    check(diff.empty(), ("match start: the card at " + std::to_string(serial) + " plays as the login shows it, " + diff).c_str());
+  }
+  auto gDetail = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", G)->put("serial", 805)));
+  check(gDetail->getJSONArray("parameters")->toString() == bySerial(loginAfter, 805)->getJSONArray("parameters")->toString(),
+      "player detail: G shows the trained card the login shows");
+  // Requests that name a card the serial does not hold are refused and change nothing.
+  call(s, "CMD_SELL_MYCLUB_GAMEPLAYER", newObj()->put("gameplayer_id_list", newArr()->put(newObj()->put("id", H)->put("serial", 807))));
+  struct Probe { const char* what; long long id, serial; };
+  for (Probe probe : {Probe{"a second card listed under a serial that holds the first one", S2, 810},
+                      Probe{"a card under another card's serial", G, 801}, Probe{"a card under serial 0", G, 0},
+                      Probe{"a sold card", H, 807}, Probe{"an unknown card under a card's serial", 990000000001LL, 805},
+                      Probe{"a card under a serial nothing is saved or listed under", G, 811}}) {
+    for (auto& t : trainings) {
+      std::string what = std::string(t.type) + " on " + probe.what;
+      std::string db = fileBytes(cfg.dataDir + "/ziru_save.db"), prefs = fileBytes(cfg.dataDir + "/prefs_almanac_state.json");
+      auto r = t.run(probe.id, probe.serial);
+      check(fileBytes(cfg.dataDir + "/ziru_save.db") == db && fileBytes(cfg.dataDir + "/prefs_almanac_state.json") == prefs,
+          (what + ": the save is not changed").c_str());
+      check(r->toString().find("\"is_success\":\"YES\"") == std::string::npos, (what + ": no successful result is sent").c_str());
+      if (std::string(t.type).rfind("CAREERPLAN", 0) == 0) {
+        auto results = r->getJSONArray("careerplan_result_list");
+        check(results->length() <= 1 && (results->length() == 0 || (results->getJSONObject(0)->getJSONArray("careerplan_list")->length() == 0 &&
+              results->getJSONObject(0)->getJSONObject("gameplayer")->getJSONObject("gameplayer_id")->getLong("id") == probe.id)),
+            (what + ": the answer shows the card unchanged").c_str());
+        continue;
+      }
+      const char* key = std::string(t.type).rfind("SKILL", 0) == 0 ? "skill_training_result"
+                      : std::string(t.type).rfind("ABILITY", 0) == 0 ? "ability_training_result" : "position_training_result";
+      auto result = r->optJSONObject(key);
+      check(result && result->getString("is_success") == "NO", (what + ": the training is answered as not successful").c_str());
+      for (const char* other : {"skill_training_result", "ability_training_result", "position_training_result"})
+        check(std::string(other) == key || !r->has(other), (what + ": only this training's result is sent").c_str());
+      auto items = r->getJSONArray("item_list");
+      for (int i = 0; i < items->length(); ++i)
+        check(items->getJSONObject(i)->getInt("inventory_num") == 999999, (what + ": no item is used up").c_str());
+    }
+  }
 }
 
 int main() {

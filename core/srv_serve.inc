@@ -134,12 +134,7 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
       }
     }
   }
-  if (jo && name == "responses/CMD_USE_MYCLUB_ITEM.json") {
-    applyZiruPositionTrainingResponse(jo);
-    applyZiruBoosterTrainingResponse(jo);
-    applyZiruSkillTrainingResponse(jo);
-    z27InjectTrainingItems(jo);
-  }
+  if (jo && name == "responses/CMD_USE_MYCLUB_ITEM.json") z27UseMyclubItem(jo);
   // The player rows written while the roster is put together (70 starter
   // cards and every pack card on a login) reach the save file in one write.
   ZiruTx tx(*ziruDb);

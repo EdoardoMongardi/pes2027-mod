@@ -662,8 +662,6 @@ void saveZiruPlayerToDb(const ObjP& jo) {
   }
 }
 
-void saveZiruSkillsToDb(int64_t serial, const std::vector<int32_t>& list) { z27SaveSkills(serial, list); }
-
 Response serveLivedataAsset(const std::string& name) {
   std::string data;
   if (!assets.read(name, data)) return newFixedText(404, "LiveData asset not found");
@@ -721,34 +719,6 @@ void traceZiruUserCompeV87(const std::string& uri) {
   ObjP req;
   if (ziruLastRequestBody && (req = decodeZiruRequestJson(ziruLastRequestBody)))
     zs::logi("ZIRU_WC", "[ZIRU_V87_USER_COMPE_REQ] msgid=" + req->optString("msgid", "") + " body=" + req->toString());
-}
-
-ObjP z27OwnedPlayer(int64_t serial) {
-  JStr lp = loadPlayer(serial);
-  if (lp) {
-    ObjP jo = Object::parse(*lp);
-    ObjP gp = jo->optJSONObject("gameplayer");
-    return gp ? gp : jo;
-  }
-  std::string s = sp("almanac_state").getString("recruited_players", "[]");
-  if (s.empty()) s = "[]";
-  ArrP arr = Array::parse(s);
-  bool second = false;
-  while (true) {
-    for (int i = 0; i < arr->length(); i++) {
-      ObjP o = arr->optJSONObject(i);
-      if (!o) continue;
-      ObjP gp = o->optJSONObject("gameplayer");
-      if (gp) o = gp;
-      ObjP gid = o->optJSONObject("gameplayer_id");
-      if (gid && gid->optLong("serial") == serial) return second ? z27Clone(o) : o;
-    }
-    if (second) return nullptr;
-    ObjP starters = z27Starters().entry;
-    arr = starters ? starters->optJSONArray("gameplayer_list") : nullptr;
-    if (!arr) return nullptr;
-    second = true;
-  }
 }
 
 void z27RepairLoginRoster(const ObjP& jo) {

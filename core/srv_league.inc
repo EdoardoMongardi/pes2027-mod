@@ -94,15 +94,14 @@ ArrP buildZiruMlLeaderboardV85(const std::string& key) {
   return out;
 }
 
-ObjP buildZiruResetPlayer(int64_t playerId, int64_t serial) {
+// The card `target` with its careerplan points given back: the parameters of
+// its record, its own boosters kept.
+ObjP buildZiruResetPlayer(int64_t playerId, int64_t serial, const ObjP& target) {
   try {
     ObjP w = getZiruPlayerWrapper(Value((long long)playerId), true);
     ObjP base;
     if (!w || !(base = w->optJSONObject("gameplayer"))) return nullptr;
-    JStr lp = loadPlayer(serial);
-    ObjP jo;
-    if (lp && !lp->empty()) jo = Object::parse(*lp);
-    if (!jo) jo = Object::parse(base->toString());
+    ObjP jo = z27Copy(target);
     ArrP bp = base->optJSONArray("parameters");
     if (bp) {
       ArrP np = Array::parse(bp->toString());
@@ -440,6 +439,9 @@ static Bytes readBody(Request& r, int n, int& got) {
   return b;
 }
 
+// Careerplan changes exactly the card the client picked (z27TrainingTarget).
+// A card that has a record, or a pack card, can be developed. Any other request
+// is answered with the card unchanged and nothing is saved.
 Response handleZiruCareerplan(Request& r) {
   try {
     auto it = r.headers.find("content-length");
@@ -469,24 +471,12 @@ Response handleZiruCareerplan(Request& r) {
               }
               i2++;
             }
-            ObjP jo = found;
-            bool fail = false;
-            if (!jo) {
-              ObjP w = getZiruPlayerWrapper(Value((long long)ziruCareerPlayerId), true);
-              ObjP gp;
-              if (!w || !(gp = w->optJSONObject("gameplayer"))) fail = true;
-              else {
-                ObjP gid = gp->optJSONObject("gameplayer_id");
-                if (gid) gid->put("serial", (long long)ziruCareerSerial);
-                jo = gp;
-              }
-            }
+            ObjP jo = z27TrainingTarget(ziruCareerSerial, ziruCareerPlayerId);
+            bool fail = !jo || (!found && !getZiruPlayerWrapper(Value((long long)ziruCareerPlayerId), true));
             ObjP res;
             if (!fail) {
-              JStr lp = loadPlayer(ziruCareerSerial);
-              if (lp && !lp->empty()) jo = Object::parse(*lp);
               if (ziruCareerSpent == 0) {
-                res = buildZiruResetPlayer(ziruCareerPlayerId, ziruCareerSerial);
+                res = buildZiruResetPlayer(ziruCareerPlayerId, ziruCareerSerial, jo);
                 if (!res) fail = true;
               } else {
                 ObjP li = jo->optJSONObject("level_info");
@@ -512,7 +502,16 @@ Response handleZiruCareerplan(Request& r) {
                 }
               }
             }
-            if (!fail) {
+            if (fail) {
+              logRequest("Z27_TRAINING_REFUSED", "[Z27_TRAINING_REFUSED] CAREERPLAN id=" + str(ziruCareerPlayerId) + " serial=" + str(ziruCareerSerial) +
+                                                     (jo ? ": this card cannot be developed" : ": not the card saved under this serial, nor its own unsaved entry"));
+              ArrP rl = newArr();
+              ObjP shown = z27Player(newObj()->put("id", (long long)ziruCareerPlayerId)->put("serial", (long long)ziruCareerSerial));
+              if (shown) rl->put(newObj()->put("gameplayer", shown)->put("careerplan_list", newArr()));
+              return serveObjectAsEncryptedMsgPack(newObj()->put("careerplan_result_list", rl)->put("achievement_notification", newArr())
+                  ->put("result", "NOERR")->put("rqid", (long long)ziruCareerRqid)->put("msgid", "CMD_USE_MYCLUB_CAREERPLAN"));
+            }
+            {
               z27NormalizeOwnedCard(res);
               ObjP li = res->optJSONObject("level_info");
               if (li) {
@@ -522,10 +521,12 @@ Response handleZiruCareerplan(Request& r) {
               }
               ObjP prog = ziruCareerProgression;
               prog->put("_spent_total", ziruCareerSpent);
+              ZiruTx tx(*ziruDb);
               ziruDb->saveProgression(ziruCareerSerial, prog->toString());
-              ziruDb->savePlayer(ziruCareerSerial, ziruCareerPlayerId, res->toString());
+              ziruDb->savePlayer(ziruCareerSerial, res->getJSONObject("gameplayer_id")->optLong("id", ziruCareerPlayerId), res->toString());
+              tx.commit();
               logRequest("ZIRU_SQLITE", "[ZIRU_SQLITE_PLAYER_SAVED] careerplan");
-              if (i2 >= 0 && i2 < arr->length()) {
+              if (found) {
                 nn(arr->optJSONObject(i2))->put("gameplayer", res);
                 prefs.edit().putString("recruited_players", arr->toString()).commit();
               }

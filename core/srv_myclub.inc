@@ -14,23 +14,15 @@ int32_t z28RandomBooster(bool isGk = false) {
   return isGk ? 22 : 12; // fallback GK Saving vs Outfield Agility
 }
 
-void applyZiruBoosterTrainingResponse(const ObjP& r13) {
+// Booster training on `target`, the card the client picked (z27TrainingTarget).
+void applyZiruBoosterTrainingResponse(const ObjP& r13, const ObjP& target) {
   try {
     if (!ziruItemType) return;
     std::string r0 = *ziruItemType;
     int32_t r3 = ziruTrainingIndex;
     if (!(r3 >= 0 && r3 < 3)) r3 = 1;
     int64_t r4 = ziruTargetSerial;
-    if (r4 <= 0) { logRequest("ZIRU_BOOSTER_V23", "[ZIRU_BOOSTER_V23_FAIL] missing target/ability"); return; }
-    JStr r7 = loadPlayer(r4);
-    ObjP r8;
-    if (r7 && !r7->empty()) {
-      r8 = Object::parse(*r7);
-    } else {
-      r8 = z27OwnedPlayer(r4);
-      if (!r8) { logRequest("ZIRU_BOOSTER_V23", "[ZIRU_BOOSTER_V23_FAIL] missing target/ability"); return; }
-    }
-    r8 = ziruSyncActiveBooster(r8);
+    ObjP r8 = ziruSyncActiveBooster(target);
     ArrP r9 = nn(r8)->optJSONArray("parameters");
     bool isGk = (r9 && r9->length() > 0 && r9->optInt(0, -1) == 0);
 
@@ -132,28 +124,14 @@ static inline int z27GetPositionIndexByName(const std::string& name) {
   return -1;
 }
 
-void applyZiruPositionTrainingResponse(const ObjP& jo) {
+// Position training on `target`, the card the client picked (z27TrainingTarget).
+void applyZiruPositionTrainingResponse(const ObjP& jo, const ObjP& target) {
   try {
     if (!(ziruItemType && (*ziruItemType == "POSITION_TRAINING" || *ziruItemType == "POSITION_TRAINING_SELECT"))) return;
     int64_t j = ziruTargetSerial;
     if (j > 0) {
-      JStr lp = loadPlayer(j);
-      ObjP p;
-      if (!lp || lp->empty()) {
-        ObjP w = getZiruPlayerWrapper(Value((long long)ziruTargetPlayerId), false);
-        if (w && (p = w->optJSONObject("gameplayer"))) {
-          ObjP gid = p->optJSONObject("gameplayer_id");
-          if (!gid) { gid = newObj(); p->put("gameplayer_id", gid); }
-          gid->put("serial", (long long)j);
-          gid->put("id", (long long)ziruTargetPlayerId);
-        }
-      } else {
-        p = Object::parse(*lp);
-      }
-      if (!p) {
-        logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_V26_FAIL] missing player");
-        return;
-      }
+      ObjP p = target;
+      int64_t cardId = p->getJSONObject("gameplayer_id")->optLong("id", ziruTargetPlayerId);
       ArrP params = p->optJSONArray("parameters");
       if (params && params->length() >= 14) {
         if (params->optInt(0) != 0) {
@@ -171,7 +149,8 @@ void applyZiruPositionTrainingResponse(const ObjP& jo) {
             slot = 0;
           }
 
-          ObjP baseWrapper = getZiruPlayerWrapper(Value((long long)ziruTargetPlayerId), false);
+          // The card's own record, never another card's.
+          ObjP baseWrapper = getZiruPlayerWrapper(Value((long long)cardId), false);
           ObjP baseP;
           ArrP baseParams;
           if (baseWrapper && (baseP = baseWrapper->optJSONObject("gameplayer"))) {
@@ -607,23 +586,19 @@ std::set<int> z27CardSkillParams(const ObjP& p) {
   return out;
 }
 
-void applyZiruSkillTrainingResponse(const ObjP& jo) {
+// Skill training on `target`, the card the client picked (z27TrainingTarget).
+// The learned skills saved for its serial are this card's.
+void applyZiruSkillTrainingResponse(const ObjP& jo, const ObjP& target) {
   try {
     if (!ziruItemType || (*ziruItemType != "SKILL_TRAINING" && *ziruItemType != "SKILL_TRAINING_CATEGORY" && *ziruItemType != "SKILL_TRAINING_SELECT")) return;
     int64_t j = ziruTargetSerial;
-    if (j == 0) return;
-    ObjP owned = z27OwnedPlayer(j);
-    if (!owned) return;
+    ObjP owned = target;
 
     zs::Prefs& prefs = sp("almanac_state");
     std::string key = "ziru_skills_" + str(j);
     std::string s = prefs.getString(key, "");
     std::vector<int32_t> al;
     ArrP sk = owned->optJSONArray("additional_skill_id");
-    if (!sk) {
-      JStr lp = loadPlayer(j);
-      if (lp && !lp->empty()) sk = Object::parse(*lp)->optJSONArray("additional_skill_id");
-    }
     if (sk) {
       for (int i = 0; i < sk->length(); i++) {
         int v = ziruRepairLearnedSkill(sk->optInt(i));
@@ -739,6 +714,41 @@ void applyZiruSkillTrainingResponse(const ObjP& jo) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_SKILL_V2] response/persistence failed ") + e.what());
     throw;
   }
+}
+
+// Skill, booster and position training change exactly the card the client
+// picked (z27TrainingTarget). A request naming any other card is answered as a
+// training that did not succeed: only that training type's result, with
+// is_success NO (Konami's answer template also carries a successful skill
+// result, which is removed), nothing is saved and no item is used up.
+void z27UseMyclubItem(const ObjP& jo) {
+  std::string type = ziruItemType ? *ziruItemType : "";
+  bool skill = type == "SKILL_TRAINING" || type == "SKILL_TRAINING_CATEGORY" || type == "SKILL_TRAINING_SELECT";
+  bool booster = type == "ABILITY_TRAINING_RANDOM" || type == "ABILITY_TRAINING_SELECT";
+  bool position = type == "POSITION_TRAINING" || type == "POSITION_TRAINING_SELECT";
+  if (skill || booster || position) {
+    ObjP target = z27TrainingTarget(ziruTargetSerial, ziruTargetPlayerId);
+    if (!target) {
+      for (const char* k : {"skill_training_result", "ability_training_result", "position_training_result"}) jo->remove(k);
+      if (skill) {
+        jo->put("skill_training_result", newObj()->put("is_success", "NO"));
+        z27KeepSkillTrainingItems(jo);
+      } else if (booster) {
+        jo->put("ability_training_result", newObj()->put("ability_id", 0)->put("ability_Id", 0)->put("is_success", "NO"));
+      } else {
+        jo->put("position_training_result", newObj()->put("additional_position", "")->put("is_success", "NO"));
+      }
+      logRequest("Z27_TRAINING_REFUSED", "[Z27_TRAINING_REFUSED] " + type + " id=" + str(ziruTargetPlayerId) + " serial=" + str(ziruTargetSerial) +
+                                             ": not the card saved under this serial, nor its own unsaved entry");
+    } else if (position) {
+      applyZiruPositionTrainingResponse(jo, target);
+    } else if (booster) {
+      applyZiruBoosterTrainingResponse(jo, target);
+    } else {
+      applyZiruSkillTrainingResponse(jo, target);
+    }
+  }
+  z27InjectTrainingItems(jo);
 }
 
 // Skill training items are never used up.

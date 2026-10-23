@@ -464,6 +464,40 @@ Response z27SquadAck() {
 
 std::set<int64_t> ziruRowOtherCardLogged;  // serials already reported, so each is logged once
 
+// A card that is not saved yet, as its row will hold it: the skills learned for
+// this serial, then the ones its entry carries (repaired, at most 5), switched on
+// in its parameters, and the usual normalisation. Returns the learned list as
+// it is kept in prefs ("" when there is none).
+std::string z27PrepareFreshCard(const ObjP& p, int64_t serial) {
+  std::vector<int32_t> skillList;
+  std::string prefSkills = sp("almanac_state").getString("ziru_skills_" + str(serial), "");
+  if (!prefSkills.empty()) {
+    for (auto& part : split(prefSkills, ',')) {
+      try {
+        int val = ziruRepairLearnedSkill(parseInt(part));
+        if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
+      } catch (const NumberFormat&) {}
+    }
+  }
+  ArrP existingSkills = p->optJSONArray("additional_skill_id");
+  for (int sIdx = 0; existingSkills && sIdx < existingSkills->length(); ++sIdx) {
+    int val = ziruRepairLearnedSkill(existingSkills->optInt(sIdx));
+    if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
+  }
+  ArrP newSkillArr = newArr();
+  for (int v : skillList) newSkillArr->put(v);
+  p->put("additional_skill_id", newSkillArr);
+  ArrP pParams = p->optJSONArray("parameters");
+  if (pParams && pParams->length() >= 142) {
+    for (int v : skillList) {
+      int pIdx = kZiruSkillParameters[v];
+      if (isZiruSkillParameter(pIdx) && pIdx < pParams->length()) pParams->put(pIdx, 1);
+    }
+  }
+  z27NormalizeOwnedCard(p);
+  return joinInts(skillList);
+}
+
 void z27Restore(const ObjP& jo) {
   try {
     ObjP ei = jo->optJSONObject("entry_info");
@@ -670,42 +704,11 @@ void z27Restore(const ObjP& jo) {
             z27NormalizeOwnedCard(p);
           }
         } else {
+          // Nothing saved under this serial yet: the listed card becomes its row.
+          std::string learned = z27PrepareFreshCard(p, serial);
           zs::Prefs& statePrefs = sp("almanac_state");
           std::string prefKey = "ziru_skills_" + str(serial);
-          std::string prefSkills = statePrefs.getString(prefKey, "");
-          std::vector<int32_t> skillList;
-          if (!prefSkills.empty()) {
-            for (auto& part : split(prefSkills, ',')) {
-              try {
-                int val = ziruRepairLearnedSkill(parseInt(part));
-                if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
-              } catch (const NumberFormat&) {}
-            }
-          }
-          ArrP existingSkills = p->optJSONArray("additional_skill_id");
-          if (existingSkills) {
-            for (int sIdx = 0; sIdx < existingSkills->length(); ++sIdx) {
-              int val = ziruRepairLearnedSkill(existingSkills->optInt(sIdx));
-
-              if (isZiruSkillId(val) && !vcontains(skillList, val) && skillList.size() < 5) skillList.push_back(val);
-            }
-          }
-          ArrP newSkillArr = newArr();
-          for (int v : skillList) newSkillArr->put(v);
-          p->put("additional_skill_id", newSkillArr);
-          if (!skillList.empty() && statePrefs.getString(prefKey, "") != joinInts(skillList)) {
-            statePrefs.edit().putString(prefKey, joinInts(skillList)).commit();
-          }
-          ArrP pParams = p->optJSONArray("parameters");
-          if (pParams && pParams->length() >= 142) {
-            for (int v : skillList) {
-              if (isZiruSkillId(v)) {
-                int pIdx = kZiruSkillParameters[v];
-                if (isZiruSkillParameter(pIdx) && pIdx < pParams->length()) pParams->put(pIdx, 1);
-              }
-            }
-          }
-          z27NormalizeOwnedCard(p);
+          if (!learned.empty() && statePrefs.getString(prefKey, "") != learned) statePrefs.edit().putString(prefKey, learned).commit();
           ziruDb->savePlayer(serial, p->getJSONObject("gameplayer_id")->getLong("id"), p->toString());
         }
       }
@@ -908,15 +911,6 @@ Response z27SelectOpponent() {
   }
 }
 
-void z27SaveSkills(int64_t serial, const std::vector<int32_t>& list) {
-  ObjP p = z27OwnedPlayer(serial);
-  if (!p) throw IllegalState("Missing owned player for skill save");
-  ArrP a = newArr();
-  for (int v : list) a->put(v);
-  p->put("additional_skill_id", a);
-  ziruDb->savePlayer(serial, p->getJSONObject("gameplayer_id")->getLong("id"), p->toString());
-}
-
 // A MyLeague rental card's own catalogue entry (rental cards are not owned).
 ObjP z27RentalCard(int64_t id) {
   ObjP list = loadZiruJsonAssetObject("responses/ZIRU_ML_RENTAL_LIST.json");
@@ -950,6 +944,48 @@ bool z27IsCard(const ObjP& saved, int64_t id) {
   int64_t savedId = sid ? sid->optLong("id", 0) : 0;
   if (savedId <= 0 || id <= 0) return false;
   return savedId == id || savedId == z27UpgradeIosCardPid(id, saved->optInt("initial_base_team_id", 0));
+}
+
+// The starter card listed under this serial with this id (a copy), or null.
+ObjP z27StarterEntry(int64_t serial, int64_t id) {
+  const ZiruStarters& starters = z27Starters();
+  auto it = starters.bySerialId.find({serial, id});
+  return it == starters.bySerialId.end() ? nullptr : z27Clone(it->second);
+}
+
+// The pack card recruited under this serial with this id, or null.
+ObjP z27RecruitedEntry(int64_t serial, int64_t id) {
+  std::string s = sp("almanac_state").getString("recruited_players", "");
+  ArrP list = s.empty() ? nullptr : Array::parse(s);
+  for (int i = 0; list && i < list->length(); i++) {
+    ObjP o = list->optJSONObject(i);
+    if (o && o->optJSONObject("gameplayer")) o = o->getJSONObject("gameplayer");
+    ObjP gid = o ? o->optJSONObject("gameplayer_id") : nullptr;
+    if (gid && gid->optLong("serial", 0) == serial && z27IsCard(o, id)) return o;
+  }
+  return nullptr;
+}
+
+// The card a training, booster, position or careerplan request may change:
+// the card saved under the serial the client sent when it is exactly the card
+// it named (or the card that id is upgraded to); else that card's own entry not
+// saved yet (a starter card listed under that serial, or a pack card recruited
+// under it). Null means the request is refused: the serial holds another card,
+// is sold, is a rental's (serial 0, nothing is saved for rentals) or the card
+// is unknown. Never another card.
+ObjP z27TrainingTarget(int64_t serial, int64_t id) {
+  if (serial <= 0 || id <= 0 || isZiruPlayerSold(serial)) return nullptr;
+  if (ObjP saved = z27SavedCardFor(serial, id)) return saved;
+  JStr row = loadPlayer(serial);
+  if (row && !row->empty()) return nullptr;
+  ObjP entry = z27StarterEntry(serial, id);
+  if (!entry) entry = z27RecruitedEntry(serial, id);
+  if (!entry) return nullptr;
+  ObjP gid = entry->getJSONObject("gameplayer_id");
+  gid->put("serial", (long long)serial);
+  gid->put("id", (long long)z27UpgradeIosCardPid(gid->optLong("id", 0), entry->optInt("initial_base_team_id", 0)));
+  z27PrepareFreshCard(entry, serial);
+  return entry;
 }
 
 // The player as the match uses it. Looked up by exact card id only:
