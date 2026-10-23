@@ -137,6 +137,27 @@ Response handleZiruLeagueStatic(const std::string& name) {
   }
 }
 
+// The rental cards as the match plays them: each rental entry gets the same card
+// normalisation as z27Player gives it at match start (identity, weak foot, boosters).
+Response handleZiruMyLeagueRentalList() {
+  try {
+    ObjP jo = nn(loadZiruJsonAssetObject("responses/ZIRU_ML_RENTAL_LIST.json"));
+    ArrP rows = jo->optJSONArray("rental_player_list");
+    for (int i = 0; rows && i < rows->length(); i++) {
+      ObjP row = rows->optJSONObject(i);
+      ObjP info = row ? row->optJSONObject("player_info") : nullptr;
+      if (info && info->optJSONObject("gameplayer_id")) z27NormalizeOwnedCard(info);
+    }
+    ObjP req = decodeZiruRequestJson(ziruLastRequestBody);
+    if (req) jo->put("rqid", (long long)req->optLong("rqid", 1));
+    patchZiruMyLeagueCommonState(jo);
+    return serveObjectAsEncryptedMsgPack(jo);
+  } catch (const std::exception& e) {
+    zs::loge("OFFLINE_SERVER", std::string("[ZIRU_ML_RENTAL_LIST_ERR] ") + e.what());
+    return handleZiruLeagueStatic("responses/ZIRU_ML_RENTAL_LIST.json");
+  }
+}
+
 Response handleZiruMyLeagueEnter() {
   ziruMyLeagueSetActive(1);
   if (ziruLeagueLoadInt("ziru_myleague_fixture", 1) <= 0) ziruLeagueSaveInt("ziru_myleague_fixture", 1);

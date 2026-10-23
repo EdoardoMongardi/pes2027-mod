@@ -141,8 +141,12 @@ static void cardIdentityTests(const std::string& top) {
       ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squadData)
           ->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))));
   asset(root, "CmdLogin.json", newObj()->put("entry_info", starter));
+  // A rental of K: the rental list's own level and stats, unlike K's record.
+  auto rentalK = card(K, 0, 9, 14, 0, aiK, {33}, 173, 0, 145);
+  rentalK->getJSONArray("parameters")->put(14, 85);
+  rentalK->put("level_info", Object::parse(R"({"level":30,"level_limit":30,"customize_point":0})"));
   asset(root, "ZIRU_ML_RENTAL_LIST.json", newObj()->put("rental_player_list", newArr()->put(newObj()->put("point", 10)
-      ->put("player_info", card(R, 0, 5, 20, 28, aiS, {44}, 61, 0, 145)))));
+      ->put("player_info", card(R, 0, 5, 20, 28, aiS, {44}, 61, 0, 145)))->put(newObj()->put("point", 20)->put("player_info", rentalK))));
   asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline"})"));
   asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
   asset(root, "ZIRU_MATCH_PROFILES.json", newObj()->put("profiles", newArr()->put(obj(R"({"profile_id":1,"coordinates":[],"team_style":0,"base_team_id":108})")
@@ -281,6 +285,34 @@ static void cardIdentityTests(const std::string& top) {
   }
   check(sameStyles(byId(mine, R), 20, 28, aiS), "MyLeague: a rental card plays with its rental entry");
   check(byId(mine, Y)->getJSONArray("parameters")->getInt(61) == 11, "MyLeague: a card only the template knows uses the template entry");
+  // Rental cards play with the cards the rental list shows: the rental's own level and stats (K's
+  // rental differs from K's record) and the same normalisation (R has no weak-foot values listed).
+  auto rentals = call(s, "CMD_GET_SEASON_POINT_RENTALPLAYER_LIST")->getJSONArray("rental_player_list");
+  auto rentalSquad = newArr();
+  for (int i = 0; i < rentals->length(); ++i)
+    rentalSquad->put(newObj()->put("gameplayer_id", Object::parse(rentals->getJSONObject(i)->getJSONObject("player_info")->getJSONObject("gameplayer_id")->toString())));
+  s.ziruDb->saveMeta("ziru_myleague_special_squad", newObj()->put("squad_data", newObj()->put("player_list", rentalSquad)
+      ->put("coach", newArr()->put(coachRef(100, 1000))))->toString());
+  s.ziruMyLeagueSetActive(1);
+  auto rentalPlayers = call(s, "CMD_START_GAME", newObj()->put("game_id", 9))->getJSONObject("squad_data_home")->getJSONArray("player_list");
+  check(rentalPlayers->length() == 2, "MyLeague: both rental cards play");
+  for (int i = 0; i < rentals->length(); ++i) {
+    auto shown = rentals->getJSONObject(i)->getJSONObject("player_info");
+    auto played = byId(rentalPlayers, shown->getJSONObject("gameplayer_id")->getLong("id"));
+    auto a = shown->getJSONArray("parameters"), b = played->getJSONArray("parameters");
+    std::string diff = a->length() == b->length() ? "" : "length";
+    for (int k = 0; diff.empty() && k < a->length(); ++k)
+      if (k != 59 && k != 60 && a->optInt(k, -1) != b->optInt(k, -1)) diff = "index " + std::to_string(k);
+    check(diff.empty(), ("MyLeague: rental " + std::to_string(shown->getJSONObject("gameplayer_id")->getLong("id")) +
+                         " plays with the card the rental list shows, " + diff).c_str());
+  }
+  check(byId(rentalPlayers, K)->getJSONArray("parameters")->getInt(14) == 85, "MyLeague: a rental keeps the rental list's stats, not its record's");
+  // A special squad none of whose cards is known still replaces the captured template squad.
+  s.ziruDb->saveMeta("ziru_myleague_special_squad", newObj()->put("squad_data", newObj()->put("player_list", newArr()
+      ->put(newObj()->put("gameplayer_id", newObj()->put("id", 424242LL)->put("serial", 0)))))->toString());
+  s.ziruMyLeagueSetActive(1);
+  auto emptySide = call(s, "CMD_START_GAME", newObj()->put("game_id", 10))->getJSONObject("squad_data_home")->getJSONArray("player_list");
+  check(emptySide->length() == 0, "MyLeague: a special squad with no known card sends an empty player_list, not the captured one");
   s.ziruMyLeagueSetActive(0);
   s.ziruDb->saveMeta("ziru_myleague_special_squad", "");
   check(sqlite3_exec(s.ziruDb->db, "DELETE FROM meta WHERE k='ziru_myleague_special_squad'", nullptr, nullptr, nullptr) == SQLITE_OK, "clear special squad");

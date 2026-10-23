@@ -592,7 +592,7 @@ Response serveInner(Request& r) {
   if (isCmd("CMD_GET_SEASON_SCHEDULE")) return handleZiruMyLeagueScheduleV74();
   if (isCmd("CMD_GET_SEASON_POINT_ITEM_LIST")) return handleZiruLeagueStatic("responses/ZIRU_ML_POINT_ITEM_LIST.json");
   if (isCmd("CMD_EXCHANGE_SEASON_POINT_ITEM")) return handleZiruMyLeagueExchangeItemV71();
-  if (isCmd("CMD_GET_SEASON_POINT_RENTALPLAYER_LIST")) return handleZiruLeagueStatic("responses/ZIRU_ML_RENTAL_LIST.json");
+  if (isCmd("CMD_GET_SEASON_POINT_RENTALPLAYER_LIST")) return handleZiruMyLeagueRentalList();
   if (isCmd("CMD_EXCHANGE_SEASON_POINT_RENTALPLAYER")) return handleZiruMyLeagueExchangeRentalV71();
   if (isCmd("CMD_SET_MYCLUB_SPECIAL_DREAM_SQUAD_INFO")) return handleZiruMyLeagueSpecialSquadV71();
   if (isCmd("CMD_SET_SEASON_MISSION_DISPED")) return handleZiruLeagueStatic("responses/ZIRU_ML_SET_MISSION_DISPED.json");

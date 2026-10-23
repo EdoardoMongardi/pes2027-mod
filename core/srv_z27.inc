@@ -910,8 +910,10 @@ ObjP z27SavedCardFor(int64_t serial, int64_t id) {
 
 // The player as the match uses it. Looked up by exact card id only:
 // the saved player, the starter entry for this serial, the card's record, a
-// MyLeague rental card, the starter entry for this card. A card none of these
-// know is logged and null is returned; it is never built from another player.
+// MyLeague rental card, the starter entry for this card. A rental card
+// (serial 0) takes its rental entry before its record: the rental list shows
+// the rental's own level and stats. A card none of these know is logged and
+// null is returned; it is never built from another player.
 ObjP z27Player(const ObjP& gid) {
   int64_t serial = gid->optLong("serial", 0);
   ObjP p = z27SavedCardFor(serial, gid->optLong("id", 0));
@@ -924,11 +926,12 @@ ObjP z27Player(const ObjP& gid) {
       ObjP eid = entry ? entry->optJSONObject("gameplayer_id") : nullptr;
       if (eid && eid->optLong("serial", -1) == serial && eid->optLong("id", 0) == id) p = entry;
     }
+    if (!p && serial == 0) p = z27RentalCard(id);
     if (!p) {
       ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
       if (w && w->optJSONObject("gameplayer")) p = z27Copy(w->getJSONObject("gameplayer"));
     }
-    if (!p) p = z27RentalCard(id);
+    if (!p && serial != 0) p = z27RentalCard(id);
     for (int i = 0; !p && i < list->length(); i++) {
       ObjP entry = list->optJSONObject(i);
       ObjP eid = entry ? entry->optJSONObject("gameplayer_id") : nullptr;

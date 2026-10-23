@@ -193,8 +193,10 @@ Response handleZiruMyLeagueStartGameV71() {
       ObjP home;
       if (sd && (home = nn(jo)->optJSONObject("squad_data_home"))) {
         ArrP pl = sd->optJSONArray("player_list");
+        // Always the special squad's own list, even when none of its cards is known: the
+        // template's player_list is a captured squad of other people's cards.
+        ArrP out = newArr();
         if (pl) {
-          ArrP out = newArr();
           for (int i = 0; i < pl->length(); i++) {
             ObjP item = pl->getJSONObject(i);
             ObjP gid = item->optJSONObject("gameplayer_id");
@@ -215,8 +217,8 @@ Response handleZiruMyLeagueStartGameV71() {
               out->put(pObj);
             }
           }
-          if (out->length() > 0) home->put("player_list", out);
         }
+        home->put("player_list", out);
         ArrP co = sd->optJSONArray("coach");
         ObjP c0;
         if (co && (c0 = co->optJSONObject(0))) home->put("coach", c0);
