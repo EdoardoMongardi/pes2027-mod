@@ -413,12 +413,10 @@ def build_ipa(app, dylib, apk, out, report, bundle_id, display_name, extra_pak=N
                     zi.compress_type = zipfile.ZIP_DEFLATED
                     content = a.read(e)
                     if os.path.basename(e.filename) == "dt870_mobile_and.cpk":
-                        from repair_ios_tables import repair_cpk_bytes
-                        original_hash = hashlib.sha256(content).hexdigest()
-                        content, changes = repair_cpk_bytes(content)
-                        if changes:
-                            table_fixes[os.path.basename(e.filename)] = {"original_sha256": original_hash,
-                                "sha256": hashlib.sha256(content).hexdigest(), "changes": changes}
+                        from repair_ios_tables import table_fix_entry
+                        content, entry = table_fix_entry(content)
+                        if entry["changes"]:
+                            table_fixes[os.path.basename(e.filename)] = entry
                             report["ios_table_fixes"] = table_fixes
                     z.writestr(zi, content)
                     n += 1

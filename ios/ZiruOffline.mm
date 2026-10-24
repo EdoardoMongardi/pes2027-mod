@@ -1188,6 +1188,21 @@ static DataFolders prepareDataFolderLinks() {
   return f;
 }
 
+// Files the bundled copy may replace: Konami's original ("original_sha256") and every copy an earlier
+// build of this mod installed ("replaces_sha256", written by tools/repair_ios_tables.py). Anything else is
+// the player's own file and is kept.
+static NSSet<NSString*>* replaceableTableHashes(id entry) {
+  NSMutableSet<NSString*>* hashes = [NSMutableSet set];
+  if (![entry isKindOfClass:NSDictionary.class]) return hashes;
+  id original = entry[@"original_sha256"];
+  if ([original isKindOfClass:NSString.class]) [hashes addObject:original];
+  id older = entry[@"replaces_sha256"];
+  if ([older isKindOfClass:NSArray.class]) {
+    for (id h in older) if ([h isKindOfClass:NSString.class]) [hashes addObject:h];
+  }
+  return hashes;
+}
+
 static void installBundledTableFixes(NSArray<NSString*>* directories) {
   NSFileManager* fm = NSFileManager.defaultManager;
   NSString* bundle = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru"];
@@ -1206,6 +1221,7 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
     BOOL cpk = [name isEqualToString:@"dt870_mobile_and.cpk"];
     if (!cpk && ![name hasPrefix:@"pc92"]) continue;
     NSString* source = [[bundle stringByAppendingPathComponent:@"livedata"] stringByAppendingPathComponent:name];
+    NSSet<NSString*>* replaceable = replaceableTableHashes(manifest[name]);
     for (NSString* directory in directories) {
       if (!cpk && [directory.lastPathComponent isEqualToString:@"cpk"]) continue;
       NSArray* aliases = cpk ? @[name, [name stringByReplacingOccurrencesOfString:@"_mobile_and" withString:@"_mobile_ios"]] : @[name];
@@ -1232,7 +1248,7 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
                 if ([hash isEqualToString:manifest[name][@"sha256"]]) {
                   continue;
                 }
-                if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
+                if (![replaceable containsObject:hash]) {
                   ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
                   continue;
                 }
@@ -1254,7 +1270,7 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
             NSMutableString* hash = [NSMutableString string];
             for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
             if ([hash isEqualToString:manifest[name][@"sha256"]]) continue;
-            if (![hash isEqualToString:manifest[name][@"original_sha256"]]) {
+            if (![replaceable containsObject:hash]) {
               ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
               continue;
             }
