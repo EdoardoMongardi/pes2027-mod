@@ -110,6 +110,16 @@ python tools/build_ipa.py `
    - Lần mở đầu tiên, save cũ được chuyển một lần: thẻ đang giữ tiến trình ở mỗi serial cũ được chuyển sang serial mới của chính nó cùng kỹ năng đã học, booster, vị trí, cấp độ và điểm phát triển; các thẻ khởi đầu khác bắt đầu với chỉ số gốc; đội hình và đội hình MyLeague trỏ sang serial mới; thẻ từ gói không bị động tới.
    - Bản sao dữ liệu cũ được giữ trong save (`meta` khóa `z27_starter_serials_backup`); mỗi bước được ghi vào `offline_server.log` với nhãn `Z27_SERIAL_MIGRATION`.
    - Yêu cầu huấn luyện cho một thẻ không nằm ở serial đó sẽ được trả lời là không thành công và không thay đổi gì (`Z27_TRAINING_REFUSED` trong log).
+5. **Những thay đổi trong bản này**:
+   - **Vé huấn luyện vị trí (chọn)**: thẻ học đúng vị trí đã chọn. Mỗi ô vị trí đã học nâng độ thành thạo ở vị trí đó thêm một bậc so với mức vốn có của thẻ (tối đa 2), như game gốc của Konami. Khi đăng nhập, các vị trí đã học trong save cũ được chỉnh lại theo quy tắc này, nên một số vị trí có thể giảm từ mức 2 xuống mức 1, đúng như game gốc.
+   - **Vé huấn luyện kỹ năng (chọn)**: mod gửi cho game danh sách kỹ năng thẻ có thể học (40 kỹ năng thường; thủ môn có thêm 4 kỹ năng thủ môn), nên các nhóm kỹ năng không còn bị khóa với nhãn "(learned)" và thẻ học đúng kỹ năng đã chọn.
+   - Với cả hai vé, lựa chọn mà game không cho chọn (ví dụ một kỹ năng thẻ đã có hoặc đã học) được trả lời là không thành công: thẻ giữ nguyên và không mất vé (`ZIRU_SKILL_SELECT_REFUSED` / `ZIRU_POSITION_REFUSED` trong `offline_server.log`; mỗi lần dùng vé được ghi với nhãn `ZIRU_ITEM`).
+   - **Xóa kỹ năng đã học**: kỹ năng bị xóa trong màn hình huấn luyện kỹ năng giờ bị xóa thật. Trước đây nó quay lại ở lần đăng nhập sau, và lần huấn luyện tiếp theo có thể ghi đè nhầm một kỹ năng khác. Kỹ năng đã xóa có thể học lại bằng vé chọn (`ZIRU_SKILL_DELETE` trong `offline_server.log`).
+   - **Kỹ năng thủ môn**: game gốc chỉ cho thủ môn học GK Low Punt, GK High Punt, GK Long Throw và GK Penalty Saver, nhưng huấn luyện kỹ năng ngẫu nhiên ở các bản trước đã dạy cả cho cầu thủ không phải thủ môn. Khi đăng nhập, các kỹ năng này được gỡ khỏi những thẻ đó, các kỹ năng còn lại được dồn lên (`Z27_GK_SKILL_REMOVED` trong `offline_server.log`).
+   - **Booster**: sau mỗi lần dùng vé booster, kể cả khi không thành công, thẻ vẫn giữ đúng giá bán (trước đây có lúc hiện 0).
+   - **Thẻ đội tuyển quốc gia** hiện cờ quốc gia trên mặt thẻ, còn thẻ câu lạc bộ có kỹ năng Low Screamer không còn hiện nhầm cờ. Phần chi tiết thẻ ghi câu lạc bộ của cầu thủ vào thời điểm thẻ ra mắt (theo dữ liệu chính thức khi có, nếu không thì là ước tính) hoặc không ghi câu lạc bộ, thay vì tên quốc gia.
+   - **Xem trước gói thẻ**: các kỹ năng nổi bật là đúng kỹ năng của từng thẻ (trước đây bị lệch và ô trống hiện "Fighting Spirit"); kỹ năng đặc biệt ở màn hình thay người trong trận cũng đúng.
+   - Khi khởi động, mod tự thay file `dt870` cũ trong thư mục dữ liệu (bản gốc của Konami hoặc bản mà các phiên bản mod trước đã cài) bằng bản mới đi kèm; file khác do người chơi tự đặt vào được giữ nguyên, kể cả file quá lớn hoặc không đọc được (`IOS_TABLE_FIX` trong `ziru.log`). Thư mục `PES2027-repair-backups` không còn nhận thêm file sau mỗi lần mở app.
 
 ---
 
@@ -124,7 +134,8 @@ make -j2 build/runcpp build/packtest build/gameplaytest build/modtest build/fold
 # 2. Chạy hồi quy kiểm thử logic gameplay (division, career, progression, skills):
 ./build/gameplaytest
 
-# 3. Kiểm thử chuyển đổi bảng dữ liệu nhị phân iOS:
+# 3. Kiểm thử chuyển đổi bảng dữ liệu nhị phân iOS (đặt DT870_ORIGINAL=<dt870_mobile_and.cpk gốc của Konami>
+#    và DT200_ORIGINAL=<cpk/dt200_mobile_all.cpk của gói dữ liệu> để so thêm với dữ liệu của Konami):
 python3 -m unittest discover -s test -p 'ios_tables_test.py' -v
 
 # 4. Kiểm thử giao thức mã hóa máy chủ Online (Signaling + TURN):
