@@ -695,11 +695,13 @@ void applyZiruSkillTrainingResponse(const ObjP& jo, const ObjP& target) {
       else pool = "44,45,47,48,49,50,51,52,53,54,67,68,69,70,71";
     }
     std::vector<std::string> sp_ = split(pool, ',');
-    // Only normal skills can be trained: no special skill, no Dummy skill card,
-    // nothing the card already has by itself or has already learned.
+    // Only the skills the card can learn (the list its player data shows): no special
+    // skill, no Dummy skill card, no goalkeeping skill for an outfield card, nothing the
+    // card already has by itself or has already learned.
     std::set<int> cardSkills = z27CardSkillParams(owned);
+    bool goalkeeper = isZiruGoalkeeperCard(owned->optJSONArray("parameters"));
     auto cardHas = [&](int id) { return isZiruSkillId(id) && cardSkills.count(kZiruSkillParameters[id]) > 0; };
-    auto open = [&](int val) { return isZiruTrainableSkill(val) && !cardHas(val) && !vcontains(al, val); };
+    auto open = [&](int val) { return isZiruLearnableSkill(val, goalkeeper) && !cardHas(val) && !vcontains(al, val); };
     std::vector<int> candidates;
     for (const auto& s_item : sp_) {
       int val = parseInt(s_item);
@@ -718,7 +720,7 @@ void applyZiruSkillTrainingResponse(const ObjP& jo, const ObjP& target) {
       int chosen = ziruAbilityId;
       if (chosen == 0 && ziruSkillItemEffect > 0) chosen = ziruSkillItemEffect;
       bool learnedElsewhere = vcontains(al, chosen) && !(target >= 0 && al[target] == chosen);
-      if (isZiruTrainableSkill(chosen) && !cardHas(chosen) && !learnedElsewhere) {
+      if (isZiruLearnableSkill(chosen, goalkeeper) && !cardHas(chosen) && !learnedElsewhere) {
         v = chosen;
       } else {
         // Never another skill than the one picked: the training is not successful, the card

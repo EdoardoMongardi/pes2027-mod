@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <unistd.h>
 #include <sqlite3.h>
@@ -424,9 +425,10 @@ static void cardIdentityTests(const std::string& top) {
     check(r->getString("is_success") == "NO" && !r->has("additional_skill_id") && *s.loadPlayer(501) == row &&
           s.sp("almanac_state").getString("ziru_skills_501", "") == learned, "a special or Dummy skill cannot be selected, and nothing else is taught");
   }
-  check(train("SKILL_TRAINING_SELECT", A, 501, newObj()->put("skill_id", 44)) == 44, "a normal skill can be selected");
+  // A is a CF: Low Lofted Pass (43) is a skill it can learn; GK Low Punt (44) is not.
+  check(train("SKILL_TRAINING_SELECT", A, 501, newObj()->put("skill_id", 43)) == 43, "a normal skill can be selected");
   auto trainedA = Object::parse(*s.loadPlayer(501));
-  check(skillCount(trainedA) == 2 && skillBit(trainedA, 29) == 1 && skillBit(trainedA, 44) == 1,
+  check(skillCount(trainedA) == 2 && skillBit(trainedA, 29) == 1 && skillBit(trainedA, 43) == 1,
       "retraining one slot leaves the card's own skill plus the one learned skill");
   check(sameStyles(trainedA, 3, 0, aiA), "training keeps the card's styles");
   // Learned skills belong to the card saved under the serial. T shares serial 501 with A in the
@@ -437,7 +439,7 @@ static void cardIdentityTests(const std::string& top) {
         ->getJSONObject("squad_data_home")->getJSONArray("player_list");
     std::string diff = paramDiff(byId(home, T), byId(after, T));
     check(diff.empty(), ("training A leaves T, which shares A's serial, as it was: " + diff).c_str());
-    check(skillBit(byId(after, A), 44) == 1, "the trained card plays with its learned skill");
+    check(skillBit(byId(after, A), 43) == 1, "the trained card plays with its learned skill");
   }
   // A category with nothing left for the card: any other normal skill instead of an error.
   auto useItem = [&](OfflineServer& srv, const char* type, long long id, long long serial, int index, const char* category) {
@@ -508,12 +510,12 @@ static void cardIdentityTests(const std::string& top) {
               ->put("item", newObj()->put("item_type", type)->put("grade", 0)->put("effect", std::string(type) == "SKILL_TRAINING_SELECT" ? ability : 0))));
       return call(w, "CMD_USE_MYCLUB_ITEM", req);
     };
-    int first = pick("SKILL_TRAINING_SELECT", 0, iosSkillId(44, true))->getJSONObject("skill_training_result")->getInt("additional_skill_id");
+    int first = pick("SKILL_TRAINING_SELECT", 0, iosSkillId(43, true))->getJSONObject("skill_training_result")->getInt("additional_skill_id");
     int second = pick("SKILL_TRAINING_SELECT", 1, iosSkillId(69, true))->getJSONObject("skill_training_result")->getInt("additional_skill_id");
-    check(first == iosSkillId(44, true) && second == iosSkillId(69, true), "iOS Select: the client's skill numbers are answered in the client's numbers");
-    check(w.sp("almanac_state").getString("ziru_skills_501", "") == "44,69", "iOS Select: the picked skills are the ones learned");
+    check(first == iosSkillId(43, true) && second == iosSkillId(69, true), "iOS Select: the client's skill numbers are answered in the client's numbers");
+    check(w.sp("almanac_state").getString("ziru_skills_501", "") == "43,69", "iOS Select: the picked skills are the ones learned");
     auto learnedA = Object::parse(*w.loadPlayer(501));
-    check(skillBit(learnedA, 44) == 1 && skillBit(learnedA, 69) == 1 && skillBit(learnedA, 45) == 0 && skillBit(learnedA, 70) == 0,
+    check(skillBit(learnedA, 43) == 1 && skillBit(learnedA, 69) == 1 && skillBit(learnedA, 44) == 0 && skillBit(learnedA, 70) == 0,
         "iOS Select: the picked skills' flags are on, the neighbours' are not");
     pick("ABILITY_TRAINING_SELECT", 1, 186);
     check(Object::parse(*w.loadPlayer(501))->getJSONArray("initial_booster_id_list")->getInt(1) == 186, "iOS booster Select: the booster id is used as sent");
@@ -527,7 +529,7 @@ static void cardIdentityTests(const std::string& top) {
       newObj()->put("gameplayer_id", newObj()->put("id", A)->put("serial", 501))->put("use_list", newArr()))));
   auto resetA = reset->getJSONArray("careerplan_result_list")->getJSONObject(0)->getJSONObject("gameplayer");
   check(resetA->getJSONArray("parameters")->getInt(142) == 12, "progression reset keeps the boosters");
-  check(sameStyles(resetA, 3, 0, aiA) && skillBit(resetA, 44) == 1, "progression reset keeps the styles and the learned skill");
+  check(sameStyles(resetA, 3, 0, aiA) && skillBit(resetA, 43) == 1, "progression reset keeps the styles and the learned skill");
   check(!s.z27Player(newObj()->put("id", 424242LL)->put("serial", 0LL)), "an unknown card is not built from another player");
   // Last check on every response: each card leaves with its own styles.
   for (bool ios : {false, true}) {
@@ -746,7 +748,7 @@ static void serialTests(const std::string& top) {
   };
   struct Training { const char* type; std::function<ObjP(long long, long long)> run; };
   std::vector<Training> trainings = {
-    {"SKILL_TRAINING_SELECT", [&](long long id, long long serial) { return item("SKILL_TRAINING_SELECT", id, serial, 0, newObj()->put("skill_id", 44)); }},
+    {"SKILL_TRAINING_SELECT", [&](long long id, long long serial) { return item("SKILL_TRAINING_SELECT", id, serial, 0, newObj()->put("skill_id", 43)); }},
     {"SKILL_TRAINING", [&](long long id, long long serial) { return item("SKILL_TRAINING", id, serial, 1, newObj()); }},
     {"SKILL_TRAINING_CATEGORY", [&](long long id, long long serial) { return item("SKILL_TRAINING_CATEGORY", id, serial, 2, newObj()->put("skill_training_category_type", "PASS")); }},
     {"ABILITY_TRAINING_SELECT", [&](long long id, long long serial) { return item("ABILITY_TRAINING_SELECT", id, serial, 0, newObj()->put("ability_id", 186)); }},
@@ -769,7 +771,7 @@ static void serialTests(const std::string& top) {
   }
   auto savedG = Object::parse(rowText(805));
   check(savedG->getJSONArray("initial_booster_id_list")->toString() != "[0,0,0]" && savedG->optJSONArray("additional_position") &&
-        skillBit(savedG, 44) == 1 && s.loadProgression(805), "G keeps what it was trained: booster, position, skill, careerplan points");
+        skillBit(savedG, 43) == 1 && s.loadProgression(805), "G keeps what it was trained: booster, position, skill, careerplan points");
   // The login shows the trained G and every other card as before; the match plays every card as shown.
   auto loginAfter = listed(call(s, "CMD_LOGIN"));
   check(loginAfter->length() == loginBefore->length(), "training adds or removes no card");
@@ -781,7 +783,7 @@ static void serialTests(const std::string& top) {
     check((card->toString() == was->toString()) != trained,
         ("login after training: card " + std::to_string(gid->getLong("id")) + (trained ? " shows its training" : " is unchanged")).c_str());
   }
-  check(skillBit(bySerial(loginAfter, 805), 44) == 1, "login after training: G shows its learned skill");
+  check(skillBit(bySerial(loginAfter, 805), 43) == 1, "login after training: G shows its learned skill");
   auto game = call(s, "CMD_GET_VSCOM_OPPONENT")->getLong("game_id");
   auto played = call(s, "CMD_START_GAME", newObj()->put("game_id", (long long)game))->getJSONObject("squad_data_home")->getJSONArray("player_list");
   for (long long serial : {801, 802, 805, 807, 810}) {
@@ -1197,6 +1199,61 @@ static std::string describe(const ClientCard& c) {
   return out + " slots " + std::to_string(c.slot[0]) + "," + std::to_string(c.slot[1]);
 }
 static bool sameCard(const ClientCard& a, const ClientCard& b) { return describe(a) == describe(b); }
+// The Skill Training (Select) category screen of the iOS 11.1.1 client, rebuilt from its
+// code. All skill numbers are the client's own (SkillCard ids, the wire format).
+//  - Categories in screen order: Shooting 3, Passing 0, Dribbling 1, Defending 2, Others 5,
+//    and Goalkeeping 4 only when the card's parameters[0] (registered position) is GK
+//    (MyClubMyTeamPlayerTrainingSkillSelect::GetCategoryList, 0x104684920).
+//  - The skills of each category are fixed lists (UtilityMyClubTraining::GetCategorySkillIdList,
+//    0x1048a5600). Only the ones in CMD_GET_MYCLUB_PLAYER_DATA's skillcard_id_list are kept
+//    (0x1048a5a14; the list is ParameterMyClubPlayerData+0x2a0, filled only by
+//    CommandObjectCmdGetMyclubPlayerData::QuitCommand, 0x104769554).
+//  - A category can be picked when one kept skill is not owned by the card
+//    (UtilityMyClubTraining::HasSkill, 0x1048a5aec: one of its 5 learned slots, which come
+//    from additional_skill_id, or its own flag at Player::GetDataLabel(SkillCard), table
+//    0x10578bc00). Otherwise, also when nothing is kept, it reads "<category> (learned)" and
+//    is greyed out (AUCMenuMyClubMyTeamPlayerTrainingSkillSelectCategoryAM::InitSetUp, 0x100d44d70).
+//    The skill screen after it greys out single skills the same way (0x100d43390).
+// GK Low Punt, GK High Punt, GK Long Throw, GK Penalty Saver (server numbers; the client's
+// 45, 46, 48, 50, which only its Goalkeeping category lists).
+static bool goalkeepingSkill(int internal) { return internal == 44 || internal == 45 || internal == 47 || internal == 49; }
+struct ClientCategory { int category; std::vector<int> pickable; bool selectable; };
+static const int kClientSkillLabel[74] = {
+  70,107,71,72,73,108,74,75,135,136,102,116,124,130,140,76,121,77,120,101,78,103,104,109,127,143,134,79,80,81,114,128,82,110,83,84,
+  119,85,86,98,117,118,122,141,87,88,105,89,90,99,100,138,139,126,129,91,92,93,106,111,112,113,125,137,115,94,123,132,142,95,131,96,97,133};
+static std::vector<int> clientCategorySkills(int category) {
+  switch (category) {
+    case 0: return {28, 32, 33, 34, 35, 37, 38, 39, 44};
+    case 1: return {0, 1, 2, 3, 4, 5, 6, 7, 10};
+    case 2: return {34, 56, 57, 58, 59, 60, 61, 65};
+    case 3: return {17, 19, 20, 21, 22, 23, 27, 29, 49};
+    case 4: return {32, 33, 34, 44, 45, 46, 48, 50, 72};
+    case 5: return {15, 47, 49, 55, 60, 69, 71, 72};
+  }
+  return {};
+}
+static bool clientHasSkill(const ObjP& card, int skill) {
+  auto learned = card->optJSONArray("additional_skill_id");
+  for (int i = 0; learned && i < learned->length() && i < 5; ++i) if (learned->getInt(i) == skill) return true;
+  auto values = card->getJSONArray("parameters");
+  return values->optInt(kClientSkillLabel[skill], 0) == 1;
+}
+static std::vector<ClientCategory> clientSkillSelectCategories(const ObjP& card, const ArrP& learnable) {
+  std::vector<int> order = {3, 0, 1, 2, 5};
+  if (card->getJSONArray("parameters")->getInt(0) == 0) order.push_back(4);
+  std::vector<ClientCategory> screen;
+  for (int category : order) {
+    ClientCategory row{category, {}, false};
+    for (int skill : clientCategorySkills(category)) {
+      bool kept = false;
+      for (int i = 0; learnable && i < learnable->length(); ++i) kept |= learnable->getInt(i) == skill;
+      if (kept && !clientHasSkill(card, skill)) row.pickable.push_back(skill);
+    }
+    row.selectable = !row.pickable.empty();
+    screen.push_back(row);
+  }
+  return screen;
+}
 
 // ---- Skill and Position Training (Select), as the 11.1.1 client sends them ----------------
 // CmdUseMyclubItemOption::PackMsgPack (0x103b120a4) sends item_list [{item {item_type, grade,
@@ -1237,6 +1294,52 @@ static void selectTrainingTests(const std::string& top) {
   std::filesystem::create_directories(cfg.dataDir);
   OfflineServer s(cfg);
   call(s, "CMD_LOGIN");
+  // The card as the client holds it (login, client numbers) and the player data it asks for
+  // when the card's training opens.
+  auto shownObj = [&](long long serial) {
+    return bySerial(call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list"), serial);
+  };
+  auto learnable = [&](long long id, long long serial) {
+    return call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", id)->put("serial", serial)))
+        ->getJSONArray("skillcard_id_list");
+  };
+  // Skill Training (Select) screen. The player data lists the skills the card can learn
+  // (Konami: every normal skill, the 4 goalkeeping ones only for a goalkeeper), its own
+  // skills included. With that list every category that still has a skill to learn can be
+  // picked; with a list of the card's own skills every category read "(learned)".
+  std::vector<int> outfieldOffered, keeperOnly;
+  {
+    auto outfieldList = learnable(P, 701), keeperList = learnable(Q, 702);
+    auto screenP = clientSkillSelectCategories(shownObj(701), outfieldList);
+    auto screenQ = clientSkillSelectCategories(shownObj(702), keeperList);
+    check(screenP.size() == 5 && screenQ.size() == 6, "Skill Select: 5 categories for an outfield card, Goalkeeping too for a goalkeeper");
+    for (const auto& row : screenP)
+      check(row.selectable, ("Skill Select: an outfield card's category can be picked, not '(learned)': " + std::to_string(row.category)).c_str());
+    for (const auto& row : screenQ)
+      check(row.selectable, ("Skill Select: a goalkeeper's category can be picked, not '(learned)': " + std::to_string(row.category)).c_str());
+    check(outfieldList->length() == 40 && keeperList->length() == 44,
+        "player data: 40 skills an outfield card can learn, 44 for a goalkeeper");
+    for (int i = 0; i < outfieldList->length(); ++i) {
+      int internal = iosSkillId(outfieldList->getInt(i), false);
+      check(isZiruTrainableSkill(internal) && !goalkeepingSkill(internal), "player data: an outfield card can learn normal, non-goalkeeping skills");
+    }
+    // The card's own skill (Double Touch, client 1) is in the list, and the client greys it out.
+    const auto& dribbling = screenP[2];
+    check(dribbling.category == 1 && std::find(dribbling.pickable.begin(), dribbling.pickable.end(), 1) == dribbling.pickable.end() &&
+          dribbling.pickable.size() == 8, "Skill Select: the card's own skill is listed but cannot be picked");
+    // A category whose every skill the card has reads "(learned)", as in Konami's game.
+    auto allDribbling = Object::parse(shownObj(701)->toString());
+    for (int skill : clientCategorySkills(1)) allDribbling->getJSONArray("parameters")->put(kClientSkillLabel[skill], 1);
+    auto screenAll = clientSkillSelectCategories(allDribbling, outfieldList);
+    check(!screenAll[2].selectable && screenAll[0].selectable, "Skill Select: only a category the card fully has is greyed out");
+    std::set<int> seen;
+    for (const auto& row : screenP) for (int skill : row.pickable) if (seen.insert(skill).second) outfieldOffered.push_back(skill);
+    std::set<int> outfieldCategories;
+    for (int category : {3, 0, 1, 2, 5}) for (int skill : clientCategorySkills(category)) outfieldCategories.insert(skill);
+    for (int skill : screenQ.back().pickable) if (!outfieldCategories.count(skill)) keeperOnly.push_back(skill);
+    check(outfieldOffered.size() == 39 && keeperOnly == std::vector<int>({45, 46, 48, 50}),
+        "Skill Select: 39 skills to pick for the outfield card, the 4 goalkeeping skills only for the goalkeeper");
+  }
   int lastAbility = 0;  // sent as ability_id with a position pick: whatever it holds, it is not the pick
   auto use = [&](const char* type, long long id, long long serial, int index, int effect, int ability, ObjP extra) {
     auto req = newObj()->put("item_list", newArr()->put(newObj()->put("item", newObj()->put("item_type", type)->put("grade", 0)->put("effect", effect))
@@ -1247,10 +1350,11 @@ static void selectTrainingTests(const std::string& top) {
     for (const auto& k : extra->keys()) req->put(k, extra->get(k));
     return call(s, "CMD_USE_MYCLUB_ITEM", req);
   };
-  auto skillSelect = [&](int wire, int index) {
+  auto skillSelectOn = [&](long long id, long long serial, int wire, int index) {
     lastAbility = wire;
-    return use("SKILL_TRAINING_SELECT", P, 701, index, wire, wire, newObj()->put("position_id", ""));
+    return use("SKILL_TRAINING_SELECT", id, serial, index, wire, wire, newObj()->put("position_id", ""));
   };
+  auto skillSelect = [&](int wire, int index) { return skillSelectOn(P, 701, wire, index); };
   auto positionSelect = [&](long long id, long long serial, int index, int position, const char* name) {
     return use("POSITION_TRAINING_SELECT", id, serial, index, position, lastAbility, newObj()->put("position_id", name));
   };
@@ -1261,21 +1365,38 @@ static void selectTrainingTests(const std::string& top) {
     return items->length() > 0;
   };
 
-  // Skill Training (Select): every skill the client offers (UtilityMyClubTraining::GetCategorySkillIdList,
-  // 0x1048a5600, all six lists), each picked into the same slot, is the skill taught and answered.
-  const std::vector<int> offered = {28, 32, 33, 34, 35, 37, 38, 39, 44, 0, 2, 3, 4, 5, 6, 7, 10, 56, 57, 58, 59, 60, 61, 65,
-                                    17, 19, 20, 21, 22, 23, 27, 29, 49, 45, 46, 48, 50, 72, 15, 47, 55, 69, 71};
-  for (int wire : offered) {
-    int internal = iosSkillId(wire, false);
-    check(isZiruTrainableSkill(internal), "every skill the client offers is a normal skill");
-    for (int round = 0; round < 3; ++round) {
-      srand(round * 7919 + wire);
-      auto r = skillSelect(wire, 0)->getJSONObject("skill_training_result");
-      check(r->getString("is_success") == "YES" && r->getInt("additional_skill_id") == wire,
-          ("Skill Select: the picked skill is answered, in the client's numbers: " + std::to_string(wire)).c_str());
-      check(s.sp("almanac_state").getString("ziru_skills_701", "") == std::to_string(internal) && skillBit(saved(701), internal) == 1,
-          ("Skill Select: the picked skill is the one learned: " + std::to_string(internal)).c_str());
+  // Skill Training (Select): every skill the client lets the user pick (the screen above),
+  // each picked into the same slot, is the skill taught and answered: the outfield card's 39,
+  // and the goalkeeping ones on the goalkeeper.
+  struct Offer { long long id, serial; std::vector<int> wires; };
+  for (const Offer& offer : {Offer{P, 701, outfieldOffered}, Offer{Q, 702, keeperOnly}}) {
+    for (int wire : offer.wires) {
+      int internal = iosSkillId(wire, false);
+      check(isZiruTrainableSkill(internal), "every skill the client offers is a normal skill");
+      for (int round = 0; round < 3; ++round) {
+        srand(round * 7919 + wire);
+        auto r = skillSelectOn(offer.id, offer.serial, wire, 0)->getJSONObject("skill_training_result");
+        check(r->getString("is_success") == "YES" && r->getInt("additional_skill_id") == wire,
+            ("Skill Select: the picked skill is answered, in the client's numbers: " + std::to_string(wire)).c_str());
+        check(s.sp("almanac_state").getString("ziru_skills_" + std::to_string(offer.serial), "") == std::to_string(internal) &&
+              skillBit(saved(offer.serial), internal) == 1,
+            ("Skill Select: the picked skill is the one learned: " + std::to_string(internal)).c_str());
+      }
     }
+  }
+  // A goalkeeping skill is not offered to an outfield card; sent anyway, it is refused.
+  {
+    auto before = saveDump(s);
+    auto r = skillSelect(46, 1);
+    check(r->getJSONObject("skill_training_result")->getString("is_success") == "NO" && firstDifference(before, saveDump(s)).empty() && itemsKept(r),
+        "Skill Select: a goalkeeping skill for an outfield card is refused; nothing changes");
+  }
+  // Random Skill Training never teaches an outfield card a goalkeeping skill either.
+  for (int k = 0; k < 60; ++k) {
+    srand(k * 31 + 5);
+    auto r = use("SKILL_TRAINING", P, 701, k % 3, 0, 0, newObj()->put("position_id", ""))->getJSONObject("skill_training_result");
+    check(r->getString("is_success") == "YES" && !goalkeepingSkill(iosSkillId(r->getInt("additional_skill_id"), false)),
+        "Skill Training: an outfield card never learns a goalkeeping skill");
   }
   // The card's own skill (Double Touch, client 1) is refused, not swapped for another one.
   {
@@ -1518,6 +1639,46 @@ static void positionTrainingTests(const std::string& top) {
   }
 }
 
+// CMD_GET_MYCLUB_PLAYER_DATA's skill list for the card in Konami's own answer
+// (ziru-extra/responses/get_myclub_player_data.json, an outfield card, numbered like the
+// server): exactly Konami's list.
+static void konamiPlayerDataSkillListTest(const std::string& top) {
+  // The file is read from the repository this test was built from, whatever the working
+  // directory: the Makefile passes the repository's folder (GAMEPLAYTEST_REPO_DIR).
+#ifdef GAMEPLAYTEST_REPO_DIR
+  std::string path = std::string(GAMEPLAYTEST_REPO_DIR) + "/ziru-extra/responses/get_myclub_player_data.json";
+#else
+  std::string path = std::filesystem::path(__FILE__).parent_path().string() + "/../ziru-extra/responses/get_myclub_player_data.json";
+#endif
+  std::ifstream in(path);
+  check(in.good(), ("Konami's player data answer is in the repository: " + path).c_str());
+  std::stringstream text; text << in.rdbuf();
+  auto konami = Object::parse(text.str());
+  const std::string root = top + "/konami-player-data";
+  std::filesystem::create_directories(root + "/responses");
+  const long long K = 9 + (1LL << 40);
+  auto record = card(K, 0, 0, 0, 0, {0, 0, 0, 0, 0, 0, 0}, {}, 108, 0, 145);
+  record->put("parameters", Array::parse(konami->getJSONArray("original_parameters")->toString()));
+  auto owned = Object::parse(record->toString());
+  owned->getJSONObject("gameplayer_id")->put("serial", 901);
+  asset(root, "ZIRU_PLAYER_RECORDS.json", newObj()->put(std::to_string(K), newObj()->put("gameplayer", record)));
+  auto refs = newArr()->put(newObj()->put("gameplayer_id", owned->getJSONObject("gameplayer_id")));
+  auto squad = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
+  asset(root, "CmdLogin.json", newObj()->put("entry_info", newObj()->put("main_squad_id", 9)->put("gameplayer_list", newArr()->put(owned))
+      ->put("coach_list", newArr()->put(coachRef(100, 1000)))
+      ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squad)->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))))));
+  asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline"})"));
+  asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
+  asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
+  std::filesystem::create_directories(cfg.dataDir);
+  OfflineServer s(cfg);
+  call(s, "CMD_LOGIN");
+  auto answer = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", K)->put("serial", 901)));
+  check(answer->getJSONArray("skillcard_id_list")->toString() == konami->getJSONArray("skillcard_id_list")->toString(),
+      "player data: the skill list of Konami's captured card is Konami's list");
+}
+
 int main() {
   try {
     zs::setVerbose(false);
@@ -1652,10 +1813,14 @@ int main() {
       auto detail = call(server, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", 1)->put("serial", 101)));
       check(detail->getJSONArray("parameters")->getInt(14) == 91,
           "player-detail endpoint uses owned progression rather than catalog stats");
+      // skillcard_id_list is what the card can learn in Skill Training (this card's
+      // parameters[0] is 0, a goalkeeper: all 44 normal skills), not the skills it has.
+      // Its own skill is its flag in parameters.
       auto cards = detail->getJSONArray("skillcard_id_list");
-      bool intrinsicShown = false;
-      for (int i = 0; i < cards->length(); ++i) intrinsicShown |= cards->getInt(i) == 2;
-      check(intrinsicShown, "owned intrinsic skills appear outside matches");
+      bool normalOnly = cards->length() == 44;
+      for (int i = 0; i < cards->length(); ++i) normalOnly &= isZiruTrainableSkill(cards->getInt(i));
+      check(normalOnly, "player data lists the skills the card can learn");
+      check(detail->getJSONArray("parameters")->getInt(71) == 1, "owned intrinsic skills appear outside matches");
       auto extra = detail->getJSONArray("additional_skill_id");
       check(extra->getInt(0) == 25 && extra->getInt(1) == 68,
           "stored internal skill IDs 25/68 are not remapped a second time");
@@ -1878,6 +2043,7 @@ int main() {
     starterSerialTests(root);
     selectTrainingTests(root);
     positionTrainingTests(root);
+    konamiPlayerDataSkillListTest(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
     check(child >= 0, "spawn abrupt-exit save test");

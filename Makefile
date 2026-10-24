@@ -1,9 +1,11 @@
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -O1 -g -Wall -Wno-unused
 CORE = core/jvalue.cpp core/codec.cpp core/store.cpp core/server.cpp core/zipread.cpp
+# The repository's folder (where this Makefile is), for tests that read the repository's files.
+REPO_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 build/gameplaytest: $(CORE) test/gameplaytest.cpp core/*.hpp core/*.inc
 	mkdir -p build
-	$(CXX) $(CXXFLAGS) -o $@ $(CORE) test/gameplaytest.cpp -lz -lsqlite3 -lcrypto
+	$(CXX) $(CXXFLAGS) -DGAMEPLAYTEST_REPO_DIR='"$(REPO_DIR)"' -o $@ $(CORE) test/gameplaytest.cpp -lz -lsqlite3 -lcrypto
 build/runcpp: $(CORE) test/runcpp.cpp core/*.hpp core/*.inc
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ $(CORE) test/runcpp.cpp -lz -lsqlite3 -lcrypto

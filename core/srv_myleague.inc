@@ -65,13 +65,10 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
         e->put("level", lim + 1);
         e->put("experience", 0);
         expl->put(e);
-        ArrP cards = newArr();
-        for (int i = 0; i < 72; i++) {
-          int pIdx = kZiruSkillParameters[i];
-          if (pIdx < params->length() && params->optInt(pIdx, 0) == 1) {
-            cards->put(i);
-          }
-        }
+        // The skills this card can learn in Skill Training, as Konami sends them;
+        // not the card's own skills, which grey out every Skill Training (Select)
+        // category as "(learned)" (see ziruLearnableSkillList).
+        ArrP cards = ziruLearnableSkillList(params);
         ObjP boost = Object::parse("{\"use_item_num_list_random\":[0,1],\"use_item_num_list_select\":[0,100]}");
         ObjP out = newObj();
         out->put("careerplan_list", career);
@@ -85,7 +82,7 @@ Response handleZiruGetMyclubPlayerData(const std::optional<Bytes>& b) {
         out->put("result", "NOERR");
         out->put("rqid", (long long)ziruPlayerDataRqid);
         out->put("msgid", "CMD_GET_MYCLUB_PLAYER_DATA");
-        logRequest("ZIRU_V11_PLAYERDATA", "[ZIRU_V11_PLAYERDATA_OK] id=" + str(j) + " level_limit=" + str(lim) + " base_skills=" + str(cards->length()) + " extra_skills=" + str(addSkills ? addSkills->length() : 0));
+        logRequest("ZIRU_V11_PLAYERDATA", "[ZIRU_V11_PLAYERDATA_OK] id=" + str(j) + " level_limit=" + str(lim) + " learnable_skills=" + str(cards->length()) + " extra_skills=" + str(addSkills ? addSkills->length() : 0));
         return serveObjectAsEncryptedMsgPack(out);
       }
     }

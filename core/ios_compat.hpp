@@ -32,6 +32,30 @@ inline bool isZiruSpecialSkill(int id) {
 }
 // Skill Training teaches normal skills only.
 inline bool isZiruTrainableSkill(int id) { return isZiruSkillId(id) && id < 72 && !isZiruDummySkill(id) && !isZiruSpecialSkill(id); }
+// The goalkeeping skills: GK Low Punt, GK High Punt, GK Long Throw, GK Penalty Saver.
+inline bool isZiruGoalkeeperSkill(int id) { return id == 44 || id == 45 || id == 47 || id == 49; }
+// A goalkeeper card: its registered position, parameters[0], is GK (0).
+inline bool isZiruGoalkeeperCard(const zj::ArrP& params) { return params && params->length() > 0 && params->optInt(0, -1) == 0; }
+// The skills a card can learn in Skill Training: every normal skill, the goalkeeping
+// ones only for a goalkeeper. Konami's answer to CMD_GET_MYCLUB_PLAYER_DATA for an
+// outfield card (ziru-extra/responses/get_myclub_player_data.json) lists exactly these
+// 40, the card's own skills included.
+inline bool isZiruLearnableSkill(int id, bool goalkeeper) {
+  return isZiruTrainableSkill(id) && (goalkeeper || !isZiruGoalkeeperSkill(id));
+}
+// CMD_GET_MYCLUB_PLAYER_DATA skillcard_id_list: the skills the card can learn, not the
+// skills it has. The iOS client stores this list in ParameterMyClubPlayerData+0x2a0
+// (CommandObjectCmdGetMyclubPlayerData::QuitCommand, 0x104769554) and shows only these
+// skills in Skill Training (Select) and (Category) (UtilityMyClubTraining::
+// GetCategorySkillIdList, 0x1048a5a14) and in Available Skills. It greys out the ones the
+// card already has by itself (UtilityMyClubTraining::HasSkill, 0x1048a5aec). A list of
+// the card's own skills therefore greys out every category as "(learned)".
+inline zj::ArrP ziruLearnableSkillList(const zj::ArrP& params) {
+  auto result = zj::Array::make();
+  bool goalkeeper = isZiruGoalkeeperCard(params);
+  for (int id = 0; id < 72; ++id) if (isZiruLearnableSkill(id, goalkeeper)) result->put(id);
+  return result;
+}
 // A learned skill read back from a save, or -1 when it must be dropped.
 // Older builds stored a learned Snap Strike (25) or Attack Trigger (68) as 72/73,
 // the iOS numbers of two Dummy cards; those are mapped back. Dummy skills and
