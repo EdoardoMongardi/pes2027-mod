@@ -414,9 +414,15 @@ static void cardIdentityTests(const std::string& top) {
         newObj()->put("skill_training_category_type", categories[k % 5]));
     check(isZiruTrainableSkill(awarded), "Skill Training never awards a special or Dummy skill");
   }
+  // A special or Dummy skill cannot be selected, and no other skill is taught in its place:
+  // the training is not successful and the card stays as it is.
   for (int refused : {29, 9, 72, 73}) {
-    int awarded = train("SKILL_TRAINING_SELECT", A, 501, newObj()->put("skill_id", refused));
-    check(awarded != refused && isZiruTrainableSkill(awarded), "a special or Dummy skill cannot be selected");
+    std::string row = *s.loadPlayer(501), learned = s.sp("almanac_state").getString("ziru_skills_501", "");
+    auto req = newObj()->put("gameplayer_id_list", newArr()->put(newObj()->put("id", A)->put("serial", 501)))->put("training_index", 0)
+        ->put("skill_id", refused)->put("item_list", newArr()->put(newObj()->put("present_num", 1)->put("item", newObj()->put("item_type", "SKILL_TRAINING_SELECT"))));
+    auto r = call(s, "CMD_USE_MYCLUB_ITEM", req)->getJSONObject("skill_training_result");
+    check(r->getString("is_success") == "NO" && !r->has("additional_skill_id") && *s.loadPlayer(501) == row &&
+          s.sp("almanac_state").getString("ziru_skills_501", "") == learned, "a special or Dummy skill cannot be selected, and nothing else is taught");
   }
   check(train("SKILL_TRAINING_SELECT", A, 501, newObj()->put("skill_id", 44)) == 44, "a normal skill can be selected");
   auto trainedA = Object::parse(*s.loadPlayer(501));
@@ -746,7 +752,7 @@ static void serialTests(const std::string& top) {
     {"ABILITY_TRAINING_SELECT", [&](long long id, long long serial) { return item("ABILITY_TRAINING_SELECT", id, serial, 0, newObj()->put("ability_id", 186)); }},
     {"ABILITY_TRAINING_RANDOM", [&](long long id, long long serial) { return item("ABILITY_TRAINING_RANDOM", id, serial, 1, newObj()); }},
     {"POSITION_TRAINING", [&](long long id, long long serial) { return item("POSITION_TRAINING", id, serial, 0, newObj()); }},
-    {"POSITION_TRAINING_SELECT", [&](long long id, long long serial) { return item("POSITION_TRAINING_SELECT", id, serial, 1, newObj()->put("position_id", 5)); }},
+    {"POSITION_TRAINING_SELECT", [&](long long id, long long serial) { return item("POSITION_TRAINING_SELECT", id, serial, 0, newObj()->put("position_id", "CMF")); }},
     {"CAREERPLAN", [&](long long id, long long serial) { return career(id, serial, 6); }},
     {"CAREERPLAN reset", [&](long long id, long long serial) { return career(id, serial, 0); }},
   };
@@ -1141,6 +1147,138 @@ static void starterSerialTests(const std::string& top) {
   }
 }
 
+// ---- Skill and Position Training (Select), as the 11.1.1 client sends them ----------------
+// CmdUseMyclubItemOption::PackMsgPack (0x103b120a4) sends item_list [{item {item_type, grade,
+// effect}, present_num}], auto_item_list, is_auto_use_item, gameplayer_id_list, training_index,
+// ability_id and position_id; CommandObjectCmdUseMyclubItem::InitCommand (0x1047746e0) fills them:
+//   SKILL_TRAINING_SELECT:    effect = ability_id = the picked skill, client numbers; position_id ""
+//   POSITION_TRAINING_SELECT: effect = the picked Position (GK 0 ... CF 12), position_id = its name
+//                             ("CF", "ST", "LWG", "OMF", "LSB", ...); ability_id is not filled in
+static void selectTrainingTests(const std::string& top) {
+  const std::string root = top + "/select-training";
+  std::filesystem::create_directories(root + "/responses");
+  const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0};
+  const long long P = 7 + (1LL << 40);   // LWF: plays LWG (2), ST only a little (1); own skill Double Touch (1)
+  const long long Q = 8 + (1LL << 40);   // GK
+  auto lwf = card(P, 0, 9, 9, 0, none, {1}, 108, 0, 149);
+  lwf->getJSONArray("parameters")->put(3, 2)->put(2, 1);
+  auto gk = card(Q, 0, 0, 0, 17, none, {}, 108, 0, 149);
+  gk->getJSONArray("parameters")->put(13, 2);
+  asset(root, "ZIRU_PLAYER_RECORDS.json", newObj()->put(std::to_string(P), newObj()->put("gameplayer", lwf))
+      ->put(std::to_string(Q), newObj()->put("gameplayer", gk)));
+  auto starterP = card(P, 701, 9, 9, 0, none, {1}, 108, 0, 145);
+  starterP->getJSONArray("parameters")->put(3, 2)->put(2, 1);
+  auto starterQ = card(Q, 702, 0, 0, 17, none, {}, 108, 0, 145);
+  starterQ->getJSONArray("parameters")->put(13, 2);
+  auto refs = newArr()->put(newObj()->put("gameplayer_id", newObj()->put("id", P)->put("serial", 701)))
+      ->put(newObj()->put("gameplayer_id", newObj()->put("id", Q)->put("serial", 702)));
+  auto squad = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
+  asset(root, "CmdLogin.json", newObj()->put("entry_info", newObj()->put("main_squad_id", 9)->put("gameplayer_list", newArr()->put(starterP)->put(starterQ))
+      ->put("coach_list", newArr()->put(coachRef(100, 1000)))
+      ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squad)->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))))));
+  asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline"})"));
+  asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
+  // Konami's answer template carries a successful skill result of its own.
+  asset(root, "CMD_USE_MYCLUB_ITEM.json", obj(R"({"result":"NOERR","skill_training_result":{"additional_skill_id":22,"is_success":"YES"},
+      "item_list":[{"item":{"item_type":"POSITION_TRAINING_SELECT","grade":0,"effect":0},"inventory_num":1}]})"));
+  asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save"; cfg.iosPlayerLayout = true;
+  std::filesystem::create_directories(cfg.dataDir);
+  OfflineServer s(cfg);
+  call(s, "CMD_LOGIN");
+  int lastAbility = 0;  // sent as ability_id with a position pick: whatever it holds, it is not the pick
+  auto use = [&](const char* type, long long id, long long serial, int index, int effect, int ability, ObjP extra) {
+    auto req = newObj()->put("item_list", newArr()->put(newObj()->put("item", newObj()->put("item_type", type)->put("grade", 0)->put("effect", effect))
+                                                        ->put("present_num", 100)))
+        ->put("auto_item_list", newArr())->put("is_auto_use_item", "NO")
+        ->put("gameplayer_id_list", newArr()->put(newObj()->put("id", id)->put("serial", serial)))
+        ->put("training_index", index)->put("ability_id", ability);
+    for (const auto& k : extra->keys()) req->put(k, extra->get(k));
+    return call(s, "CMD_USE_MYCLUB_ITEM", req);
+  };
+  auto skillSelect = [&](int wire, int index) {
+    lastAbility = wire;
+    return use("SKILL_TRAINING_SELECT", P, 701, index, wire, wire, newObj()->put("position_id", ""));
+  };
+  auto positionSelect = [&](long long id, long long serial, int index, int position, const char* name) {
+    return use("POSITION_TRAINING_SELECT", id, serial, index, position, lastAbility, newObj()->put("position_id", name));
+  };
+  auto saved = [&](long long serial) { return Object::parse(*s.loadPlayer(serial)); };
+  auto itemsKept = [](const ObjP& r) {
+    auto items = r->getJSONArray("item_list");
+    for (int i = 0; i < items->length(); ++i) if (items->getJSONObject(i)->getInt("inventory_num") != 999999) return false;
+    return items->length() > 0;
+  };
+
+  // Skill Training (Select): every skill the client offers (UtilityMyClubTraining::GetCategorySkillIdList,
+  // 0x1048a5600, all six lists), each picked into the same slot, is the skill taught and answered.
+  const std::vector<int> offered = {28, 32, 33, 34, 35, 37, 38, 39, 44, 0, 2, 3, 4, 5, 6, 7, 10, 56, 57, 58, 59, 60, 61, 65,
+                                    17, 19, 20, 21, 22, 23, 27, 29, 49, 45, 46, 48, 50, 72, 15, 47, 55, 69, 71};
+  for (int wire : offered) {
+    int internal = iosSkillId(wire, false);
+    check(isZiruTrainableSkill(internal), "every skill the client offers is a normal skill");
+    for (int round = 0; round < 3; ++round) {
+      srand(round * 7919 + wire);
+      auto r = skillSelect(wire, 0)->getJSONObject("skill_training_result");
+      check(r->getString("is_success") == "YES" && r->getInt("additional_skill_id") == wire,
+          ("Skill Select: the picked skill is answered, in the client's numbers: " + std::to_string(wire)).c_str());
+      check(s.sp("almanac_state").getString("ziru_skills_701", "") == std::to_string(internal) && skillBit(saved(701), internal) == 1,
+          ("Skill Select: the picked skill is the one learned: " + std::to_string(internal)).c_str());
+    }
+  }
+  // The card's own skill (Double Touch, client 1) is refused, not swapped for another one.
+  {
+    auto before = saveDump(s);
+    auto r = skillSelect(1, 1);
+    check(r->getJSONObject("skill_training_result")->getString("is_success") == "NO" && !r->getJSONObject("skill_training_result")->has("additional_skill_id") &&
+          firstDifference(before, saveDump(s)).empty() && itemsKept(r), "Skill Select: a skill the card has is refused; nothing changes, no item used up");
+  }
+
+  // Position Training (Select): the picked position, every time, in either slot.
+  struct Pick { int index, position; const char* name; int parameter; };
+  for (Pick pick : {Pick{0, 12, "CF", 1}, Pick{1, 4, "DMF", 6}, Pick{0, 2, "LSB", 11}, Pick{1, 8, "OMF", 5}, Pick{0, 11, "ST", 2}}) {
+    for (int round = 0; round < 3; ++round) {
+      srand(round * 104729 + pick.position);
+      auto r = positionSelect(P, 701, pick.index, pick.position, pick.name)->getJSONObject("position_training_result");
+      check(r->getString("is_success") == "YES" && r->getString("additional_position") == pick.name,
+          (std::string("Position Select: the picked position is answered: ") + pick.name).c_str());
+      auto row = saved(701);
+      check(row->getJSONArray("additional_position")->getString(pick.index) == pick.name && row->getJSONArray("parameters")->getInt(pick.parameter) == 2,
+          (std::string("Position Select: the picked position is the one learned: ") + pick.name).c_str());
+    }
+  }
+  {
+    // Slot 0 now holds ST (it replaced LSB, which replaced CF), slot 1 OMF (it replaced DMF).
+    auto row = saved(701);
+    auto values = row->getJSONArray("parameters");
+    check(row->getJSONArray("additional_position")->toString() == "[\"ST\",\"OMF\"]" && values->getInt(1) == 0 && values->getInt(11) == 0 &&
+          values->getInt(6) == 0 && values->getInt(3) == 2, "Position Select: a replaced position is no longer played; the card's own one stays");
+  }
+  // Refused: the card's own position, the other slot's position, GK, and any card that is a GK.
+  struct Refusal { const char* what; long long id, serial; int index, position; const char* name; };
+  for (Refusal no : {Refusal{"its own position", P, 701, 0, 9, "LWG"}, Refusal{"the other slot's position", P, 701, 0, 8, "OMF"},
+                     Refusal{"GK", P, 701, 1, 0, "GK"}, Refusal{"a GK card", Q, 702, 0, 12, "CF"}}) {
+    auto before = saveDump(s);
+    auto r = positionSelect(no.id, no.serial, no.index, no.position, no.name);
+    auto result = r->getJSONObject("position_training_result");
+    check(result->getString("is_success") == "NO" && result->getString("additional_position").empty() && firstDifference(before, saveDump(s)).empty(),
+        (std::string("Position Select: ") + no.what + " is refused and nothing changes").c_str());
+    check(!r->has("skill_training_result"), (std::string("Position Select: ") + no.what + ": no skill result is sent").c_str());
+  }
+  // Without position_id the item's effect is the picked Position; a number in position_id too.
+  {
+    auto r = use("POSITION_TRAINING_SELECT", P, 701, 0, 7, 0, newObj())->getJSONObject("position_training_result");
+    check(r->getString("is_success") == "YES" && r->getString("additional_position") == "RMF", "Position Select: the item's effect names the position");
+    r = use("POSITION_TRAINING_SELECT", P, 701, 0, 0, 0, newObj()->put("position_id", 5))->getJSONObject("position_training_result");
+    check(r->getString("is_success") == "YES" && r->getString("additional_position") == "CMF", "Position Select: a Position number as position_id");
+  }
+  // Position Training (random) still never teaches a position the card plays by itself.
+  for (int k = 0; k < 20; ++k) {
+    auto r = use("POSITION_TRAINING", P, 701, k % 2, 0, 0, newObj()->put("position_id", ""))->getJSONObject("position_training_result");
+    check(r->getString("is_success") == "YES" && r->getString("additional_position") != "LWG", "Position Training: never the card's own position");
+  }
+}
+
 int main() {
   try {
     zs::setVerbose(false);
@@ -1499,6 +1637,7 @@ int main() {
     cardIdentityTests(root);
     serialTests(root);
     starterSerialTests(root);
+    selectTrainingTests(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
     check(child >= 0, "spawn abrupt-exit save test");

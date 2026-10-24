@@ -224,6 +224,7 @@ void decodeZiruMyclubItemRequest(const Bytes& b) {
   ziruTargetPlayerId = 0;
   ziruLevelEffect = 0;
   ziruIsAuto = false;
+  ziruPickedPosition = -1;
   try {
     ObjP req = decodeZiruRequestObject(&b);
     if (!req) return;
@@ -257,6 +258,7 @@ void decodeZiruMyclubItemRequest(const Bytes& b) {
       ziruSkillCategoryCode = req->optInt("skill_training_category_type", -1);
     }
 
+    bool effectSent = false;
     ArrP itemList = req->optJSONArray("item_list");
     if (itemList) {
       for (int i = 0; i < itemList->length(); i++) {
@@ -266,7 +268,7 @@ void decodeZiruMyclubItemRequest(const Bytes& b) {
         ObjP item = it->optJSONObject("item");
         if (item) {
           if (item->has("item_type")) ziruItemType = item->optString("item_type", "");
-          if (item->has("effect")) { i5 = item->optInt("effect", 0); ziruSkillItemEffect = i5; }
+          if (item->has("effect")) { i5 = item->optInt("effect", 0); ziruSkillItemEffect = i5; effectSent = true; }
           if (item->has("grade")) ziruSkillItemGrade = item->optInt("grade", 0);
           readAbility(item);
         }
@@ -288,11 +290,30 @@ void decodeZiruMyclubItemRequest(const Bytes& b) {
       if (abilityInClientNumbers) ziruAbilityId = iosSkillId(ziruAbilityId, false);
       if (ziruSkillItemEffect > 0) ziruSkillItemEffect = iosSkillId(ziruSkillItemEffect, false);
     }
-    zs::logi("OFFLINE_SERVER", "[ZIRU V15.7.2A ITEM] type=" + (ziruItemType ? *ziruItemType : "none") +
-             " serial=" + str(ziruTargetSerial) + " player_id=" + str(ziruTargetPlayerId) +
-             " training_index=" + str(ziruTrainingIndex) + " ability=" + str(ziruAbilityId));
+    // Position Training (Select): the 11.1.1 client sends the picked position as position_id, its
+    // CommandCamPosition name ("CF", "ST", "LWG", "OMF", "LSB", ...), and as the item's effect, its
+    // Position number (GK 0 ... CF 12): MyClubMyTeamPlayerTrainingPositionSelect::StartPositionTrainingCommand
+    // 0x1046830dc puts the picked Position in the item, CommandObjectCmdUseMyclubItem::InitCommand
+    // 0x104774924 writes CommandCamPosition::GetLiteral(Position) as position_id. InitCommand does not
+    // fill ability_id for this item; it is not read.
+    std::string positionName = req->optString("position_id", "");
+    if (ziruItemType && *ziruItemType == "POSITION_TRAINING_SELECT") {
+      int byName = z27GetPositionIndexByName(positionName);
+      int32_t number = -1;
+      if (byName < 0 && !positionName.empty()) toInteger(req->opt("position_id"), number);
+      if (byName < 0 && number < 0 && effectSent) number = ziruSkillItemEffect;
+      ziruPickedPosition = byName >= 0 ? byName : z27PositionParameter(number);
+    }
+    std::string line = "[ZIRU V15.7.2A ITEM] type=" + (ziruItemType ? *ziruItemType : "none") +
+                       " serial=" + str(ziruTargetSerial) + " player_id=" + str(ziruTargetPlayerId) +
+                       " training_index=" + str(ziruTrainingIndex) + " ability=" + str(ziruAbilityId) +
+                       " effect=" + str(ziruSkillItemEffect) + " position_id=" + positionName +
+                       " picked_position=" + str(ziruPickedPosition);
+    zs::logi("OFFLINE_SERVER", line);
+    logRequest("ZIRU_ITEM", line);
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU V15.7.2A ITEM] decode failed ") + e.what());
+    logRequest("ZIRU_ITEM", std::string("[ZIRU V15.7.2A ITEM] decode failed ") + e.what());
   }
 }
 

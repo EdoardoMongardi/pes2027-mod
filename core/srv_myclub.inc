@@ -124,6 +124,27 @@ static inline int z27GetPositionIndexByName(const std::string& name) {
   return -1;
 }
 
+// parameters[1..13] index of a Position number (GK 0, CB 1, LB 2, RB 3, DMF 4, CMF 5, LMF 6,
+// RMF 7, AMF 8, LWF 9, RWF 10, SS 11, CF 12), as iOS tmpdb::Player::GetDataLabel(Position)
+// maps it (labelTable 0x10578ba08); -1 for anything else.
+static inline int z27PositionParameter(int position) {
+  static const int index[13] = {13, 10, 11, 12, 6, 7, 8, 9, 5, 3, 4, 2, 1};
+  return position >= 0 && position < 13 ? index[position] : -1;
+}
+
+// Position training items are never used up.
+static void z27KeepPositionTrainingItems(const ObjP& jo) {
+  ArrP items = jo->optJSONArray("item_list");
+  for (int i = 0; items && i < items->length(); i++) {
+    ObjP it = items->optJSONObject(i);
+    ObjP item;
+    if (it && (item = it->optJSONObject("item"))) {
+      std::string t = item->optString("item_type", "");
+      if (t == "POSITION_TRAINING" || t == "POSITION_TRAINING_SELECT") it->put("inventory_num", 999999);
+    }
+  }
+}
+
 // Position training on `target`, the card the client picked (z27TrainingTarget).
 void applyZiruPositionTrainingResponse(const ObjP& jo, const ObjP& target) {
   try {
@@ -161,6 +182,26 @@ void applyZiruPositionTrainingResponse(const ObjP& jo, const ObjP& target) {
           std::string other_pos = (other_slot < add->length()) ? add->optString(other_slot, "") : "";
           int other_pos_idx = z27GetPositionIndexByName(other_pos);
 
+          // Position Training (Select) teaches the position the client picked, when the card can
+          // learn it: an outfield position the card does not play by itself and that the other slot
+          // does not hold. Anything else is answered as not successful; nothing changes and the
+          // item is not used up.
+          bool select = *ziruItemType == "POSITION_TRAINING_SELECT";
+          if (select) {
+            int k = ziruPickedPosition;
+            std::string old_pos = (slot < add->length()) ? add->optString(slot, "") : "";
+            bool hasBase = baseParams && baseParams->length() >= 14;
+            int level = hasBase ? baseParams->optInt(k) : (k == z27GetPositionIndexByName(old_pos) ? 0 : params->optInt(k));
+            if (!(k >= 1 && k <= 12 && k != other_pos_idx && level < 2)) {
+              for (const char* other : {"skill_training_result", "ability_training_result"}) jo->remove(other);
+              jo->put("position_training_result", newObj()->put("additional_position", "")->put("is_success", "NO"));
+              z27KeepPositionTrainingItems(jo);
+              logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_SELECT_REFUSED] serial=" + str(j) + " slot=" + str(slot) +
+                                                  " position=" + str(k) + " cannot be learned");
+              return;
+            }
+          }
+
           if (baseParams && baseParams->length() >= 14) {
             for (int k = 1; k <= 12; k++) {
               params->put(k, baseParams->optInt(k));
@@ -191,7 +232,7 @@ void applyZiruPositionTrainingResponse(const ObjP& jo, const ObjP& target) {
             }
           }
 
-          int chosen_idx = candidates[rand() % candidates.size()];
+          int chosen_idx = select ? ziruPickedPosition : candidates[rand() % candidates.size()];
           std::string chosen_pos = names[chosen_idx];
 
           params->put(chosen_idx, 2);
@@ -216,26 +257,17 @@ void applyZiruPositionTrainingResponse(const ObjP& jo, const ObjP& target) {
           res->put("additional_position", chosen_pos);
           res->put("is_success", "YES");
 
-          ArrP items = jo->optJSONArray("item_list");
-          if (items) {
-            for (int i8 = 0; i8 < items->length(); i8++) {
-              ObjP it = items->optJSONObject(i8);
-              ObjP item;
-              if (it && (item = it->optJSONObject("item"))) {
-                std::string t = item->optString("item_type", "");
-                if (t == "POSITION_TRAINING" || t == "POSITION_TRAINING_SELECT") it->put("inventory_num", 999999);
-              }
-            }
-          }
+          z27KeepPositionTrainingItems(jo);
 
-          logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_V26] serial=" + str(j) + " slot=" + str(slot) + " position=" + chosen_pos);
+          logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_V26] type=" + *ziruItemType + " serial=" + str(j) + " slot=" + str(slot) +
+                                              " position=" + chosen_pos);
           return;
         }
 
-        ObjP res = jo->optJSONObject("position_training_result");
-        if (!res) { res = newObj(); jo->put("position_training_result", res); }
-        res->put("additional_position", "");
-        res->put("is_success", "NO");
+        // A goalkeeper learns no other position.
+        for (const char* other : {"skill_training_result", "ability_training_result"}) jo->remove(other);
+        jo->put("position_training_result", newObj()->put("additional_position", "")->put("is_success", "NO"));
+        z27KeepPositionTrainingItems(jo);
         return;
       }
     }
@@ -656,8 +688,12 @@ void applyZiruSkillTrainingResponse(const ObjP& jo, const ObjP& target) {
       if (isZiruTrainableSkill(chosen) && !cardHas(chosen) && !learnedElsewhere) {
         v = chosen;
       } else {
-        logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_SELECT_REFUSED] skill=" + str(chosen) + " cannot be trained");
-        if (!candidates.empty()) v = candidates[0];
+        // Never another skill than the one picked: the training is not successful, the card
+        // stays as it is and the item is not used up.
+        logRequest("ZIRU_SKILL_V18", "[ZIRU_SKILL_SELECT_REFUSED] serial=" + str(j) + " skill=" + str(chosen) + " cannot be trained");
+        jo->put("skill_training_result", newObj()->put("is_success", "NO"));
+        z27KeepSkillTrainingItems(jo);
+        return;
       }
     } else if (!candidates.empty()) {
       v = candidates[rand() % candidates.size()];
@@ -704,7 +740,7 @@ void applyZiruSkillTrainingResponse(const ObjP& jo, const ObjP& target) {
     prefs.edit().putString(key, joinInts(al)).commit();
     saveZiruPlayerToDb(owned);
 
-    logRequest("ZIRU_SKILL_V22", "[ZIRU_SKILL_V22] skill awarded: " + str(v));
+    logRequest("ZIRU_SKILL_V22", "[ZIRU_SKILL_V22] type=" + *ziruItemType + " serial=" + str(j) + " slot=" + str(target) + " skill awarded: " + str(v));
     ObjP res = jo->optJSONObject("skill_training_result");
     if (!res) { res = newObj(); jo->put("skill_training_result", res); }
     res->put("additional_skill_id", v);

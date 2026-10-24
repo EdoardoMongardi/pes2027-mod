@@ -136,6 +136,8 @@ class OfflineServer {
   int64_t ziruTargetPlayerId = 0;
   int64_t ziruTargetSerial = 0;
   int32_t ziruTrainingIndex = 0;
+  // Position Training (Select): the position the client picked, as a parameters[1..13] index; -1 none.
+  int32_t ziruPickedPosition = -1;
 
   // ---- helpers for Android APIs ----
   std::string readAsset(const std::string& name);      // throws IOEx
