@@ -288,16 +288,10 @@ bool ziruMyLeagueUserIsHomeV74() {
 void ziruPatchAgentBoxInfo(const ObjP& jo) {
   try {
     int64_t j = ziruLastAgentId;
-    if (j > 0) {
+    ObjP pack = j > 0 ? ziruPack(j) : nullptr;
+    if (pack) {
       ziruAttachResetCounts(jo, j);
-      std::string s = sp("almanac_state").getString("ziru_remaining_" + str(j), "");
-      int len = 23;
-      if (!s.empty()) {
-        try { len = Array::parse(s)->length(); } catch (...) {}
-      }
-      ArrP a = newArr();
-      a->put(0); a->put(0); a->put(0); a->put(0); a->put(len);
-      jo->put("remaining_player_count", a);
+      jo->put("remaining_player_count", ziruBoxCounts(ziruBoxRemaining(j, ziruBoxCards(pack))->length()));
     }
   } catch (const std::exception&) {
   }

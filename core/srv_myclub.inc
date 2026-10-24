@@ -60,24 +60,126 @@ void applyZiruBoosterTrainingResponse(const ObjP& r13, const ObjP& target) {
   }
 }
 
+// ---- Boxes: their cards (ZIRU_PACKS_CONFIG.json) and what is left in each ----
+// The box config, read at most once per request (serve() clears it).
+ObjP ziruPacksCache;
+int ziruPacksParses = 0;  // how often ZIRU_PACKS_CONFIG.json was parsed (checked by the tests)
+
+ObjP ziruPacksConfig() {
+  if (!ziruPacksCache) {
+    ziruPacksParses++;
+    ziruPacksCache = Object::parse(readAsset("responses/ZIRU_PACKS_CONFIG.json"));
+  }
+  return ziruPacksCache;
+}
+
+// The box with this agent id in the config, or null when the agent is not one of the boxes.
+ObjP ziruPack(int64_t agent) {
+  ArrP packs = ziruPacksConfig()->optJSONArray("packs");
+  for (int i = 0; packs && i < packs->length(); i++) {
+    ObjP p = packs->optJSONObject(i);
+    if (p && p->optLong("agent_id") == agent) return p;
+  }
+  return nullptr;
+}
+
+// A box's cards: its player_ids, each card once.
+ArrP ziruBoxCards(const ObjP& pack) {
+  ArrP ids = pack ? pack->optJSONArray("player_ids") : nullptr;
+  ArrP cards = newArr();
+  std::set<int64_t> seen;
+  for (int i = 0; ids && i < ids->length(); i++)
+    if (seen.insert(ids->optLong(i)).second) cards->put(ids->opt(i));
+  return cards;
+}
+
+// A short fingerprint of a box's cards, kept with what is left of the box: the number of cards and the
+// 64-bit FNV-1a hash of the sorted card ids, so a change in the box's cards is noticed and a new order is not.
+std::string ziruBoxSignature(const ArrP& cards) {
+  static constexpr uint64_t kFnvOffsetBasis = 14695981039346656037ULL, kFnvPrime = 1099511628211ULL;
+  std::vector<int64_t> ids;
+  for (int i = 0; i < cards->length(); i++) ids.push_back(cards->optLong(i));
+  std::sort(ids.begin(), ids.end());
+  uint64_t h = kFnvOffsetBasis;
+  for (int64_t id : ids)
+    for (char c : std::to_string(id) + ",") { h ^= (unsigned char)c; h *= kFnvPrime; }
+  return std::to_string(ids.size()) + ":" + std::to_string(h);
+}
+
+// The card ids the user has: every saved card, every drawn card and the starter cards (also under the id the iOS
+// client knows a starter card by), leaving out sold ones. Built at most once per request (serve() clears it, and a
+// draw clears it again).
+std::optional<std::set<int64_t>> ziruOwnedCache;
+
+const std::set<int64_t>& ziruOwnedCardIds() {
+  if (ziruOwnedCache) return *ziruOwnedCache;
+  std::set<int64_t> own;
+  auto add = [&](const ObjP& card) {
+    ObjP gp = card && card->optJSONObject("gameplayer") ? card->getJSONObject("gameplayer") : card;
+    ObjP gid = gp ? gp->optJSONObject("gameplayer_id") : nullptr;
+    if (gid && !isZiruPlayerSold(gid->optLong("serial", 0))) own.insert(gid->optLong("id", 0));
+  };
+  for (auto& row : ziruDb->loadAllPlayerRows()) {
+    try { add(Object::parse(row.second)); } catch (const std::exception&) {}
+  }
+  std::string recruited = sp("almanac_state").getString("recruited_players", "");
+  if (!recruited.empty()) {
+    ArrP list = Array::parse(recruited);
+    for (int i = 0; i < list->length(); i++) add(list->optJSONObject(i));
+  }
+  for (const auto& kv : z27Starters().bySerialId)
+    if (!isZiruPlayerSold(kv.first.first)) own.insert(kv.first.second);
+  ziruOwnedCache = std::move(own);
+  return *ziruOwnedCache;
+}
+
+std::string ziruRemainingKey(int64_t agent) { return "ziru_remaining_" + str(agent); }
+std::string ziruBoxSignatureKey(int64_t agent) { return "ziru_box_signature_" + str(agent); }
+
+// What is left in a box: the cards a draw can give. Every reader of a box's saved list uses this.
+// A box this save has not seen yet, and a box whose cards changed since its list was saved (an older build's boxes
+// under a reused id, or new box contents), start again as the box's cards minus the cards the user already has, so
+// nothing the user has is offered again and no card of another box comes out of it. A box the user reset holds all
+// its cards again.
+ArrP ziruBoxRemaining(int64_t agent, const ArrP& cards) {
+  zs::Prefs& prefs = sp("almanac_state");
+  std::string key = ziruRemainingKey(agent), signature = ziruBoxSignature(cards);
+  std::string saved = prefs.getString(key, "");
+  if (prefs.getString(ziruBoxSignatureKey(agent), "") == signature)
+    return Array::parse(saved.empty() ? cards->toString() : saved);
+  const std::set<int64_t>& own = ziruOwnedCardIds();
+  ArrP left = newArr();
+  for (int i = 0; i < cards->length(); i++)
+    if (!own.count(cards->optLong(i))) left->put(cards->opt(i));
+  prefs.edit().putString(key, left->toString()).putString(ziruBoxSignatureKey(agent), signature).commit();
+  logRequest("ZIRU_BOX_MIGRATE", "[ZIRU_BOX_MIGRATE] agent_id=" + str(agent) + " cards=" + str(cards->length()) + " left=" +
+                                     str(left->length()) + (saved.empty() ? " (new box)" : " (changed box)"));
+  return left;
+}
+
+// A box reply carries five counts (remaining_player_count, base_player_count); the client shows their sum
+// (AUCMenuMyClubAgentView::GetRemainingPlayerNumStr 0x100d8c1f4). The mod keeps a box's whole count in the
+// third one, where the shipped box lists have it.
+static constexpr int kZiruBoxCountSlots = 5, kZiruBoxCountSlot = 2;
+
+ArrP ziruBoxCounts(int count) {
+  ArrP c = newArr();
+  for (int i = 0; i < kZiruBoxCountSlots; i++) c->put(i == kZiruBoxCountSlot ? count : 0);
+  return c;
+}
+
 void applyZiruDynamicRecruit(const ObjP& jo) {
   try {
     int64_t j = ziruLastAgentId;
     if (j <= 0) return;
     int32_t i = ziruLastCount;
     if (i <= 0) i = 1;
-    ArrP packs = Object::parse(readAsset("responses/ZIRU_PACKS_CONFIG.json"))->getJSONArray("packs");
-    ObjP pack;
-    for (int i2 = 0; i2 < packs->length(); i2++) {
-      ObjP p = packs->optJSONObject(i2);
-      if (p && p->optLong("agent_id") == j) { pack = p; break; }
-    }
+    ObjP pack = ziruPack(j);
     if (!pack) { zs::logi("OFFLINE_SERVER", "[ZIRU_V10_DRAW] agent_id not in ZIRU config; leaving template unchanged"); return; }
-    ArrP ids = pack->getJSONArray("player_ids");
+    ArrP ids = ziruBoxCards(pack);
     zs::Prefs& prefs = sp("almanac_state");
-    std::string key = "ziru_remaining_" + str(j);
-    std::string s = prefs.getString(key, "");
-    ArrP remaining = s.empty() ? Array::parse(ids->toString()) : Array::parse(s);
+    std::string key = ziruRemainingKey(j);
+    ArrP remaining = ziruBoxRemaining(j, ids);
     int length = remaining->length();
     if (length <= 0) {
       remaining = Array::parse(ids->toString());
@@ -108,6 +210,7 @@ void applyZiruDynamicRecruit(const ObjP& jo) {
     }
     jo->put("gameplayer_list", out);
     prefs.edit().putString(key, remaining->toString()).putLong("ziru_next_serial", j2).commit();
+    ziruOwnedCache.reset();  // the user has the drawn cards now
     std::string msg = "[ZIRU_V10_DRAW] count=" + str(i) + " remaining=" + str(remaining->length());
     zs::logi("OFFLINE_SERVER", msg);
     logRequest("ZIRU_V10_DRAW", msg);
@@ -312,19 +415,11 @@ void applyZiruPositionTrainingResponse(const ObjP& jo, const ObjP& target) {
 
 void applyZiruProcurableList(const ObjP& jo) {
   try {
-    int32_t i = (int32_t)ziruLastAgentId;
+    int64_t i = ziruLastAgentId;
     if (i <= 0) return;
-    ArrP packs = Object::parse(readAsset("responses/ZIRU_PACKS_CONFIG.json"))->getJSONArray("packs");
-    ObjP pack;
-    for (int i2 = 0; i2 < packs->length(); i2++) {
-      pack = packs->optJSONObject(i2);
-      if (pack && pack->optInt("agent_id") == i) break;
-      pack = nullptr;
-    }
+    ObjP pack = ziruPack(i);
     if (!pack) return;
-    ArrP ids = pack->getJSONArray("player_ids");
-    std::string s = sp("almanac_state").getString("ziru_remaining_" + str(i), "");
-    if (!s.empty()) ids = Array::parse(s);
+    ArrP ids = ziruBoxRemaining(i, ziruBoxCards(pack));
     ArrP list = jo->optJSONArray("gameplayer_list");
     ObjP first;
     if (!list || list->length() <= 0 || !(first = list->optJSONObject(0))) return;
@@ -372,19 +467,15 @@ void applyZiruRemainingCounts(const ObjP& jo) {
   try {
     ArrP list = jo->optJSONArray("agent_list");
     if (!list) return;
-    zs::Prefs& prefs = sp("almanac_state");
     for (int i = 0; i < list->length(); i++) {
       ObjP a = list->optJSONObject(i);
       if (!a) continue;
       int64_t id = a->optLong("agent_id");
-      std::string s = prefs.getString("ziru_remaining_" + str(id), "");
-      if (!s.empty()) {
-        int len = Array::parse(s)->length();
-        ArrP c = newArr();
-        c->put(0); c->put(0); c->put(len); c->put(0); c->put(0);
-        a->put("remaining_player_count", c);
-        logRequest("ZIRU_V12_2_REMAINING", "[ZIRU_V12_2_REMAINING] agent_id=" + str(id) + " remaining=" + str(len));
-      }
+      ObjP pack = ziruPack(id);
+      if (!pack) continue;
+      int len = ziruBoxRemaining(id, ziruBoxCards(pack))->length();
+      a->put("remaining_player_count", ziruBoxCounts(len));
+      logRequest("ZIRU_V12_2_REMAINING", "[ZIRU_V12_2_REMAINING] agent_id=" + str(id) + " remaining=" + str(len));
     }
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V12_2_REMAINING_ERR] failed ") + e.what());
@@ -395,7 +486,11 @@ void applyZiruResetBox(const ObjP& jo) {
   try {
     int64_t j = ziruLastAgentId;
     if (j > 0) {
-      sp("almanac_state").edit().remove("ziru_remaining_" + str(j)).commit();
+      // A reset box holds all its cards again, the ones the user has included (ziruBoxRemaining).
+      auto edit = sp("almanac_state").edit();
+      edit.remove(ziruRemainingKey(j));
+      if (ObjP pack = ziruPack(j)) edit.putString(ziruBoxSignatureKey(j), ziruBoxSignature(ziruBoxCards(pack)));
+      edit.commit();
       jo->put("agent_id", (long long)j);
       ziruAttachResetCounts(jo, j);
       logRequest("ZIRU_V14_RESET", "[ZIRU_V14_RESET] agent_id=" + str(j) + " restored");

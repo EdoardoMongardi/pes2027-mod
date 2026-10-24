@@ -2010,6 +2010,182 @@ static void konamiPlayerDataSkillListTest(const std::string& top) {
       "player data: the skill list of Konami's captured card is Konami's list");
 }
 
+// ---- Boxes ------------------------------------------------------------------
+// The box tests' cards: A..G are box cards with records, S1 and S2 are starter cards (CmdLogin.json) that are
+// also box cards, and T is the card the draw and box-contents templates carry.
+static const long long kBoxA = 601 + (0x50LL << 40), kBoxB = 602 + (0x50LL << 40), kBoxC = 603 + (0x50LL << 40),
+    kBoxD = 604 + (0x50LL << 40), kBoxE = 605 + (0x50LL << 40), kBoxF = 606 + (0x50LL << 40),
+    kBoxG = 607 + (0x50LL << 40), kBoxS1 = 611 + (0x10LL << 40), kBoxS2 = 612 + (0x10LL << 40),
+    kBoxT = 600 + (0x50LL << 40);
+static const long long kBoxS1Serial = 900001, kBoxS2Serial = 900002;
+static const std::vector<int> kNoAi = {0, 0, 0, 0, 0, 0, 0};
+using BoxLayout = std::vector<std::pair<long long, std::vector<long long>>>;  // (agent id, cards), in list order
+
+static ObjP boxCard(long long id, long long serial) { return card(id, serial, 12, 0, 0, kNoAi, {}, 108, 0, 149); }
+static ArrP idList(const std::vector<long long>& ids) {
+  auto a = newArr();
+  for (long long id : ids) a->put(id);
+  return a;
+}
+static std::set<long long> idSet(const std::vector<long long>& ids) { return std::set<long long>(ids.begin(), ids.end()); }
+static std::string showIds(const std::set<long long>& ids) {
+  std::string s;
+  for (long long id : ids) s += (s.empty() ? "" : " ") + std::to_string(id & 0xFFFFFF);
+  return "{" + s + "}";
+}
+// A box entry of an agent list and its price entry, shaped like the shipped ones.
+static ObjP boxEntry(long long agent, const std::string& title, int count, long long pickup) {
+  auto counts = newArr()->put(0)->put(0)->put(count)->put(0)->put(0);
+  auto pick = [&] { return newArr()->put(boxCard(pickup, 0)); };
+  return newObj()->put("agent_id", agent)->put("count", 0)->put("title", title)->put("subcategory", "Epic")
+      ->put("banner_file_c_name", "/banner/agent/001348/c")->put("banner_file_d_name", "/banner/agent/001348/d")
+      ->put("can_reset", "YES")->put("remaining_player_count", counts)->put("base_player_count", Array::parse(counts->toString()))
+      ->put("pickup_list", pick())->put("player_list_total", count)->put("agent_type", "BOX_AGENT")
+      ->put("pickup_cardtype_list", newArr()->put(newObj()->put("id", pickup)->put("serial", 0)))
+      ->put("probability", std::to_string(count))->put("banner_a_pickup_list", pick())->put("banner_c_pickup_list", pick());
+}
+static ObjP boxPrice(long long agent) {
+  return newObj()->put("agent_id", agent)->put("price_list", Array::parse(
+      R"([{"multiple_count":1,"price":{"can_use_coin":"YES","coin_price":100}},{"multiple_count":10,"price":{"can_use_coin":"YES","coin_price":900}}])"));
+}
+// The box config and the shipped box lists for a layout.
+static void writeBoxLayout(const std::string& root, const BoxLayout& layout) {
+  auto packs = newArr(), agents = newArr(), prices = newArr();
+  for (const auto& [agent, cards] : layout) {
+    std::string title = "BOX " + std::to_string(agent);
+    packs->put(newObj()->put("agent_id", agent)->put("title", title)->put("category", "epic")->put("player_ids", idList(cards)));
+    agents->put(boxEntry(agent, title, (int)cards.size(), cards.empty() ? kBoxT : cards[0]));
+    prices->put(boxPrice(agent));
+  }
+  asset(root, "ZIRU_PACKS_CONFIG.json", newObj()->put("schema", "ziru-runtime-pack-config-v1")->put("packs", packs));
+  auto lists = newObj()->put("agent_list", agents)->put("agent_price_list", prices)->put("result", "NOERR");
+  asset(root, "CmdGetMyclubAgentlist.json", lists);
+  asset(root, "get_myclub_agentlist.json", lists);
+}
+// Records of every box card, two starter cards in a squad, and the templates of the box replies.
+static void writeBoxAssets(const std::string& root) {
+  std::filesystem::create_directories(root + "/responses");
+  auto records = newObj();
+  for (long long id : {kBoxA, kBoxB, kBoxC, kBoxD, kBoxE, kBoxF, kBoxG, kBoxS1, kBoxS2, kBoxT})
+    records->put(std::to_string(id), newObj()->put("gameplayer", boxCard(id, 0)));
+  asset(root, "ZIRU_PLAYER_RECORDS.json", records);
+  auto refs = newArr();
+  for (long long serial : {kBoxS1Serial, kBoxS2Serial})
+    refs->put(newObj()->put("gameplayer_id", newObj()->put("id", serial == kBoxS1Serial ? kBoxS1 : kBoxS2)->put("serial", serial)));
+  auto squad = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
+  asset(root, "CmdLogin.json", newObj()->put("entry_info", newObj()->put("main_squad_id", 9)
+      ->put("gameplayer_list", newArr()->put(boxCard(kBoxS1, kBoxS1Serial))->put(boxCard(kBoxS2, kBoxS2Serial)))
+      ->put("coach_list", newArr()->put(coachRef(100, 1000)))
+      ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squad)
+          ->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))))));
+  asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline"})"));
+  asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
+  asset(root, "CmdUseMyclubAgent.json", newObj()->put("gameplayer_list", newArr()->put(newObj()->put("gameplayer", boxCard(kBoxT, 1))))
+      ->put("agent_list", newArr())->put("result", "NOERR"));
+  asset(root, "CmdGetMyclubProcurableGameplayerlist.json", newObj()->put("gameplayer_list", newArr()->put(newObj()->put("gameplayer", boxCard(kBoxT, 0))))
+      ->put("result", "NOERR"));
+  asset(root, "CmdGetMyclubAgentBoxInfo.json", obj(R"({"result":"NOERR","can_reset":"NO","remaining_player_count":[0,0,0,0,23],"base_player_count":[0,0,0,0,23]})"));
+  asset(root, "CmdResetMyclubAgent.json", obj(R"({"result":"NOERR","msgid":"CMD_RESET_MYCLUB_AGENT"})"));
+  asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
+}
+static int countSum(const ArrP& counts) {
+  int n = 0;
+  for (int i = 0; counts && i < counts->length(); ++i) n += counts->optInt(i);
+  return n;
+}
+// What each listed box shows as left: the sum of its five counts, as the client shows it.
+static std::map<long long, int> shownLeft(const ObjP& reply) {
+  std::map<long long, int> left;
+  auto list = reply->getJSONArray("agent_list");
+  for (int i = 0; i < list->length(); ++i)
+    left[list->getJSONObject(i)->getLong("agent_id")] = countSum(list->getJSONObject(i)->optJSONArray("remaining_player_count"));
+  return left;
+}
+static std::vector<long long> cardIds(const ArrP& list) {
+  std::vector<long long> ids;
+  for (int i = 0; list && i < list->length(); ++i) {
+    auto p = list->getJSONObject(i);
+    if (p->optJSONObject("gameplayer")) p = p->getJSONObject("gameplayer");
+    ids.push_back(p->getJSONObject("gameplayer_id")->getLong("id"));
+  }
+  return ids;
+}
+// The cards a box's contents screen lists, and a draw from a box.
+static std::set<long long> offered(OfflineServer& s, long long agent) {
+  return idSet(cardIds(call(s, "CMD_GET_MYCLUB_PROCURABLE_GAMEPLAYERLIST", newObj()->put("agent_id", agent))->getJSONArray("gameplayer_list")));
+}
+static std::vector<long long> drawFrom(OfflineServer& s, long long agent, int count) {
+  return cardIds(call(s, "CMD_USE_MYCLUB_AGENT", newObj()->put("agent_id", agent)->put("count", count))->getJSONArray("gameplayer_list"));
+}
+static int logLines(const std::string& path, const std::string& what) {
+  std::ifstream f(path);
+  int n = 0;
+  for (std::string line; std::getline(f, line);) n += line.find(what) != std::string::npos;
+  return n;
+}
+
+// What is left in a box, read the same way by the box list, the box contents, a draw and the box info.
+static void boxRemainingTests(const std::string& top) {
+  const std::string root = top + "/boxes";
+  writeBoxAssets(root);
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save"; cfg.logFile = root + "/server.log";
+  std::filesystem::create_directories(cfg.dataDir);
+  // A save an older build (fix3) wrote with its layout, where box 1368 held A, B, C and D: it drew A and C from
+  // 1368 and saved what was left of it, but no fingerprint of the box's cards. C was sold since.
+  writeBoxLayout(root, {{1368, {kBoxA, kBoxB, kBoxC, kBoxD}}});
+  {
+    OfflineServer s(cfg);
+    call(s, "CMD_LOGIN");
+    auto recruited = newArr();
+    for (auto [id, serial] : std::vector<std::pair<long long, long long>>{{kBoxA, 2}, {kBoxC, 3}}) {
+      s.ziruDb->savePlayer(serial, id, boxCard(id, serial)->toString());
+      recruited->put(newObj()->put("gameplayer", boxCard(id, serial)));
+    }
+    s.sp("almanac_state").edit().putString("recruited_players", recruited->toString())
+        .putString("ziru_remaining_1368", idList({kBoxB, kBoxD})->toString()).putLong("ziru_next_serial", 3).commit();
+    s.markZiruPlayerSold(3);
+  }
+  // The new layout: 1368 holds other cards now and 7001 is new. The user has A, S1 and S2; C was sold.
+  writeBoxLayout(root, {{1368, {kBoxA, kBoxB, kBoxE, kBoxG, kBoxS1}}, {7001, {kBoxC, kBoxD, kBoxF, kBoxS2}}});
+  {
+    OfflineServer s(cfg);
+    auto left = shownLeft(call(s, "CMD_GET_MYCLUB_AGENTLIST"));
+    check(left[1368] == 3 && left[7001] == 3, ("a moved save: each box shows its cards minus the cards the user has, shown " +
+                                               std::to_string(left[1368]) + " and " + std::to_string(left[7001])).c_str());
+    auto in1368 = offered(s, 1368), in7001 = offered(s, 7001);
+    check(in1368 == idSet({kBoxB, kBoxE, kBoxG}),
+        ("a moved save: a box with new cards under a reused id lists its own cards, not the older build's list: " + showIds(in1368)).c_str());
+    check(in7001 == idSet({kBoxC, kBoxD, kBoxF}),
+        ("a moved save: a new box lists no card the user has, and a sold card again: " + showIds(in7001)).c_str());
+    auto drawn = drawFrom(s, 7001, 10);
+    check(drawn.size() == 3 && idSet(drawn) == in7001, ("a moved save: a draw gives only the box's cards the user does not have: " + showIds(idSet(drawn))).c_str());
+    check(shownLeft(call(s, "CMD_GET_MYCLUB_AGENTLIST"))[7001] == 0 && offered(s, 7001).empty(), "a box drawn to the end shows and lists nothing left");
+    auto info = call(s, "CMD_GET_MYCLUB_AGENT_BOX_INFO", newObj()->put("agent_id", 1368LL));
+    check(info->getJSONArray("remaining_player_count")->toString() == "[0,0,3,0,0]",
+        ("box info: what is left of the box, in the slot of its base count: " + info->getJSONArray("remaining_player_count")->toString()).c_str());
+    call(s, "CMD_RESET_MYCLUB_AGENT", newObj()->put("agent_id", 7001LL));
+    check(offered(s, 7001) == idSet({kBoxC, kBoxD, kBoxF, kBoxS2}) && shownLeft(call(s, "CMD_GET_MYCLUB_AGENTLIST"))[7001] == 4,
+        "a reset box holds all its cards again, the ones the user has included");
+    check(drawFrom(s, 1368, 1).size() == 1 && shownLeft(call(s, "CMD_GET_MYCLUB_AGENTLIST"))[1368] == 2, "a draw takes the card out of what is left");
+    int before = s.ziruPacksParses;
+    call(s, "CMD_GET_MYCLUB_AGENTLIST");
+    check(s.ziruPacksParses == before + 1, "the box config is read once for a box list");
+    before = s.ziruPacksParses;
+    drawFrom(s, 1368, 1);
+    check(s.ziruPacksParses == before + 1, "the box config is read once for a draw");
+  }
+  int moved = logLines(cfg.logFile, "[ZIRU_BOX_MIGRATE]");
+  check(moved == 2, ("each box's list is made again once after the layout changed, made " + std::to_string(moved)).c_str());
+  // The same layout with 7001's cards in another order: nothing is made again, what is left stays.
+  writeBoxLayout(root, {{1368, {kBoxA, kBoxB, kBoxE, kBoxG, kBoxS1}}, {7001, {kBoxS2, kBoxF, kBoxD, kBoxC}}});
+  {
+    OfflineServer s(cfg);
+    auto left = shownLeft(call(s, "CMD_GET_MYCLUB_AGENTLIST"));
+    check(left[1368] == 1 && left[7001] == 4, "what is left of each box survives a restart; the order of a box's cards does not matter");
+    check(logLines(cfg.logFile, "[ZIRU_BOX_MIGRATE]") == moved, "an unchanged box's list is not made again");
+  }
+}
+
 int main() {
   try {
     zs::setVerbose(false);
@@ -2377,6 +2553,7 @@ int main() {
     skillDeleteTests(root);
     goalkeeperSkillMigrationTests(root);
     konamiPlayerDataSkillListTest(root);
+    boxRemainingTests(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
     check(child >= 0, "spawn abrupt-exit save test");

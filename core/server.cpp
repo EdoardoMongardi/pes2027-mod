@@ -143,6 +143,9 @@ std::string OfflineServer::redirectUrl(const std::string& url) {
 Response OfflineServer::serve(Request& r) {
   std::lock_guard<std::recursive_mutex> g(mu);
   try {
+    // The box config and the cards the user has are read at most once for each request.
+    ziruPacksCache.reset();
+    ziruOwnedCache.reset();
     z27MigrateSave();  // once per process, before any handler reads the save
     if (cfg.iosPlayerLayout && r.readPos == 0) {
       Bytes mp;
