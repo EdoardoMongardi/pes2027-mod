@@ -1113,9 +1113,12 @@ static void ensureSymlink(NSString* linkPath, NSString* targetPath) {
         return;
       }
       // A small real file with the same bytes as the target already gives what the link would: keep the
-      // player's own file (their data folder stays complete) instead of replacing it with a link.
-      NSDictionary* targetAttrs = [fm attributesOfItemAtPath:targetPath.stringByResolvingSymlinksInPath error:nil];
-      if ([targetAttrs fileSize] == sz && [fm contentsEqualAtPath:linkPath andPath:targetPath]) return;
+      // player's own file (their data folder stays complete) instead of replacing it with a link. The target
+      // is often a link itself (Documents/livedata/<name> -> the app's copy), and contentsEqualAtPath: says
+      // NO for a file and a link to the same bytes, so compare with the file the target leads to.
+      NSString* resolvedTarget = targetPath.stringByResolvingSymlinksInPath;
+      NSDictionary* targetAttrs = [fm attributesOfItemAtPath:resolvedTarget error:nil];
+      if ([targetAttrs fileSize] == sz && [fm contentsEqualAtPath:linkPath andPath:resolvedTarget]) return;
       // A small file with other bytes can be the player's own (Documents/livedata can be a link into
       // their data folder): move it to PES2027-repair-backups, never delete it, then link the target.
       std::string kept = zfr::moveToBackups(gDocs.fileSystemRepresentation, linkPath.fileSystemRepresentation,
@@ -1203,6 +1206,18 @@ static NSSet<NSString*>* replaceableTableHashes(id entry) {
   return hashes;
 }
 
+// A real dt870 is about 9.5 MB. A file above this size is not read in to be hashed: it is not one the
+// installer may replace.
+static const unsigned long long kMaxTableFileBytes = 20000000;
+
+static NSString* sha256Hex(NSData* data) {
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+  NSMutableString* hash = [NSMutableString string];
+  for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
+  return hash;
+}
+
 static void installBundledTableFixes(NSArray<NSString*>* directories) {
   NSFileManager* fm = NSFileManager.defaultManager;
   NSString* bundle = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru"];
@@ -1237,22 +1252,22 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
           }
           BOOL exists = [fm fileExistsAtPath:path];
           if (exists) {
+            // Only a file known by its hash is replaced (Konami's original or a copy an earlier build
+            // installed). Any other file, also one too big to hash or one that cannot be read, is the
+            // player's own and is kept.
             NSDictionary* attrs = [fm attributesOfItemAtPath:path error:nil];
-            if ([attrs[NSFileSize] unsignedLongLongValue] <= 20000000) {
-              NSData* data = [NSData dataWithContentsOfFile:path];
-              if (data) {
-                unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-                CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
-                NSMutableString* hash = [NSMutableString string];
-                for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
-                if ([hash isEqualToString:manifest[name][@"sha256"]]) {
-                  continue;
-                }
-                if (![replaceable containsObject:hash]) {
-                  ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
-                  continue;
-                }
-              }
+            NSData* data = [attrs[NSFileSize] unsignedLongLongValue] <= kMaxTableFileBytes ? [NSData dataWithContentsOfFile:path] : nil;
+            if (!data) {
+              ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@ (too big or unreadable)", path);
+              continue;
+            }
+            NSString* hash = sha256Hex(data);
+            if ([hash isEqualToString:manifest[name][@"sha256"]]) {
+              continue;
+            }
+            if (![replaceable containsObject:hash]) {
+              ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
+              continue;
             }
             [fm removeItemAtPath:path error:nil];
           }
@@ -1262,13 +1277,10 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
           BOOL exists = [fm fileExistsAtPath:path];
           if (exists) {
             NSDictionary* attrs = [fm attributesOfItemAtPath:path.stringByResolvingSymlinksInPath error:nil];
-            if ([attrs[NSFileSize] unsignedLongLongValue] > 20000000) continue;
+            if ([attrs[NSFileSize] unsignedLongLongValue] > kMaxTableFileBytes) continue;
             NSData* data = [NSData dataWithContentsOfFile:path];
             if (!data) continue;
-            unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-            CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
-            NSMutableString* hash = [NSMutableString string];
-            for (unsigned char byte : digest) [hash appendFormat:@"%02x", byte];
+            NSString* hash = sha256Hex(data);
             if ([hash isEqualToString:manifest[name][@"sha256"]]) continue;
             if (![replaceable containsObject:hash]) {
               ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
