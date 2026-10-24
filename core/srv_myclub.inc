@@ -596,11 +596,30 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
           }
         }
       }
+      ArrP params = p->optJSONArray("parameters");
+      // Konami's game offers the goalkeeping skills only to a goalkeeper (its registered position,
+      // parameters[0], is GK), but random Skill Training in builds up to fix2 also taught them to
+      // outfield cards. Such a skill is removed: the later ones move up one slot, as when the player
+      // deletes a skill, and its flag is cleared unless the card has the skill by itself.
+      bool goalkeepingRemoved = false;
+      if (params && params->length() > 0 && !isZiruGoalkeeperCard(params) &&
+          std::any_of(al.begin(), al.end(), [](int v) { return isZiruGoalkeeperSkill(v); })) {
+        std::set<int> cardSkills = z27CardSkillParams(p);
+        std::vector<int32_t> kept, removed;
+        for (int v : al) (isZiruGoalkeeperSkill(v) ? removed : kept).push_back(v);
+        for (int v : removed) {
+          int index = kZiruSkillParameters[v];
+          if (isZiruSkillParameter(index) && index < params->length() && !cardSkills.count(index)) params->put(index, 0);
+        }
+        logRequest("Z27_GK_SKILL_REMOVED", "[Z27_GK_SKILL_REMOVED] serial=" + str(serial) + " id=" + str(pid) + " outfield card: removed " +
+                                               joinInts(removed) + ", learned " + joinInts(al) + " -> " + joinInts(kept));
+        al = kept;
+        goalkeepingRemoved = true;
+      }
       ArrP ja = newArr();
       for (int v : al) ja->put(v);
       p->put("additional_skill_id", ja);
 
-      ArrP params = p->optJSONArray("parameters");
       if (params && params->length() >= 70) {
         for (int v : al) {
           if (isZiruSkillId(v)) {
@@ -614,7 +633,7 @@ void applyZiruSkillStateToLogin(const ObjP& jo) {
       // The card's own skills plus the learned ones (exact card only).
       z27ApplyCardIdentity(p);
       if (!serialState) continue;
-      if (!al.empty() && prefs.getString("ziru_skills_" + str(serial), "") != joinInts(al)) {
+      if ((!al.empty() || goalkeepingRemoved) && prefs.getString("ziru_skills_" + str(serial), "") != joinInts(al)) {
         prefs.edit().putString("ziru_skills_" + str(serial), joinInts(al)).commit();
       }
       if (!saved || *saved != p->toString()) saveZiruPlayerToDb(p);

@@ -966,12 +966,12 @@ static void starterSerialTests(const std::string& top) {
       if (!done.insert(serial).second || serial == oldSerial(260)) continue;  // the first card listed under a serial is the row card
       auto row = starterCard(pos, false);
       row->getJSONObject("gameplayer_id")->put("id", shownId(kZiruStarterSerials[pos].id));
-      row->put("additional_skill_id", newArr()->put(44)->put(k % 2 ? 45 : 46));
+      row->put("additional_skill_id", newArr()->put(43)->put(k % 2 ? 48 : 46));
       row->put("initial_booster_id_list", newArr()->put(100 + k)->put(0)->put(0));
-      row->getJSONArray("parameters")->put(142, 100 + k)->put(kZiruSkillParameters[44], 1);
+      row->getJSONArray("parameters")->put(142, 100 + k)->put(kZiruSkillParameters[43], 1);
       row->put("additional_position", newArr()->put("CF"));
       s.ziruDb->savePlayer(serial, shownId(kZiruStarterSerials[pos].id), row->toString());
-      edit.putString("ziru_skills_" + std::to_string(serial), "44," + std::to_string(k % 2 ? 45 : 46));
+      edit.putString("ziru_skills_" + std::to_string(serial), "43," + std::to_string(k % 2 ? 48 : 46));
       k++;
     }
     s.ziruDb->saveProgression(oldSerial(0), R"({"SHOOT":6,"_spent_total":6})");
@@ -1084,7 +1084,7 @@ static void starterSerialTests(const std::string& top) {
     auto login = call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
     check(login->length() == kStarters - 2 + 1, ("old save: the login lists 68 starter cards and the pack card, got " + std::to_string(login->length())).c_str());
     auto movedCard = bySerial(login, newSerialOf(4));
-    check(movedCard->getJSONObject("gameplayer_id")->getLong("id") == 106788187843931LL && movedCard->getJSONArray("additional_skill_id")->getInt(0) == 44 &&
+    check(movedCard->getJSONObject("gameplayer_id")->getLong("id") == 106788187843931LL && movedCard->getJSONArray("additional_skill_id")->getInt(0) == 43 &&
           movedCard->getJSONArray("initial_booster_id_list")->getInt(0) == 101 && movedCard->getJSONArray("additional_position")->getString(0) == "CF",
         "old save: a moved card keeps its learned skills, booster and position");
     auto fresh = bySerial(login, newSerialOf(5));
@@ -1104,14 +1104,14 @@ static void starterSerialTests(const std::string& top) {
       OfflineServer s(cfg);
       before = s.sp("almanac_state").getString("ziru_skills_" + std::to_string(oldSerial(0)), "");
       call(s, "CMD_GET_MANNER_WARN");
-      s.ziruDb->saveMeta("z27_starter_serials_prefs", newObj()->put("ziru_skills_" + std::to_string(newSerialOf(0)), "44,46")
+      s.ziruDb->saveMeta("z27_starter_serials_prefs", newObj()->put("ziru_skills_" + std::to_string(newSerialOf(0)), "43,46")
           ->put("ziru_skills_" + std::to_string(oldSerial(0)), Value::null())->toString());
       s.sp("almanac_state").edit().putString("ziru_skills_" + std::to_string(oldSerial(0)), before)
           .remove("ziru_skills_" + std::to_string(newSerialOf(0))).commit();
     }
     OfflineServer s(cfg);
     call(s, "CMD_GET_MANNER_WARN");
-    check(!s.loadMeta("z27_starter_serials_prefs") && s.sp("almanac_state").getString("ziru_skills_" + std::to_string(newSerialOf(0)), "") == "44,46" &&
+    check(!s.loadMeta("z27_starter_serials_prefs") && s.sp("almanac_state").getString("ziru_skills_" + std::to_string(newSerialOf(0)), "") == "43,46" &&
           !s.sp("almanac_state").hasString("ziru_skills_" + std::to_string(oldSerial(0))), "a prefs plan left behind is applied at the next start");
   }
   // ---- A failure inside the move leaves the save as it was; the next request tries again ----
@@ -1858,6 +1858,110 @@ static void skillDeleteTests(const std::string& top) {
   }
 }
 
+// ---- Goalkeeping skills that older builds taught outfield cards ----------------------------
+// Konami's game offers the four goalkeeping skills (GK Low Punt 44, GK High Punt 45, GK Long Throw 47,
+// GK Penalty Saver 49 in server numbers; the client's 45, 46, 48, 50) only to a card whose registered
+// position, parameters[0], is GK. Random Skill Training in builds up to fix2 also taught them to
+// outfield cards. At login such a skill is removed: the later skills move up one slot, as when the
+// player deletes a skill, and its flag is cleared unless the card has the skill by itself.
+static void goalkeeperSkillMigrationTests(const std::string& top) {
+  const std::string root = top + "/goalkeeper-skills";
+  std::filesystem::create_directories(root + "/responses");
+  const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0};
+  // O: a CF that learned GK Low Punt, skill 20, GK Long Throw and skill 30 under fix2.
+  // Q: an RMF whose record has GK Penalty Saver by itself, saved with it learned too, and skill 5.
+  // G: a goalkeeper with GK High Punt and 20 learned. X: a CMF with 20 learned. Y: a CB with only a
+  // starter entry, saved with GK Low Punt learned.
+  const long long O = 41 + (1LL << 40), Q = 42 + (1LL << 40), G = 43 + (1LL << 40), X = 44 + (1LL << 40), Y = 45 + (1LL << 40);
+  auto recordO = card(O, 0, 12, 0, 0, none, {}, 108, 0, 149), recordQ = card(Q, 0, 7, 0, 0, none, {49}, 108, 0, 149);
+  auto recordG = card(G, 0, 0, 0, 17, none, {}, 108, 0, 149), recordX = card(X, 0, 5, 0, 0, none, {}, 108, 0, 149);
+  asset(root, "ZIRU_PLAYER_RECORDS.json", newObj()->put(std::to_string(O), newObj()->put("gameplayer", recordO))
+      ->put(std::to_string(Q), newObj()->put("gameplayer", recordQ))->put(std::to_string(G), newObj()->put("gameplayer", recordG))
+      ->put(std::to_string(X), newObj()->put("gameplayer", recordX)));
+  struct Saved { long long id, serial; int position; std::vector<int> own, learned; };
+  const std::vector<Saved> saves = {{O, 751, 12, {}, {44, 20, 47, 30}}, {Q, 752, 7, {49}, {49, 5}}, {G, 753, 0, {}, {45, 20}},
+                                    {X, 754, 5, {}, {20}}, {Y, 755, 1, {}, {44}}};
+  auto starters = newArr(), refs = newArr();
+  for (const Saved& c : saves) {
+    auto entry = card(c.id, c.serial, c.position, 0, 0, none, c.own, 108, 0, 145);
+    starters->put(entry);
+    refs->put(newObj()->put("gameplayer_id", Object::parse(entry->getJSONObject("gameplayer_id")->toString())));
+  }
+  auto squad = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
+  asset(root, "CmdLogin.json", newObj()->put("entry_info", newObj()->put("main_squad_id", 9)->put("gameplayer_list", starters)
+      ->put("coach_list", newArr()->put(coachRef(100, 1000)))
+      ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squad)->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))))));
+  asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline"})"));
+  asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
+  asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save"; cfg.iosPlayerLayout = true; cfg.logFile = root + "/offline_server.log";
+  std::filesystem::create_directories(cfg.dataDir);
+  {
+    // The save as fix2 wrote it: the learned skills in the row and in the prefs, their flags on.
+    OfflineServer first(cfg);
+    for (const Saved& c : saves) {
+      auto row = card(c.id, c.serial, c.position, 0, 0, none, c.own, 108, 0, 145);
+      std::string list;
+      for (int skill : c.learned) {
+        row->getJSONArray("additional_skill_id")->put(skill);
+        row->getJSONArray("parameters")->put(kZiruSkillParameters[skill], 1);
+        list += (list.empty() ? "" : ",") + std::to_string(skill);
+      }
+      first.ziruDb->savePlayer(c.serial, c.id, row->toString());
+      first.sp("almanac_state").edit().putString("ziru_skills_" + std::to_string(c.serial), list).commit();
+    }
+  }
+  auto logged = [&]() {
+    std::ifstream in(cfg.logFile);
+    std::string line;
+    int n = 0;
+    while (std::getline(in, line)) n += line.find("[Z27_GK_SKILL_REMOVED]") != std::string::npos;
+    return n;
+  };
+  // The login as the client gets it (client numbers), and what is saved for the card (server numbers).
+  auto clientList = [](std::vector<int> internal) {
+    auto out = newArr();
+    for (int skill : internal) out->put(iosSkillId(skill, true));
+    return out->toString();
+  };
+  auto flag = [](const ObjP& shown, int internal) { return shown->getJSONArray("parameters")->getInt(kClientSkillLabel[iosSkillId(internal, true)]); };
+  struct Expected { long long serial; std::vector<int> learned; std::vector<std::pair<int, int>> flags; };
+  const std::vector<Expected> expected = {{751, {20, 30}, {{44, 0}, {47, 0}, {20, 1}, {30, 1}}}, {752, {5}, {{49, 1}, {5, 1}}},
+                                          {753, {45, 20}, {{45, 1}, {20, 1}}}, {754, {20}, {{20, 1}}}, {755, {}, {{44, 0}}}};
+  auto checkCards = [&](OfflineServer& s, const std::string& when) {
+    auto list = call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    for (const Expected& e : expected) {
+      auto shown = bySerial(list, e.serial);
+      std::string what = when + ", card " + std::to_string(e.serial);
+      check(shown->getJSONArray("additional_skill_id")->toString() == clientList(e.learned),
+          (what + ": the login lists " + shown->getJSONArray("additional_skill_id")->toString()).c_str());
+      for (auto [skill, on] : e.flags) check(flag(shown, skill) == on, (what + ": skill " + std::to_string(skill) + " flag").c_str());
+      std::string saved;
+      for (int skill : e.learned) saved += (saved.empty() ? "" : ",") + std::to_string(skill);
+      check(s.sp("almanac_state").getString("ziru_skills_" + std::to_string(e.serial), "") == saved &&
+            Object::parse(*s.loadPlayer(e.serial))->getJSONArray("additional_skill_id")->toString() == "[" + saved + "]",
+          (what + ": the save keeps the same learned skills").c_str());
+    }
+  };
+  {
+    OfflineServer s(cfg);
+    checkCards(s, "first login");
+    check(logged() == 3, ("Z27_GK_SKILL_REMOVED: one line for each of the 3 outfield cards that had a goalkeeping skill, got " +
+                          std::to_string(logged())).c_str());
+    // Removed once: a second login changes nothing and logs nothing.
+    auto before = saveDump(s);
+    checkCards(s, "second login");
+    check(firstDifference(before, saveDump(s)).empty() && logged() == 3, "a second login changes and logs nothing");
+    auto detail = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", O)->put("serial", 751)));
+    check(flag(detail, 44) == 0 && flag(detail, 47) == 0 && flag(detail, 20) == 1, "player data: the removed goalkeeping skills are off");
+  }
+  {
+    OfflineServer s(cfg);
+    checkCards(s, "after a new start");
+    check(logged() == 3, "a new start logs nothing more");
+  }
+}
+
 // CMD_GET_MYCLUB_PLAYER_DATA's skill list for the card in Konami's own answer
 // (ziru-extra/responses/get_myclub_player_data.json, an outfield card, numbered like the
 // server): exactly Konami's list.
@@ -2263,6 +2367,7 @@ int main() {
     selectTrainingTests(root);
     positionTrainingTests(root);
     skillDeleteTests(root);
+    goalkeeperSkillMigrationTests(root);
     konamiPlayerDataSkillListTest(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
