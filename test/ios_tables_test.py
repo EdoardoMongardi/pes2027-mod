@@ -8,8 +8,9 @@ import zlib
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from cpk_toc import decrypt_utf, utf_table
-from repair_ios_tables import (PIPELINES, TableStep, compact_table, ios_national_card_flag, read_cpk,
+from repair_ios_tables import (PESDB_DIR, PIPELINES, TableStep, compact_table, ios_national_card_flag, read_cpk,
                                repair_cpk_bytes, table_fix_entry, unpack_wesys, verify_cpk)
+import ios_skill_tables as skills
 
 
 class IosTablesTest(unittest.TestCase):
@@ -74,20 +75,201 @@ class NationalFlagTest(unittest.TestCase):
             ios_national_card_flag(b"")
 
 
+class SkillNumberingTest(unittest.TestCase):
+    """Android skill card a is iOS card a + (a >= 25) + (a >= 67); iOS 25 and 68 have no Android card."""
+
+    def test_boundaries(self):
+        self.assertEqual([skills.android_to_ios_skill(a) for a in (0, 24, 25, 26, 66, 67, 68, 71)],
+                         [0, 24, 26, 27, 67, 69, 70, 73])
+
+    def test_map_is_injective_and_skips_ios_only_cards(self):
+        image = set(skills.ANDROID_TO_IOS)
+        self.assertEqual(len(image), 72)
+        self.assertEqual(set(range(74)) - image, set(skills.IOS_ONLY_SKILLS))
+
+    def test_rejects_non_skills(self):
+        for bad in (-1, 72, 73, 127, 1.0):
+            with self.assertRaises(ValueError):
+                skills.android_to_ios_skill(bad)
+
+    def test_empty_marker(self):
+        # The featured-skill empty marker is not a skill: 72 becomes 74, never iosSkillId(72) = 25 (a Dummy card).
+        self.assertEqual(skills.android_to_ios_pr_slot(72), 74)
+        with self.assertRaises(ValueError):
+            skills.android_to_ios_pr_slot(73)
+
+
+class FeaturedSkillTableTest(unittest.TestCase):
+    """PlayerVariationPrSkill.bin: the featured special skills of box and banner previews."""
+
+    def table(self):
+        return (pr_row(5, 29, 72, 30) + pr_row(9, 72, 72, 72) + pr_row(12, 68, 72, 24, high=0x3ff, tail=7)
+                + pr_row(40, 0, 1, 71))
+
+    def test_converts_each_slot_and_keeps_everything_else(self):
+        raw = self.table()
+        out = skills.convert_pr_skill_table(raw)
+        self.assertEqual(len(out), len(raw))
+        rows = [struct.unpack_from("<QII", out, i) for i in range(0, len(out), 16)]
+        self.assertEqual([r[0] for r in rows], [5, 9, 12, 40])
+        self.assertEqual([skills.pr_slots(r[1]) for r in rows], [[30, 74, 31], [74, 74, 74], [70, 74, 24], [0, 1, 73]])
+        self.assertEqual(rows[2][1] >> 21, 0x3ff)
+        self.assertEqual(rows[2][2], 7)
+
+    def test_numbering_detection_and_step_runs_once(self):
+        raw = self.table()
+        self.assertEqual(skills.pr_skill_numbering(raw), "android")
+        once, counts = skills.renumber_featured_skills(raw)
+        self.assertEqual(counts, {"records": 4, "skills_renumbered": 4, "skills_kept": 3, "empty_slots": 5})
+        self.assertEqual(skills.pr_skill_numbering(once), "ios")
+        self.assertEqual(skills.renumber_featured_skills(once), (once, {}))
+        with self.assertRaises(ValueError):
+            skills.convert_pr_skill_table(once)
+
+    def test_ios_table_featuring_fighting_spirit_is_still_ios(self):
+        # iOS 72 is a real skill (Fighting Spirit); with a 74 present the table is iOS.
+        self.assertEqual(skills.pr_skill_numbering(pr_row(1, 72, 74, 74)), "ios")
+
+    def test_unknown_numbering_is_refused(self):
+        full = pr_row(1, 3, 4, 5)
+        self.assertEqual(skills.pr_skill_numbering(full), "unknown")
+        with self.assertRaises(ValueError):
+            skills.renumber_featured_skills(full)
+        odd = pr_row(1, 100, 72, 72)  # neither platform writes 75..127
+        self.assertEqual(skills.pr_skill_numbering(odd), "unknown")
+        with self.assertRaises(ValueError):
+            skills.renumber_featured_skills(odd)
+
+    def test_order_must_stay_sorted(self):
+        with self.assertRaises(ValueError):
+            skills.convert_pr_skill_table(pr_row(9, 1, 72, 72) + pr_row(5, 1, 72, 72))
+        with self.assertRaises(ValueError):
+            skills.convert_pr_skill_table(b"\0" * 15)
+
+    def test_display_order_swaps_second_and_third_slot(self):
+        word = struct.unpack_from("<I", skills.convert_pr_skill_table(pr_row(1, 29, 72, 30)), 8)[0]
+        self.assertEqual(client_featured_skills(word), [30, 31])
+        android_word = struct.unpack_from("<I", pr_row(1, 29, 72, 30), 8)[0]
+        self.assertEqual(client_featured_skills(android_word), [29, 30, 72])  # what the client showed before
+
+    def test_steps_belong_to_the_fix3_pipeline_only(self):
+        # The fix2 entry must keep reproducing the shipped 8a2a7725 file.
+        names = dict(PIPELINES)
+        self.assertEqual([(s.table, s.step) for s in names["build138-fix2"]],
+                         [("Playstyle.bin", "compact_legacy_records"), ("PlayerSkill.bin", "compact_legacy_records")])
+        p3 = [(s.table, s.function) for s in names["fix3"] if s.step == "ios_skill_numbering"]
+        self.assertEqual(p3, [("PlayerSkill.bin", skills.renumber_player_skills),
+                              ("PlayerVariationPrSkill.bin", skills.renumber_featured_skills)])
+
+
+class PlayerSkillTableTest(unittest.TestCase):
+    """PlayerSkill.bin: skill priorities, read by the in-match substitution screen."""
+
+    def check(self, raw):
+        out = skills.convert_player_skill_table(raw)
+        self.assertEqual(len(out), 74 * 4)
+        words = struct.unpack("<74I", out)
+        self.assertEqual([w & 0x7F for w in words], list(range(74)))
+        for a in range(72):
+            self.assertEqual((words[skills.android_to_ios_skill(a)] >> 7) & 31, (a * 7) % 29)
+        for k, w in skills.IOS_ONLY_PLAYER_SKILL_WORDS.items():
+            self.assertEqual(words[k], w)
+        return out
+
+    def test_legacy_104_byte_records(self):
+        self.check(android_player_skill(104))
+
+    def test_compacted_4_byte_records(self):
+        self.assertEqual(self.check(android_player_skill(4)), self.check(android_player_skill(104)))
+
+    def test_already_ios_is_left_alone(self):
+        out, info = skills.renumber_player_skills(compact_table(android_player_skill(104)))
+        self.assertEqual(info, {"before": 288, "after": 296, "records": 74})
+        self.assertEqual(skills.player_skill_numbering(out), "ios")
+        self.assertEqual(skills.renumber_player_skills(out), (out, {}))
+        self.assertEqual(compact_table(out), out)  # the compaction step leaves the iOS table alone too
+        with self.assertRaises(ValueError):
+            skills.convert_player_skill_table(out)
+
+    def test_bad_inputs(self):
+        with self.assertRaises(ValueError):
+            skills.convert_player_skill_table(b"\0" * 100)
+        shuffled = bytearray(android_player_skill(4))
+        shuffled[0] = 5
+        with self.assertRaises(ValueError):
+            skills.convert_player_skill_table(bytes(shuffled))
+
+    def test_substitution_screen_ranks_the_same_skills(self):
+        # Android's table ranks a card's Android skills; the converted table ranks the same skills under their iOS ids.
+        android = compact_table(android_player_skill(104))
+        ios = skills.convert_player_skill_table(android)
+        for card in ({0, 24, 25, 30, 66, 67, 71}, {3, 13, 26, 60}, {25, 67}):
+            before = client_substitution_specials(card, android)
+            self.assertEqual([skills.android_to_ios_skill(a) for a in before],
+                             client_substitution_specials({skills.android_to_ios_skill(a) for a in card}, ios))
+
+    def test_substitution_model_orders_by_priority(self):
+        table = struct.pack("<4I", 0 | 3 << 7, 1 | 0 << 7, 2 | 9 << 7, 3 | 5 << 7)
+        self.assertEqual(client_substitution_specials({0, 1, 2, 3}, table), [2, 3, 0])
+        self.assertEqual(client_substitution_specials({0, 1, 2, 3}, table, limit=2), [2, 3])
+        self.assertEqual(client_substitution_specials({1, 70}, table), [])  # unknown id -> priority 0
+
+
+@unittest.skipUnless(os.environ.get("DT870_ORIGINAL") and os.environ.get("DT200_ORIGINAL"),
+                     "set DT870_ORIGINAL to Konami's dt870_mobile_and.cpk and DT200_ORIGINAL to the data pack's "
+                     "cpk/dt200_mobile_all.cpk (Konami's iOS tables)")
+class KonamiSkillTablesTest(unittest.TestCase):
+    """The converted Android tables equal Konami's own iOS dt200 tables."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.android = Path(os.environ["DT870_ORIGINAL"]).read_bytes()
+        cls.ios = Path(os.environ["DT200_ORIGINAL"]).read_bytes()
+        cls.fixed = repair_cpk_bytes(cls.android)[0]
+
+    def test_player_skill_equals_ios_dt200(self):
+        android = decoded_table(self.android, "PlayerSkill.bin")
+        ios = decoded_table(self.ios, "PlayerSkill.bin")
+        self.assertEqual(skills.convert_player_skill_table(android), ios)
+        self.assertEqual(skills.convert_player_skill_table(compact_table(android)), ios)
+        self.assertEqual(decoded_table(self.fixed, "PlayerSkill.bin"), ios)
+
+    def test_pr_skill_equals_ios_dt200_on_every_shared_record(self):
+        android = decoded_table(self.android, "PlayerVariationPrSkill.bin")
+        ios = decoded_table(self.ios, "PlayerVariationPrSkill.bin")
+        conv = decoded_table(self.fixed, "PlayerVariationPrSkill.bin")
+        self.assertEqual(conv, skills.convert_pr_skill_table(android))
+        a = {conv[i:i + 8]: conv[i:i + 16] for i in range(0, len(conv), 16)}
+        b = {ios[i:i + 8]: ios[i:i + 16] for i in range(0, len(ios), 16)}
+        shared = set(a) & set(b)
+        self.assertEqual(len(b), 287)
+        self.assertEqual(len(shared), len(b))
+        self.assertEqual(sum(a[k] == b[k] for k in shared), len(b))
+        self.assertEqual(sum(android[i:i + 16] == b.get(android[i:i + 8]) for i in range(0, len(android), 16)), 0)
+
+
 class CpkRepairTest(unittest.TestCase):
     def setUp(self):
         rng = random.Random(11)
         styles = b"".join(struct.pack("<I", i | 256) + b"Style".ljust(164, b"\0") for i in range(36))
-        skills = b"".join(struct.pack("<I", i | 1024) + b"Skill".ljust(100, b"\0") for i in range(72))
+        skills_table = b"".join(struct.pack("<I", i | 1024) + b"Skill".ljust(100, b"\0") for i in range(72))
         players = bytearray(rng.randrange(256) for _ in range(400 * 60))  # does not compress: grows on repack
         for i in range(60):
             set_bit(players, i * 400 * 8 + 618, i % 3 == 0)
             set_bit(players, i * 400 * 8 + 626, i % 5 == 0)
         self.players = bytes(players)
+        self.skills = skills_table
+        pick = random.Random(13)
+        featured = []
+        for i in range(300):  # Android-numbered, mostly empty (72) like Konami's
+            slots = [pick.randrange(72) if i % 4 == 0 or (i % 4 == 1 and k == 0) else 72 for k in range(3)]
+            featured.append(pr_row(88045755000000 + 37 * i, *slots))
+        self.featured = b"".join(featured)
         self.files = [
             ("common/demo", "a.bin", bytes(rng.randrange(256) for _ in range(3000))),
             ("common/etc/pesdb", "Player.bin", konami_wesys(self.players)),
-            ("common/etc/pesdb", "PlayerSkill.bin", konami_wesys(skills)),
+            ("common/etc/pesdb", "PlayerSkill.bin", konami_wesys(skills_table)),
+            ("common/etc/pesdb", "PlayerVariationPrSkill.bin", konami_wesys(self.featured)),
             ("common/etc/pesdb", "Playstyle.bin", konami_wesys(styles)),
             ("eng/string", "z.str", bytes(rng.randrange(256) for _ in range(700))),
         ]
@@ -110,29 +292,43 @@ class CpkRepairTest(unittest.TestCase):
         self.assertEqual(len(unpack_wesys(self.payload(fixed, "Playstyle.bin"))), 36 * 4)
         verify_cpk(self.cpk, fixed, PIPELINES[0][1])
 
-    def test_default_pipeline_repairs_all_three_tables(self):
+    def test_default_pipeline_repairs_all_four_tables(self):
         fixed, changes = repair_cpk_bytes(self.cpk)
         report = verify_cpk(self.cpk, fixed)
-        self.assertEqual(sorted(report["changed_files"]), ["Player.bin", "PlayerSkill.bin", "Playstyle.bin"])
+        self.assertEqual(sorted(report["changed_files"]),
+                         ["Player.bin", "PlayerSkill.bin", "PlayerVariationPrSkill.bin", "Playstyle.bin"])
         self.assertEqual(unpack_wesys(self.payload(fixed, "Player.bin")), ios_national_card_flag(self.players)[0])
+        self.assertEqual(unpack_wesys(self.payload(fixed, "PlayerSkill.bin")),
+                         skills.convert_player_skill_table(compact_table(self.skills)))
+        self.assertEqual(unpack_wesys(self.payload(fixed, "PlayerVariationPrSkill.bin")),
+                         skills.convert_pr_skill_table(self.featured))
+        self.assertEqual([(c["table"], c["step"]) for c in changes if c["step"] != "cpk_layout"],
+                         [("Playstyle.bin", "compact_legacy_records"), ("PlayerSkill.bin", "compact_legacy_records"),
+                          ("Player.bin", "ios_national_card_flag"), ("PlayerSkill.bin", "ios_skill_numbering"),
+                          ("PlayerVariationPrSkill.bin", "ios_skill_numbering")])
         flag = [c for c in changes if c["step"] == "ios_national_card_flag"][0]
         self.assertEqual((flag["bit626_set"], flag["bit626_cleared"]), (16, 8))
         self.assertEqual(repair_cpk_bytes(fixed)[0], fixed)  # running it again changes nothing
 
-    def test_grown_table_moves_later_files_by_whole_blocks(self):
+    def test_grown_tables_move_later_files_by_whole_blocks(self):
+        # As in Konami's dt870, two tables grow: Player.bin and, further on, PlayerVariationPrSkill.bin.
         rng = random.Random(5)
         extra = bytes(rng.randrange(256) for _ in range(9000))  # incompressible: the table must grow
-        steps = PIPELINES[-1][1] + (TableStep("Player.bin", "test_grow", lambda raw: (raw + extra, {"added": 9000})),)
+        more = bytes(rng.randrange(256) for _ in range(16 * 300))
+        steps = PIPELINES[-1][1] + (TableStep("Player.bin", "test_grow", lambda raw: (raw + extra, {"added": 9000})),
+                                    TableStep("PlayerVariationPrSkill.bin", "test_grow", lambda raw: (raw + more, {})))
         fixed, changes = repair_cpk_bytes(self.cpk, steps)
         report = verify_cpk(self.cpk, fixed, steps)
-        self.assertEqual(sorted(report["changed_files"]), ["Player.bin", "PlayerSkill.bin", "Playstyle.bin"])
+        self.assertEqual(sorted(report["changed_files"]),
+                         ["Player.bin", "PlayerSkill.bin", "PlayerVariationPrSkill.bin", "Playstyle.bin"])
         layout = [c for c in changes if c["step"] == "cpk_layout"]
-        self.assertEqual([c["table"] for c in layout], ["Player.bin"])
+        self.assertEqual([c["table"] for c in layout], ["Player.bin", "PlayerVariationPrSkill.bin"])
         self.assertGreater(len(fixed), len(self.cpk))
-        self.assertEqual((len(fixed) - len(self.cpk)) % 2048, 0)
         # Every file decodes; untouched files and the filler after them are byte-identical.
         expected_players = ios_national_card_flag(self.players)[0] + extra
         self.assertEqual(unpack_wesys(self.payload(fixed, "Player.bin")), expected_players)
+        self.assertEqual(unpack_wesys(self.payload(fixed, "PlayerVariationPrSkill.bin")),
+                         skills.convert_pr_skill_table(self.featured) + more)
         for d, n, data in self.files:
             if n in ("a.bin", "z.str"):
                 self.assertEqual(self.payload(fixed, n), data)
@@ -148,8 +344,12 @@ class CpkRepairTest(unittest.TestCase):
         for o, n in zip(old_rows, new_rows):
             self.assertEqual({k: v for k, v in o.items() if k not in ("FileOffset", "FileSize", "ExtractSize")},
                              {k: v for k, v in n.items() if k not in ("FileOffset", "FileSize", "ExtractSize")})
-        moved = [n["FileOffset"] - o["FileOffset"] for o, n in zip(old_rows, new_rows) if n["FileName"] == "PlayerSkill.bin"]
-        self.assertEqual(moved, [len(fixed) - len(self.cpk)])
+        # Files after Player.bin move by its growth, files after PlayerVariationPrSkill.bin by both, in whole blocks.
+        moved = {n["FileName"]: n["FileOffset"] - o["FileOffset"] for o, n in zip(old_rows, new_rows)}
+        first, total = moved["PlayerSkill.bin"], len(fixed) - len(self.cpk)
+        self.assertEqual((moved["a.bin"], moved["Player.bin"], moved["PlayerVariationPrSkill.bin"]), (0, 0, first))
+        self.assertEqual((moved["Playstyle.bin"], moved["z.str"]), (total, total))
+        self.assertTrue(0 < first < total and first % 2048 == 0 and total % 2048 == 0)
 
     def test_manifest_entry_lists_every_earlier_output(self):
         fixed, entry = table_fix_entry(self.cpk)
@@ -176,12 +376,55 @@ class CpkRepairTest(unittest.TestCase):
         self.assertIn("8a2a77254d5b86f35feb2111eb24a689c5b362167eac2af8a07c24318a2136ff", entry["replaces_sha256"])
         flag = [c for c in entry["changes"] if c["step"] == "ios_national_card_flag"][0]
         self.assertEqual((flag["records"], flag["bit626_set"], flag["bit626_cleared"]), (44028, 4078, 44))
+        numbering = {c["table"]: c for c in entry["changes"] if c["step"] == "ios_skill_numbering"}
+        self.assertEqual(numbering["PlayerSkill.bin"], {"table": "PlayerSkill.bin", "step": "ios_skill_numbering",
+                                                        "before": 288, "after": 296, "records": 74})
+        featured = numbering["PlayerVariationPrSkill.bin"]
+        self.assertEqual([featured[k] for k in ("records", "skills_renumbered", "skills_kept", "empty_slots")],
+                         [13147, 1236, 635, 37570])
 
 
 # ---------------------------------------------------------------- synthetic CRI CPK writer (test only)
 
 def sha(b):
     return hashlib.sha256(b).hexdigest()
+
+
+def pr_row(card, s0, s1, s2, high=0, tail=0):
+    """One PlayerVariationPrSkill.bin record: card id, three 7-bit skill slots (and the word's high bits), zero."""
+    return struct.pack("<QII", card, s0 | s1 << 7 | s2 << 14 | high << 21, tail)
+
+
+def android_player_skill(stride, prio=lambda a: (a * 7) % 29):
+    """An Android PlayerSkill.bin: 72 records numbered 0..71 with a priority each, `stride` bytes per record."""
+    return b"".join(struct.pack("<I", a | prio(a) << 7) + b"\0" * (stride - 4) for a in range(72))
+
+
+def decoded_table(cpk, name):
+    _, _, rows, _, base = read_cpk(cpk)
+    row = [r for r in rows if r.get("DirName") == PESDB_DIR and r.get("FileName") == name][0]
+    return unpack_wesys(cpk[base + row["FileOffset"]:base + row["FileOffset"] + row["FileSize"]])
+
+
+# What the iOS 11.1.1 client does with the two skill tables, for the tests.
+
+def client_featured_skills(word):
+    """UtilityMyClub::GetPRCardSkillList (0x1048958c0) for a PlayerVariationPrSkill word: the import swaps
+    the 2nd and 3rd slot (LinkPesdb::ImportPlayerVariationPrSkill 0x104ba0f60..0x104ba0f84), and every
+    id of 74 or more is left out."""
+    s0, s1, s2 = skills.pr_slots(word)
+    return [v for v in (s0, s2, s1) if v < skills.IOS_SKILL_COUNT]
+
+
+def client_substitution_specials(card_skills, player_skill_table, limit=3):
+    """The substitution screen (0x10092fd30, with GetSkillCardPriority 0x104bc27e4): the card's skills whose
+    PlayerSkill priority is above 0, highest first, the first `limit` of them (its Super-sub case left out)."""
+    priority = {}
+    for i in range(0, len(player_skill_table), 4):
+        w = struct.unpack_from("<I", player_skill_table, i)[0]
+        priority.setdefault(w & 0x7F, (w >> 7) & 0x1F)  # GetPlayerSkillData: the first record with that id
+    ranked = sorted((k for k in sorted(card_skills) if priority.get(k, 0)), key=lambda k: -priority[k])
+    return ranked[:limit]  # equal priorities keep the id order
 
 
 def get_bit(buf, n):

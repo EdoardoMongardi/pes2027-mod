@@ -12,13 +12,16 @@ Table steps (applied in this order; each one is a function raw table bytes -> (n
     tmpdb::LinkPesdb::SetPlayerData copies record bit 626 (rec+0x48 bit 50) into tmpdb::Player+0x198
     bit 53 (0x104b9c318..0x104b9c338), and MyClubGamePlayer::GetBaseTeamId (0x1047e8408) shows the
     national team only when that bit is set. Every other bit of the record is kept.
+  * PlayerSkill.bin, PlayerVariationPrSkill.bin "ios_skill_numbering": skill card ids from Android to
+    iOS numbering, and the featured-skill empty marker 72 -> 74 (tools/ios_skill_tables.py). Box
+    previews then show each card's own featured skills, and the substitution screen the right
+    special skills.
 
-To add a table change (for example the box-preview skill ids), write a function raw -> (raw, info)
-and append a TableStep to the newest entry of PIPELINES (several steps may change the same table;
-they run in order on its decoded bytes). Once a build ships, leave its entry as it is, record its
-sha256 in SHIPPED and put later changes in a new entry: older entries are how the tool recomputes
-the files earlier builds installed, which the installer may then replace (table-fixes.json
-"replaces_sha256").
+To add a table change, write a function raw -> (raw, info) and append a TableStep to the newest
+entry of PIPELINES (several steps may change the same table; they run in order on its decoded
+bytes). Once a build ships, leave its entry as it is, record its sha256 in SHIPPED and put later
+changes in a new entry: older entries are how the tool recomputes the files earlier builds
+installed, which the installer may then replace (table-fixes.json "replaces_sha256").
 
 Every other CPK byte is preserved. A table that no longer fits its old space is given a bigger one
 and the files after it move by whole 2048-byte blocks; only the numeric TOC/header fields that
@@ -33,6 +36,7 @@ import zlib
 from collections import namedtuple
 from pathlib import Path
 from cpk_toc import decrypt_utf, utf_table
+from ios_skill_tables import renumber_featured_skills, renumber_player_skills
 
 PESDB_DIR = "common/etc/pesdb"
 
@@ -147,6 +151,8 @@ PIPELINES = (
     ("build138-fix2", COMPACT_STEPS),  # shipped from build 138 to fix2: sha256 8a2a7725...
     ("fix3", COMPACT_STEPS + (
         TableStep("Player.bin", "ios_national_card_flag", ios_national_card_flag),
+        TableStep("PlayerSkill.bin", "ios_skill_numbering", renumber_player_skills),
+        TableStep("PlayerVariationPrSkill.bin", "ios_skill_numbering", renumber_featured_skills),
     )),
 )
 TABLE_STEPS = PIPELINES[-1][1]
