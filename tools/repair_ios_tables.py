@@ -26,7 +26,8 @@ installed, which the installer may then replace (table-fixes.json "replaces_sha2
 Every other CPK byte is preserved. A table that no longer fits its old space is given a bigger one
 and the files after it move by whole 2048-byte blocks; only the numeric TOC/header fields that
 describe sizes and offsets change, in place, in their original encrypted encoding.
-Input and output are local user-owned assets, never repository fixtures.
+The input is Konami's original file, which the user has (it is not in the repository). The output is the
+copy the IPA bundles, ziru-extra/livedata/dt870_mobile_and.cpk; --manifest writes its table-fixes.json.
 """
 import argparse
 import hashlib
@@ -147,9 +148,10 @@ COMPACT_STEPS = (
 
 # Each entry is one shipped (or about to ship) version of the bundled dt870: (name, steps).
 # The last entry is what the tool builds. Earlier entries reproduce what older builds installed.
+# An entry listed in SHIPPED is frozen: change nothing in it, add a new entry for the next build.
 PIPELINES = (
     ("build138-fix2", COMPACT_STEPS),  # shipped from build 138 to fix2: sha256 8a2a7725...
-    ("fix3", COMPACT_STEPS + (
+    ("fix3", COMPACT_STEPS + (  # shipped in fix3: sha256 599f17f0...
         TableStep("Player.bin", "ios_national_card_flag", ios_national_card_flag),
         TableStep("PlayerSkill.bin", "ios_skill_numbering", renumber_player_skills),
         TableStep("PlayerVariationPrSkill.bin", "ios_skill_numbering", renumber_featured_skills),
@@ -162,6 +164,7 @@ TABLE_STEPS = PIPELINES[-1][1]
 SHIPPED = {
     "fce1f90f65e48c4f99c5654a4ca56c917663d6033f6adc16a9014f5786a93259": {
         "build138-fix2": "8a2a77254d5b86f35feb2111eb24a689c5b362167eac2af8a07c24318a2136ff",
+        "fix3": "599f17f0f1a9684685b1ca5b02d3717e501949e7e0f122e2c556a41efd8331af",
     },
 }
 

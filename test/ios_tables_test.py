@@ -8,7 +8,7 @@ import zlib
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from cpk_toc import decrypt_utf, utf_table
-from repair_ios_tables import (PESDB_DIR, PIPELINES, TableStep, compact_table, ios_national_card_flag, read_cpk,
+from repair_ios_tables import (PESDB_DIR, PIPELINES, SHIPPED, TableStep, compact_table, ios_national_card_flag, read_cpk,
                                repair_cpk_bytes, table_fix_entry, unpack_wesys, verify_cpk)
 import ios_skill_tables as skills
 
@@ -160,6 +160,37 @@ class FeaturedSkillTableTest(unittest.TestCase):
         p3 = [(s.table, s.function) for s in names["fix3"] if s.step == "ios_skill_numbering"]
         self.assertEqual(p3, [("PlayerSkill.bin", skills.renumber_player_skills),
                               ("PlayerVariationPrSkill.bin", skills.renumber_featured_skills)])
+
+
+KONAMI_DT870 = "fce1f90f65e48c4f99c5654a4ca56c917663d6033f6adc16a9014f5786a93259"   # Konami's dt870 r146343
+FIX2_DT870 = "8a2a77254d5b86f35feb2111eb24a689c5b362167eac2af8a07c24318a2136ff"     # shipped from build 138 to fix2
+FIX3_DT870 = "599f17f0f1a9684685b1ca5b02d3717e501949e7e0f122e2c556a41efd8331af"     # shipped in fix3
+
+
+class ShippedPipelinesTest(unittest.TestCase):
+    """A build that shipped keeps its PIPELINES entry exactly as it was: the tool rebuilds from it the file that
+    build installed, and the installer replaces only such files (table-fixes.json replaces_sha256). A later change
+    goes in a new entry."""
+
+    FROZEN = {
+        "build138-fix2": [("Playstyle.bin", "compact_legacy_records"), ("PlayerSkill.bin", "compact_legacy_records")],
+        "fix3": [("Playstyle.bin", "compact_legacy_records"), ("PlayerSkill.bin", "compact_legacy_records"),
+                 ("Player.bin", "ios_national_card_flag"), ("PlayerSkill.bin", "ios_skill_numbering"),
+                 ("PlayerVariationPrSkill.bin", "ios_skill_numbering")],
+    }
+
+    def test_every_shipped_build_is_recorded(self):
+        self.assertEqual(SHIPPED, {KONAMI_DT870: {"build138-fix2": FIX2_DT870, "fix3": FIX3_DT870}})
+
+    def test_shipped_entries_keep_their_steps(self):
+        names = [name for name, _ in PIPELINES]
+        self.assertEqual(names[:len(self.FROZEN)], list(self.FROZEN), "shipped entries stay first, in order")
+        for name, steps in dict(PIPELINES).items():
+            if name in self.FROZEN:
+                self.assertEqual([(s.table, s.step) for s in steps], self.FROZEN[name], name)
+        fix3 = dict(PIPELINES)["fix3"]
+        self.assertEqual([s.function for s in fix3[2:]], [ios_national_card_flag, skills.renumber_player_skills,
+                                                          skills.renumber_featured_skills])
 
 
 class PlayerSkillTableTest(unittest.TestCase):
@@ -372,8 +403,9 @@ class CpkRepairTest(unittest.TestCase):
         original = Path(os.environ["DT870_ORIGINAL"]).read_bytes()
         self.assertEqual(sha(original), "fce1f90f65e48c4f99c5654a4ca56c917663d6033f6adc16a9014f5786a93259")
         fixed, entry = table_fix_entry(original)
-        # The compaction-only pipeline reproduces the copy shipped from build 138 to fix2.
-        self.assertIn("8a2a77254d5b86f35feb2111eb24a689c5b362167eac2af8a07c24318a2136ff", entry["replaces_sha256"])
+        # The compaction-only pipeline reproduces the copy shipped from build 138 to fix2, the fix3 one the fix3 copy.
+        self.assertIn(FIX2_DT870, entry["replaces_sha256"])
+        self.assertEqual((entry["pipeline"], entry["sha256"], sha(fixed)), ("fix3", FIX3_DT870, FIX3_DT870))
         flag = [c for c in entry["changes"] if c["step"] == "ios_national_card_flag"][0]
         self.assertEqual((flag["records"], flag["bit626_set"], flag["bit626_cleared"]), (44028, 4078, 44))
         numbering = {c["table"]: c for c in entry["changes"] if c["step"] == "ios_skill_numbering"}
