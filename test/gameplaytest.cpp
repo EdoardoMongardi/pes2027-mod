@@ -1639,6 +1639,13 @@ static void positionTrainingTests(const std::string& top) {
     booster = use("ABILITY_TRAINING_RANDOM", R, 721, 1, 0, newObj());
     check(booster->getJSONObject("ability_training_result")->getString("is_success") == "YES" && onlyResult(booster, "ability_training_result") &&
           booster->optLong("gameplayer_sell_gp", -1) == 230000, "Booster (random): only the booster result, and the card's sell value");
+    // A refused booster answer carries the card's sell value too: the client puts it on the card after a NO as well.
+    // S named under R's serial is refused (another card is saved there); S's own entry sells for 150000.
+    auto before = saveDump(s);
+    booster = use("ABILITY_TRAINING_SELECT", S, 721, 0, 0, newObj()->put("ability_id", 186));
+    check(booster->getJSONObject("ability_training_result")->getString("is_success") == "NO" && onlyResult(booster, "ability_training_result") &&
+          booster->optLong("gameplayer_sell_gp", -1) == 150000 && firstDifference(before, saveDump(s)).empty(),
+        ("Booster refused: nothing changes, and the answer carries the card's own sell value, " + booster->toString()).c_str());
     auto skill = use("SKILL_TRAINING", R, 721, 0, 0, newObj());
     check(skill->getJSONObject("skill_training_result")->getString("is_success") == "YES" && onlyResult(skill, "skill_training_result"),
         "Skill training: only the skill result");

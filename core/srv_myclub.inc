@@ -885,6 +885,10 @@ void z27UseMyclubItem(const ObjP& jo) {
         z27KeepSkillTrainingItems(jo);
       } else if (booster) {
         jo->put("ability_training_result", newObj()->put("ability_id", 0)->put("ability_Id", 0)->put("is_success", "NO"));
+        // The client puts gameplayer_sell_gp on its card after a NO too (QuitCommand 0x104774db4): the sell
+        // value of the card it named, looked up by that exact card (z27Player), not of the card saved here.
+        ObjP named = z27Player(newObj()->put("id", (long long)ziruTargetPlayerId)->put("serial", (long long)ziruTargetSerial));
+        if (named && named->has("sell_gp")) jo->put("gameplayer_sell_gp", named->optLong("sell_gp", 0));
       } else {
         jo->put("position_training_result", newObj()->put("additional_position", "")->put("is_success", "NO"));
       }
