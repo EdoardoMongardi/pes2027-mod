@@ -1218,6 +1218,39 @@ static NSString* sha256Hex(NSData* data) {
   return hash;
 }
 
+// A bundled table file is first copied to this hidden name next to its real name, and renamed into place
+// only once the copy is complete. If the app is closed during the copy, only this file is left, never a
+// half-written file under the real name, and the next start removes it.
+static NSString* unfinishedCopyPath(NSString* path) {
+  NSString* name = [NSString stringWithFormat:@".%@.part", path.lastPathComponent];
+  return [path.stringByDeletingLastPathComponent stringByAppendingPathComponent:name];
+}
+
+static BOOL copyBundledTableFile(NSString* source, NSString* path) {
+  NSString* part = unfinishedCopyPath(path);
+  unlink(part.fileSystemRepresentation);
+  NSError* err = nil;
+  if (![NSFileManager.defaultManager copyItemAtPath:source toPath:part error:&err]) {
+    unlink(part.fileSystemRepresentation);
+    ZLog(@"[IOS_TABLE_FIX] Could not copy %@: %@", path.lastPathComponent, err.localizedDescription);
+    return NO;
+  }
+  if (rename(part.fileSystemRepresentation, path.fileSystemRepresentation) != 0) {
+    ZLog(@"[IOS_TABLE_FIX] Could not put the copy of %@ in place: %s", path.lastPathComponent, strerror(errno));
+    unlink(part.fileSystemRepresentation);
+    return NO;
+  }
+  return YES;
+}
+
+// The start of the bundled file and nothing more (also an empty file): a copy of it that was cut off.
+// Before copies went through unfinishedCopyPath, closing the app during a copy left such a file under the
+// real name.
+static BOOL isCutOffCopy(NSData* data, NSString* source) {
+  NSData* bundled = [NSData dataWithContentsOfFile:source options:NSDataReadingMappedIfSafe error:nil];
+  return bundled && data.length < bundled.length && (data.length == 0 || memcmp(data.bytes, bundled.bytes, data.length) == 0);
+}
+
 static void installBundledTableFixes(NSArray<NSString*>* directories) {
   NSFileManager* fm = NSFileManager.defaultManager;
   NSString* bundle = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ziru"];
@@ -1250,11 +1283,14 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
             unlink(path.fileSystemRepresentation);
             link = nil;
           }
+          if (unlink(unfinishedCopyPath(path).fileSystemRepresentation) == 0) {
+            ZLog(@"[IOS_TABLE_FIX] Removed an unfinished copy of %@", alias);
+          }
           BOOL exists = [fm fileExistsAtPath:path];
           if (exists) {
-            // Only a file known by its hash is replaced (Konami's original or a copy an earlier build
-            // installed). Any other file, also one too big to hash or one that cannot be read, is the
-            // player's own and is kept.
+            // Only a file known by its hash (Konami's original or a copy an earlier build installed) or a
+            // cut-off copy of the bundled file is replaced. Any other file, also one too big to hash or one
+            // that cannot be read, is the player's own and is kept.
             NSDictionary* attrs = [fm attributesOfItemAtPath:path error:nil];
             NSData* data = [attrs[NSFileSize] unsignedLongLongValue] <= kMaxTableFileBytes ? [NSData dataWithContentsOfFile:path] : nil;
             if (!data) {
@@ -1265,14 +1301,20 @@ static void installBundledTableFixes(NSArray<NSString*>* directories) {
             if ([hash isEqualToString:manifest[name][@"sha256"]]) {
               continue;
             }
-            if (![replaceable containsObject:hash]) {
+            if (isCutOffCopy(data, source)) {
+              // Damaged, so the game must not read it, but it is moved aside, not deleted.
+              std::string kept = zfr::moveToBackups(gDocs.fileSystemRepresentation, path.fileSystemRepresentation, "Download");
+              if (kept.empty()) {
+                ZLog(@"[IOS_TABLE_FIX] Could not move the cut-off copy %@ aside; keeping it", path);
+                continue;
+              }
+              ZLog(@"[IOS_TABLE_FIX] Moved cut-off copy %@ (%lu bytes) to %s", alias, (unsigned long)data.length, kept.c_str());
+            } else if (![replaceable containsObject:hash]) {
               ZLog(@"[IOS_TABLE_FIX] Preserving unrecognized custom CPK %@", path);
               continue;
             }
-            [fm removeItemAtPath:path error:nil];
           }
-          [fm copyItemAtPath:source toPath:path error:nil];
-          ZLog(@"[IOS_TABLE_FIX] Copied real file %@ to Download/", alias);
+          if (copyBundledTableFile(source, path)) ZLog(@"[IOS_TABLE_FIX] Copied real file %@ to Download/", alias);
         } else {
           BOOL exists = [fm fileExistsAtPath:path];
           if (exists) {
