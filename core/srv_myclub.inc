@@ -26,12 +26,19 @@ void applyZiruBoosterTrainingResponse(const ObjP& r13, const ObjP& target) {
     ArrP r9 = nn(r8)->optJSONArray("parameters");
     bool isGk = (r9 && r9->length() > 0 && r9->optInt(0, -1) == 0);
 
+    // The client puts gameplayer_sell_gp on the card after any booster answer (QuitCommand
+    // 0x104774db4); a missing one reads as 0. The card's sell value does not change.
+    if (r8 && r8->has("sell_gp")) r13->put("gameplayer_sell_gp", r8->optLong("sell_gp", 0));
     int32_t r2;
     if (r0 == "ABILITY_TRAINING_RANDOM") {
       r2 = z28RandomBooster(isGk);
     } else if (r0 == "ABILITY_TRAINING_SELECT") {
       r2 = ziruAbilityId;
-      if (r2 <= 0) { logRequest("ZIRU_BOOSTER_V23", "[ZIRU_BOOSTER_V23_FAIL] missing target/ability"); return; }
+      if (r2 <= 0) {
+        r13->put("ability_training_result", newObj()->put("ability_id", 0)->put("ability_Id", 0)->put("is_success", "NO"));
+        logRequest("ZIRU_BOOSTER_V23", "[ZIRU_BOOSTER_V23_FAIL] missing target/ability");
+        return;
+      }
     } else {
       return;
     }
@@ -110,12 +117,13 @@ void applyZiruDynamicRecruit(const ObjP& jo) {
   }
 }
 
+// Name of each position level in parameters[1..13], as additional_position and
+// position_training_result carry it (CommandCamPosition literals).
+static constexpr const char* kZiruPositionNames[14] = {"", "CF", "ST", "LWG", "RWG", "OMF", "DMF", "CMF", "LMF", "RMF", "CB", "LSB", "RSB", "GK"};
+
 static inline int z27GetPositionIndexByName(const std::string& name) {
-  static const char* const names[] = {
-    "", "CF", "ST", "LWG", "RWG", "OMF", "DMF", "CMF", "LMF", "RMF", "CB", "LSB", "RSB"
-  };
-  for (int i = 1; i <= 12; i++) {
-    if (name == names[i]) return i;
+  for (int i = 1; i <= 13; i++) {
+    if (name == kZiruPositionNames[i]) return i;
   }
   if (name == "SS") return 2;
   if (name == "AMF") return 5;
@@ -145,135 +153,160 @@ static void z27KeepPositionTrainingItems(const ObjP& jo) {
   }
 }
 
-// Position training on `target`, the card the client picked (z27TrainingTarget).
+// ---- Learned positions, as Konami's server and the 11.1.1 client keep them ----
+// A card plays each position at level 0, 1 or 2 (parameters[1..13]) and has two slots for
+// learned positions (additional_position). A learned position is the card's own level there
+// plus one for each slot holding it, at most 2:
+// - after a successful training the client itself takes one level off the position the slot
+//   held and adds one to the new position (CommandObjectCmdUseMyclubItem::QuitCommand,
+//   0x104774eac..0x104774f24);
+// - it counts a card's own level as its level minus the slots holding that position
+//   (UtilityMyClubTraining::GetPositionTrainableNum, 0x1048a4df0), and the select screen
+//   previews a pick as one level up (MyClubMyTeamPlayerTrainingPositionSelect::GetPositionArea,
+//   0x104683354);
+// - Konami's own login data has three cards with a learned position: OMF at the card's own
+//   level 1 is at 2, LWG and RMF at the card's own level 0 are at 1.
+
+// How many of the slots in `learned` hold the position at parameters index k.
+static int z27SlotsHolding(const ArrP& learned, int k) {
+  int n = 0;
+  for (int i = 0; learned && i < learned->length() && i < 2; i++)
+    if (z27GetPositionIndexByName(learned->optString(i, "")) == k) n++;
+  return n;
+}
+
+// The card's own position levels, parameters[1..13] (index 0 unused): the levels of what the
+// card was made from, without the positions learned there. That is the starter entry listed
+// under its serial (also when the client knows the card by another id), else its record, else
+// its starter or rental entry (z27CardSource), else the card itself.
+void z27OwnPositionLevels(const ObjP& p, int own[14]) {
+  ObjP gid = p ? p->optJSONObject("gameplayer_id") : nullptr;
+  int64_t id = gid ? gid->optLong("id", 0) : 0, serial = gid ? gid->optLong("serial", 0) : 0;
+  const ZiruStarters& starters = z27Starters();
+  ObjP source;
+  auto listed = starters.bySerialId.find({serial, id});
+  if (serial > 0 && listed != starters.bySerialId.end()) source = listed->second;
+  if (!source) source = z27CardSource(id);
+  auto upgraded = starters.byUpgradedId.find(id);
+  if (!source && upgraded != starters.byUpgradedId.end()) source = upgraded->second;
+  ArrP values = source ? source->optJSONArray("parameters") : nullptr;
+  if (!values || values->length() < 14) {
+    source = p;
+    values = p ? p->optJSONArray("parameters") : nullptr;
+  }
+  ArrP learned = source ? source->optJSONArray("additional_position") : nullptr;
+  own[0] = 0;
+  for (int k = 1; k <= 13; k++) own[k] = values && values->length() >= 14 ? std::max(0, values->optInt(k, 0) - z27SlotsHolding(learned, k)) : 0;
+}
+
+// Sets the card's position levels from its own levels and the slots it has.
+void z27PutPositionLevels(const ObjP& p, const int own[14]) {
+  ArrP learned = p->optJSONArray("additional_position");
+  for (const char* key : {"parameters", "original_parameters"}) {
+    ArrP values = p->optJSONArray(key);
+    if (!values || values->length() < 14) continue;
+    for (int k = 1; k <= 13; k++) values->put(k, std::min(2, own[k] + z27SlotsHolding(learned, k)));
+  }
+}
+
+// A card that learned positions shows them as the client and Konami's server have them. Builds
+// before fix3 saved a learned position at level 2 whatever the card's own level, and a replaced
+// one at the record's level or 0.
+void z27ApplyLearnedPositions(const ObjP& p) {
+  ArrP learned = p ? p->optJSONArray("additional_position") : nullptr;
+  ArrP values = p ? p->optJSONArray("parameters") : nullptr;
+  if (!learned || learned->length() == 0 || !values || values->length() < 14) return;
+  int own[14];
+  z27OwnPositionLevels(p, own);
+  z27PutPositionLevels(p, own);
+}
+
+// Whether the client offers the position at parameters index k for `slot`, as
+// MyClubMyTeamPlayerTrainingPositionSelect::AvailablePositionTraining (0x10468321c) decides with
+// UtilityMyClubTraining::GetTrainablePositionList (0x1048a4ba4) and AddToPositionList
+// (0x1048a4cfc): below level 2, not the position this slot holds, and either played (level 1)
+// or next to the card's registered position (parameters[0], a Position number). The positions
+// next to each one are the table the client builds at 0x1048a5d44.
+static bool z27PositionOffered(const ArrP& values, const ArrP& learned, int slot, int k) {
+  static const std::vector<int> nextTo[13] = {{}, {2, 3, 4}, {1, 6}, {1, 7}, {1, 5, 6, 7}, {4, 6, 7, 8},
+      {2, 4, 5, 8, 9}, {3, 4, 5, 8, 10}, {6, 7, 5, 11}, {6, 11, 12}, {7, 11, 12}, {9, 10, 8, 12}, {9, 10, 11}};
+  if (k < 1 || k > 13) return false;
+  int level = values->optInt(k, 0);
+  if (level > 1) return false;
+  if (learned && slot < learned->length() && z27GetPositionIndexByName(learned->optString(slot, "")) == k) return false;
+  int registered = values->optInt(0, -1);
+  if (level != 0 && k != z27PositionParameter(registered)) return true;
+  if (registered < 0 || registered > 12) return false;
+  for (int position : nextTo[registered])
+    if (z27PositionParameter(position) == k) return true;
+  return false;
+}
+
+// Position training on `target`, the card the client picked (z27TrainingTarget). Position
+// Training (Select) teaches the position picked, Position Training a random one, in either case
+// only a position the client offers for that slot; otherwise the answer is not successful,
+// nothing changes and the item is not used up.
 void applyZiruPositionTrainingResponse(const ObjP& jo, const ObjP& target) {
   try {
     if (!(ziruItemType && (*ziruItemType == "POSITION_TRAINING" || *ziruItemType == "POSITION_TRAINING_SELECT"))) return;
+    bool select = *ziruItemType == "POSITION_TRAINING_SELECT";
     int64_t j = ziruTargetSerial;
-    if (j > 0) {
-      ObjP p = target;
-      int64_t cardId = p->getJSONObject("gameplayer_id")->optLong("id", ziruTargetPlayerId);
-      ArrP params = p->optJSONArray("parameters");
-      if (params && params->length() >= 14) {
-        if (params->optInt(0) != 0) {
-          static const char* const names[] = {
-            "", "CF", "ST", "LWG", "RWG", "OMF", "DMF", "CMF", "LMF", "RMF", "CB", "LSB", "RSB"
-          };
-          ArrP add = p->optJSONArray("additional_position");
-          if (!add) { add = newArr(); p->put("additional_position", add); }
+    ObjP p = target;
+    ArrP params = p ? p->optJSONArray("parameters") : nullptr;
+    auto refuse = [&](const std::string& why) {
+      jo->put("position_training_result", newObj()->put("additional_position", "")->put("is_success", "NO"));
+      z27KeepPositionTrainingItems(jo);
+      logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_REFUSED] type=" + *ziruItemType + " serial=" + str(j) + " " + why);
+    };
+    if (j <= 0 || !params || params->length() < 14) {
+      refuse("missing/invalid player state");
+      return;
+    }
+    ArrP add = p->optJSONArray("additional_position");
+    if (!add) add = newArr();
+    // The client opens slot 1 only once slot 0 holds a position (MyClubMyTeamPlayerTrainingPosition::SetupPlayerData, 0x104682850).
+    int slot = ziruTrainingIndex;
+    if (slot != 0 && slot != 1) slot = (add->length() == 0) ? 0 : 1;
+    if (add->length() == 0) slot = 0;
 
-          int slot = ziruTrainingIndex;
-          if (slot != 0 && slot != 1) {
-            slot = (add->length() == 0) ? 0 : 1;
-          }
-          if (add->length() == 0) {
-            slot = 0;
-          }
+    // The levels as the client shows them.
+    int own[14];
+    z27OwnPositionLevels(p, own);
+    ArrP shown = newArr();
+    shown->put(params->optInt(0, 0));
+    for (int k = 1; k <= 13; k++) shown->put(std::min(2, own[k] + z27SlotsHolding(add, k)));
 
-          // The card's own record, never another card's.
-          ObjP baseWrapper = getZiruPlayerWrapper(Value((long long)cardId), false);
-          ObjP baseP;
-          ArrP baseParams;
-          if (baseWrapper && (baseP = baseWrapper->optJSONObject("gameplayer"))) {
-            baseParams = baseP->optJSONArray("parameters");
-          }
-
-          int other_slot = (slot == 0) ? 1 : 0;
-          std::string other_pos = (other_slot < add->length()) ? add->optString(other_slot, "") : "";
-          int other_pos_idx = z27GetPositionIndexByName(other_pos);
-
-          // Position Training (Select) teaches the position the client picked, when the card can
-          // learn it: an outfield position the card does not play by itself and that the other slot
-          // does not hold. Anything else is answered as not successful; nothing changes and the
-          // item is not used up.
-          bool select = *ziruItemType == "POSITION_TRAINING_SELECT";
-          if (select) {
-            int k = ziruPickedPosition;
-            std::string old_pos = (slot < add->length()) ? add->optString(slot, "") : "";
-            bool hasBase = baseParams && baseParams->length() >= 14;
-            int level = hasBase ? baseParams->optInt(k) : (k == z27GetPositionIndexByName(old_pos) ? 0 : params->optInt(k));
-            if (!(k >= 1 && k <= 12 && k != other_pos_idx && level < 2)) {
-              for (const char* other : {"skill_training_result", "ability_training_result"}) jo->remove(other);
-              jo->put("position_training_result", newObj()->put("additional_position", "")->put("is_success", "NO"));
-              z27KeepPositionTrainingItems(jo);
-              logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_SELECT_REFUSED] serial=" + str(j) + " slot=" + str(slot) +
-                                                  " position=" + str(k) + " cannot be learned");
-              return;
-            }
-          }
-
-          if (baseParams && baseParams->length() >= 14) {
-            for (int k = 1; k <= 12; k++) {
-              params->put(k, baseParams->optInt(k));
-            }
-          } else {
-            std::string old_pos = (slot < add->length()) ? add->optString(slot, "") : "";
-            int old_idx = z27GetPositionIndexByName(old_pos);
-            if (old_idx >= 1 && old_idx <= 12) {
-              params->put(old_idx, 0);
-            }
-          }
-
-          if (other_pos_idx >= 1 && other_pos_idx <= 12) {
-            params->put(other_pos_idx, 2);
-          }
-
-          std::vector<int> candidates;
-          for (int k = 1; k <= 12; k++) {
-            if (k == other_pos_idx) continue;
-            if (baseParams && baseParams->length() >= 14 && baseParams->optInt(k) >= 2) continue;
-            if ((!baseParams || baseParams->length() < 14) && params->optInt(k) >= 2) continue;
-            candidates.push_back(k);
-          }
-
-          if (candidates.empty()) {
-            for (int k = 1; k <= 12; k++) {
-              if (k != other_pos_idx) candidates.push_back(k);
-            }
-          }
-
-          int chosen_idx = select ? ziruPickedPosition : candidates[rand() % candidates.size()];
-          std::string chosen_pos = names[chosen_idx];
-
-          params->put(chosen_idx, 2);
-
-          if (slot == 0) {
-            if (add->length() == 0) add->put(chosen_pos);
-            else add->put(0, chosen_pos);
-          } else {
-            if (add->length() == 0) {
-              add->put(chosen_pos);
-            } else if (add->length() == 1) {
-              add->put(chosen_pos);
-            } else {
-              add->put(1, chosen_pos);
-            }
-          }
-
-          saveZiruPlayerToDb(p);
-
-          ObjP res = jo->optJSONObject("position_training_result");
-          if (!res) { res = newObj(); jo->put("position_training_result", res); }
-          res->put("additional_position", chosen_pos);
-          res->put("is_success", "YES");
-
-          z27KeepPositionTrainingItems(jo);
-
-          logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_V26] type=" + *ziruItemType + " serial=" + str(j) + " slot=" + str(slot) +
-                                              " position=" + chosen_pos);
-          return;
-        }
-
-        // A goalkeeper learns no other position.
-        for (const char* other : {"skill_training_result", "ability_training_result"}) jo->remove(other);
-        jo->put("position_training_result", newObj()->put("additional_position", "")->put("is_success", "NO"));
-        z27KeepPositionTrainingItems(jo);
+    int chosen = -1;
+    if (select) {
+      if (!z27PositionOffered(shown, add, slot, ziruPickedPosition)) {
+        refuse("slot=" + str(slot) + " position=" + str(ziruPickedPosition) + " cannot be learned");
         return;
       }
+      chosen = ziruPickedPosition;
+    } else {
+      std::vector<int> candidates;
+      for (int k = 1; k <= 13; k++)
+        if (z27PositionOffered(shown, add, slot, k)) candidates.push_back(k);
+      if (candidates.empty()) {
+        refuse("slot=" + str(slot) + " no position left to learn");
+        return;
+      }
+      chosen = candidates[rand() % candidates.size()];
     }
-    logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_V26_FAIL] missing/invalid player state");
+    std::string chosen_pos = kZiruPositionNames[chosen];
+    if (slot < add->length()) add->put(slot, chosen_pos);
+    else add->put(chosen_pos);
+    p->put("additional_position", add);
+    z27PutPositionLevels(p, own);
+    saveZiruPlayerToDb(p);
+
+    jo->put("position_training_result", newObj()->put("additional_position", chosen_pos)->put("is_success", "YES"));
+    z27KeepPositionTrainingItems(jo);
+    logRequest("ZIRU_POSITION_V26", "[ZIRU_POSITION_V26] type=" + *ziruItemType + " serial=" + str(j) + " slot=" + str(slot) +
+                                        " position=" + chosen_pos + " level=" + str(params->optInt(chosen, 0)));
   } catch (const std::exception& e) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_POSITION_V26_ERR] ") + e.what());
+    logRequest("ZIRU_POSITION_V26", std::string("[ZIRU_POSITION_V26_ERR] ") + e.what());
   }
 }
 
@@ -755,17 +788,20 @@ void applyZiruSkillTrainingResponse(const ObjP& jo, const ObjP& target) {
 // Skill, booster and position training change exactly the card the client
 // picked (z27TrainingTarget). A request naming any other card is answered as a
 // training that did not succeed: only that training type's result, with
-// is_success NO (Konami's answer template also carries a successful skill
-// result, which is removed), nothing is saved and no item is used up.
+// is_success NO, nothing is saved and no item is used up.
+// Every answer carries only the result of the item used: the client reads only
+// that one (CommandObjectCmdUseMyclubItem::QuitCommand 0x104774bc8 picks skill,
+// booster or position by the item type). Konami's answer template is a skill
+// training answer with a successful skill result of its own, which is removed.
 void z27UseMyclubItem(const ObjP& jo) {
   std::string type = ziruItemType ? *ziruItemType : "";
   bool skill = type == "SKILL_TRAINING" || type == "SKILL_TRAINING_CATEGORY" || type == "SKILL_TRAINING_SELECT";
   bool booster = type == "ABILITY_TRAINING_RANDOM" || type == "ABILITY_TRAINING_SELECT";
   bool position = type == "POSITION_TRAINING" || type == "POSITION_TRAINING_SELECT";
+  for (const char* k : {"skill_training_result", "ability_training_result", "position_training_result"}) jo->remove(k);
   if (skill || booster || position) {
     ObjP target = z27TrainingTarget(ziruTargetSerial, ziruTargetPlayerId);
     if (!target) {
-      for (const char* k : {"skill_training_result", "ability_training_result", "position_training_result"}) jo->remove(k);
       if (skill) {
         jo->put("skill_training_result", newObj()->put("is_success", "NO"));
         z27KeepSkillTrainingItems(jo);

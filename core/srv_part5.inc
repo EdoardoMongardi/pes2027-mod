@@ -331,6 +331,7 @@ void z27NormalizeOwnedCard(const ObjP& p) {
   applyZiruRonaldoMaxProgression(p);
   applyZiruWeakFootFix(p);
   ziruSyncActiveBooster(p);
+  z27ApplyLearnedPositions(p);
 }
 
 void z27ApplyProgressionPoints(const ArrP& params, const ObjP& prog, const ArrP& baseParams) {

@@ -752,7 +752,8 @@ static void serialTests(const std::string& top) {
     {"ABILITY_TRAINING_SELECT", [&](long long id, long long serial) { return item("ABILITY_TRAINING_SELECT", id, serial, 0, newObj()->put("ability_id", 186)); }},
     {"ABILITY_TRAINING_RANDOM", [&](long long id, long long serial) { return item("ABILITY_TRAINING_RANDOM", id, serial, 1, newObj()); }},
     {"POSITION_TRAINING", [&](long long id, long long serial) { return item("POSITION_TRAINING", id, serial, 0, newObj()); }},
-    {"POSITION_TRAINING_SELECT", [&](long long id, long long serial) { return item("POSITION_TRAINING_SELECT", id, serial, 0, newObj()->put("position_id", "CMF")); }},
+    // ST is next to G's own LWG, so the client offers it for slot 1 whatever the random training taught in slot 0.
+    {"POSITION_TRAINING_SELECT", [&](long long id, long long serial) { return item("POSITION_TRAINING_SELECT", id, serial, 1, newObj()->put("position_id", "ST")); }},
     {"CAREERPLAN", [&](long long id, long long serial) { return career(id, serial, 6); }},
     {"CAREERPLAN reset", [&](long long id, long long serial) { return career(id, serial, 0); }},
   };
@@ -1147,6 +1148,56 @@ static void starterSerialTests(const std::string& top) {
   }
 }
 
+// ---- Position training as the 11.1.1 client does it (PESmobile, disassembled) -------------
+// Written from the client, not from the server, so the tests check the server against it.
+// Position numbers (CommandCamPosition literals, 0x10399da00): GK 0, CB 1, LSB 2, RSB 3, DMF 4,
+// CMF 5, LMF 6, RMF 7, OMF 8, LWG 9, RWG 10, ST 11, CF 12; 13 is an empty learned-position slot.
+static const char* const kPositionNames[13] = {"GK", "CB", "LSB", "RSB", "DMF", "CMF", "LMF", "RMF", "OMF", "LWG", "RWG", "ST", "CF"};
+// The parameters[] index of each position's level (tmpdb::Player::GetDataLabel(Position), 0x10578ba08).
+static const int kPositionLabels[13] = {13, 10, 11, 12, 6, 7, 8, 9, 5, 3, 4, 2, 1};
+// The positions next to each registered position, which a card may learn even at level 0
+// (built by __GLOBAL__sub_I_OnlineModeUtilityMyClubTraining.cpp, 0x1048a5d44, at 0x10764b698).
+static const std::vector<int> kPositionsNextTo[13] = {{}, {2, 3, 4}, {1, 6}, {1, 7}, {1, 5, 6, 7}, {4, 6, 7, 8},
+    {2, 4, 5, 8, 9}, {3, 4, 5, 8, 10}, {6, 7, 5, 11}, {6, 11, 12}, {7, 11, 12}, {9, 10, 8, 12}, {9, 10, 11}};
+struct ClientCard { int registered = 0; int level[13] = {}; int slot[2] = {13, 13}; };
+static int positionNumber(const std::string& name) {
+  for (int p = 0; p < 13; ++p) if (name == kPositionNames[p]) return p;
+  return -1;
+}
+// The card as the client holds it after a login (ModeUtility::SetCommandGamePlayerToMyClubGamePlayer,
+// 0x104703a64): the parameters as sent, and the additional_position names as positions.
+static ClientCard clientCard(const ObjP& card) {
+  ClientCard c;
+  auto values = card->getJSONArray("parameters");
+  c.registered = values->getInt(0);
+  for (int p = 0; p < 13; ++p) c.level[p] = values->getInt(kPositionLabels[p]);
+  auto learned = card->optJSONArray("additional_position");
+  for (int i = 0; learned && i < learned->length() && i < 2; ++i) c.slot[i] = positionNumber(learned->getString(i));
+  return c;
+}
+// Whether the Position Training (Select) screen lets the player pick `p` for `slot`:
+// MyClubMyTeamPlayerTrainingPositionSelect::AvailablePositionTraining (0x10468321c) with
+// UtilityMyClubTraining::GetTrainablePositionList (0x1048a4ba4) and AddToPositionList (0x1048a4cfc).
+static bool clientOffers(const ClientCard& c, int slot, int p) {
+  if (c.level[p] > 1 || c.slot[slot] == p) return false;
+  const auto& next = kPositionsNextTo[c.registered];
+  bool listed = (c.level[p] != 0 && p != c.registered) || std::count(next.begin(), next.end(), p) > 0;
+  return listed && (c.level[p] != 2 || c.slot[0] == p || c.slot[1] == p);
+}
+// What the client does to the card after is_success "YES" (CommandObjectCmdUseMyclubItem::QuitCommand,
+// 0x104774eac..0x104774f24): the position the slot held loses a level, the new one gains a level.
+static void clientLearns(ClientCard& c, int slot, int p) {
+  if (c.slot[slot] != 13) c.level[c.slot[slot]] -= 1;
+  c.level[p] += 1;
+  c.slot[slot] = p;
+}
+static std::string describe(const ClientCard& c) {
+  std::string out = "registered " + std::to_string(c.registered) + " levels";
+  for (int p = 0; p < 13; ++p) out += " " + std::string(kPositionNames[p]) + "=" + std::to_string(c.level[p]);
+  return out + " slots " + std::to_string(c.slot[0]) + "," + std::to_string(c.slot[1]);
+}
+static bool sameCard(const ClientCard& a, const ClientCard& b) { return describe(a) == describe(b); }
+
 // ---- Skill and Position Training (Select), as the 11.1.1 client sends them ----------------
 // CmdUseMyclubItemOption::PackMsgPack (0x103b120a4) sends item_list [{item {item_type, grade,
 // effect}, present_num}], auto_item_list, is_auto_use_item, gameplayer_id_list, training_index,
@@ -1234,48 +1285,236 @@ static void selectTrainingTests(const std::string& top) {
           firstDifference(before, saveDump(s)).empty() && itemsKept(r), "Skill Select: a skill the card has is refused; nothing changes, no item used up");
   }
 
-  // Position Training (Select): the picked position, every time, in either slot.
-  struct Pick { int index, position; const char* name; int parameter; };
-  for (Pick pick : {Pick{0, 12, "CF", 1}, Pick{1, 4, "DMF", 6}, Pick{0, 2, "LSB", 11}, Pick{1, 8, "OMF", 5}, Pick{0, 11, "ST", 2}}) {
-    for (int round = 0; round < 3; ++round) {
-      srand(round * 104729 + pick.position);
-      auto r = positionSelect(P, 701, pick.index, pick.position, pick.name)->getJSONObject("position_training_result");
-      check(r->getString("is_success") == "YES" && r->getString("additional_position") == pick.name,
-          (std::string("Position Select: the picked position is answered: ") + pick.name).c_str());
-      auto row = saved(701);
-      check(row->getJSONArray("additional_position")->getString(pick.index) == pick.name && row->getJSONArray("parameters")->getInt(pick.parameter) == 2,
-          (std::string("Position Select: the picked position is the one learned: ") + pick.name).c_str());
-    }
+  // Position Training (Select): the picked position, every time, in either slot. P is an LWG
+  // (level 2) who plays ST a little (1); next to LWG are LMF, ST and CF.
+  auto shown = [&](long long serial) { return clientCard(bySerial(call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list"), serial)); };
+  struct Pick { int index, position; const char* name; };
+  for (Pick pick : {Pick{0, 12, "CF"}, Pick{1, 6, "LMF"}, Pick{0, 11, "ST"}}) {
+    ClientCard expected = shown(701);
+    check(clientOffers(expected, pick.index, pick.position), (std::string("the client offers ") + pick.name).c_str());
+    clientLearns(expected, pick.index, pick.position);
+    auto r = positionSelect(P, 701, pick.index, pick.position, pick.name)->getJSONObject("position_training_result");
+    check(r->getString("is_success") == "YES" && r->getString("additional_position") == pick.name,
+        (std::string("Position Select: the picked position is answered: ") + pick.name).c_str());
+    check(sameCard(shown(701), expected), (std::string("Position Select: the card learned ") + pick.name + " as the client shows it: " + describe(shown(701))).c_str());
   }
   {
-    // Slot 0 now holds ST (it replaced LSB, which replaced CF), slot 1 OMF (it replaced DMF).
+    // Slot 0 now holds ST (it replaced CF), slot 1 LMF: ST 1 + 1, LMF 0 + 1, CF back to 0, LWG as it was.
     auto row = saved(701);
     auto values = row->getJSONArray("parameters");
-    check(row->getJSONArray("additional_position")->toString() == "[\"ST\",\"OMF\"]" && values->getInt(1) == 0 && values->getInt(11) == 0 &&
-          values->getInt(6) == 0 && values->getInt(3) == 2, "Position Select: a replaced position is no longer played; the card's own one stays");
+    check(row->getJSONArray("additional_position")->toString() == "[\"ST\",\"LMF\"]" && values->getInt(1) == 0 && values->getInt(2) == 2 &&
+          values->getInt(8) == 1 && values->getInt(3) == 2, "Position Select: a learned position is one level up; a replaced one goes back to the card's own level");
   }
-  // Refused: the card's own position, the other slot's position, GK, and any card that is a GK.
+  // Refused: what the client does not offer. Its own position, the position this slot holds,
+  // a position neither played nor next to LWG, GK, and any card that is a GK.
   struct Refusal { const char* what; long long id, serial; int index, position; const char* name; };
-  for (Refusal no : {Refusal{"its own position", P, 701, 0, 9, "LWG"}, Refusal{"the other slot's position", P, 701, 0, 8, "OMF"},
+  for (Refusal no : {Refusal{"its own position", P, 701, 0, 9, "LWG"}, Refusal{"the position this slot holds", P, 701, 1, 6, "LMF"},
+                     Refusal{"a position it does not play and that is not next to its own", P, 701, 0, 4, "DMF"},
                      Refusal{"GK", P, 701, 1, 0, "GK"}, Refusal{"a GK card", Q, 702, 0, 12, "CF"}}) {
     auto before = saveDump(s);
     auto r = positionSelect(no.id, no.serial, no.index, no.position, no.name);
     auto result = r->getJSONObject("position_training_result");
-    check(result->getString("is_success") == "NO" && result->getString("additional_position").empty() && firstDifference(before, saveDump(s)).empty(),
-        (std::string("Position Select: ") + no.what + " is refused and nothing changes").c_str());
-    check(!r->has("skill_training_result"), (std::string("Position Select: ") + no.what + ": no skill result is sent").c_str());
+    check(result->getString("is_success") == "NO" && result->getString("additional_position").empty() && firstDifference(before, saveDump(s)).empty() && itemsKept(r),
+        (std::string("Position Select: ") + no.what + " is refused, nothing changes and no item is used up").c_str());
+    check(!r->has("skill_training_result") && !r->has("ability_training_result"), (std::string("Position Select: ") + no.what + ": only the position result is sent").c_str());
   }
   // Without position_id the item's effect is the picked Position; a number in position_id too.
   {
-    auto r = use("POSITION_TRAINING_SELECT", P, 701, 0, 7, 0, newObj())->getJSONObject("position_training_result");
-    check(r->getString("is_success") == "YES" && r->getString("additional_position") == "RMF", "Position Select: the item's effect names the position");
-    r = use("POSITION_TRAINING_SELECT", P, 701, 0, 0, 0, newObj()->put("position_id", 5))->getJSONObject("position_training_result");
-    check(r->getString("is_success") == "YES" && r->getString("additional_position") == "CMF", "Position Select: a Position number as position_id");
+    auto r = use("POSITION_TRAINING_SELECT", P, 701, 0, 12, 0, newObj())->getJSONObject("position_training_result");
+    check(r->getString("is_success") == "YES" && r->getString("additional_position") == "CF", "Position Select: the item's effect names the position");
+    r = use("POSITION_TRAINING_SELECT", P, 701, 1, 0, 0, newObj()->put("position_id", 11))->getJSONObject("position_training_result");
+    check(r->getString("is_success") == "YES" && r->getString("additional_position") == "ST", "Position Select: a Position number as position_id");
   }
-  // Position Training (random) still never teaches a position the card plays by itself.
+  // Position Training (random): always a position the client would offer for that slot.
   for (int k = 0; k < 20; ++k) {
+    ClientCard before = shown(701);
     auto r = use("POSITION_TRAINING", P, 701, k % 2, 0, 0, newObj()->put("position_id", ""))->getJSONObject("position_training_result");
-    check(r->getString("is_success") == "YES" && r->getString("additional_position") != "LWG", "Position Training: never the card's own position");
+    int got = positionNumber(r->getString("additional_position"));
+    check(r->getString("is_success") == "YES" && got >= 0 && clientOffers(before, k % 2, got),
+        ("Position Training: a position the client offers, got " + r->getString("additional_position")).c_str());
+  }
+}
+
+// ---- Position training keeps the card as the client shows it ----------------------------
+// After a "YES" the client changes the card itself: one level up for the learned position, one
+// down for the position the slot held (clientLearns). Konami's server does the same: a learned
+// position is the card's own level plus one. Konami's own login data has three starter cards with
+// a learned position: OMF at own level 1 is 2, LWG and RMF at own level 0 are 1.
+// Also: each answer carries only the result of the item used, as the client reads only that one
+// (QuitCommand 0x104774bc8), and a booster answer carries the card's sell value, which the client
+// puts on the card (gameplayer_sell_gp, QuitCommand 0x104774db4).
+static void positionTrainingTests(const std::string& top) {
+  const std::string root = top + "/position-training";
+  std::filesystem::create_directories(root + "/responses");
+  const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0};
+  auto withLevels = [](const ObjP& c, std::vector<std::pair<int, int>> levels) {
+    auto values = c->getJSONArray("parameters");
+    for (auto [position, level] : levels) values->put(kPositionLabels[position], level);
+    return c;
+  };
+  // R: an ST with a record: CF 2, ST 2, LWG 1, OMF 1.
+  // S: a CMF with only a starter entry: CMF 2, DMF 1, OMF 1, RMF 1.
+  // K: an ST with only a starter entry, listed as Konami lists a card that learned LWG (own level 0).
+  // L: an LWG with only a starter entry (LWG 2, ST 1), saved by fix2 after it learned ST and then LMF
+  //    in slot 0: LMF saved at 2 and ST at 0.
+  // G: a goalkeeper.
+  const long long R = 21 + (1LL << 40), S = 22 + (1LL << 40), K = 23 + (1LL << 40), L = 24 + (1LL << 40), G = 25 + (1LL << 40);
+  const std::vector<std::pair<int, int>> rLevels = {{11, 2}, {12, 2}, {9, 1}, {8, 1}}, sLevels = {{5, 2}, {4, 1}, {8, 1}, {7, 1}};
+  asset(root, "ZIRU_PLAYER_RECORDS.json", newObj()->put(std::to_string(R), newObj()->put("gameplayer", withLevels(card(R, 0, 11, 0, 0, none, {}, 108, 0, 149), rLevels))));
+  auto starterR = withLevels(card(R, 721, 11, 0, 0, none, {}, 108, 0, 145), rLevels)->put("sell_gp", 230000);
+  auto starterS = withLevels(card(S, 722, 5, 0, 0, none, {}, 108, 0, 145), sLevels)->put("sell_gp", 150000);
+  auto starterK = withLevels(card(K, 723, 11, 0, 0, none, {}, 108, 0, 145), {{11, 2}, {12, 2}, {9, 1}})->put("additional_position", newArr()->put("LWG"));
+  starterK->put("original_parameters", Array::parse(starterK->getJSONArray("parameters")->toString()));
+  auto starterL = withLevels(card(L, 724, 9, 0, 0, none, {}, 108, 0, 145), {{9, 2}, {11, 1}});
+  auto starterG = withLevels(card(G, 725, 0, 0, 0, none, {}, 108, 0, 145), {{0, 2}});
+  auto starters = newArr(), refs = newArr();
+  for (auto c : {starterR, starterS, starterK, starterL, starterG}) {
+    starters->put(c);
+    refs->put(newObj()->put("gameplayer_id", Object::parse(c->getJSONObject("gameplayer_id")->toString())));
+  }
+  auto squad = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
+  asset(root, "CmdLogin.json", newObj()->put("entry_info", newObj()->put("main_squad_id", 9)->put("gameplayer_list", starters)
+      ->put("coach_list", newArr()->put(coachRef(100, 1000)))
+      ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squad)->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))))));
+  asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline"})"));
+  asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
+  asset(root, "ZIRU_RANDOM_BOOSTERS.json", obj(R"({"ability_ids":[12,20,30]})"));
+  // Konami's answer template is a skill training answer: it carries a successful skill result.
+  asset(root, "CMD_USE_MYCLUB_ITEM.json", obj(R"({"result":"NOERR","skill_training_result":{"additional_skill_id":22,"is_success":"YES"},
+      "item_list":[{"item":{"item_type":"SKILL_TRAINING","grade":0,"effect":0},"inventory_num":1}],"achievement_notification":[]})"));
+  asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save"; cfg.iosPlayerLayout = true;
+  std::filesystem::create_directories(cfg.dataDir);
+  {
+    // L as fix2 saved it.
+    OfflineServer first(cfg);
+    auto row = withLevels(Object::parse(starterL->toString()), {{6, 2}, {11, 0}})->put("additional_position", newArr()->put("LMF"));
+    first.ziruDb->savePlayer(724, L, row->toString());
+  }
+  OfflineServer s(cfg);
+  auto login = [&]() { return call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list"); };
+  auto shown = [&](long long serial) { return clientCard(bySerial(login(), serial)); };
+  auto use = [&](const char* type, long long id, long long serial, int index, int effect, ObjP extra) {
+    auto req = newObj()->put("item_list", newArr()->put(newObj()->put("item", newObj()->put("item_type", type)->put("grade", 0)->put("effect", effect))
+                                                        ->put("present_num", 100)))
+        ->put("auto_item_list", newArr())->put("is_auto_use_item", "NO")
+        ->put("gameplayer_id_list", newArr()->put(newObj()->put("id", id)->put("serial", serial)))
+        ->put("training_index", index)->put("ability_id", 0)->put("position_id", "");
+    for (const auto& k : extra->keys()) req->put(k, extra->get(k));
+    return call(s, "CMD_USE_MYCLUB_ITEM", req);
+  };
+  auto pick = [&](long long id, long long serial, int slot, int position) {
+    return use("POSITION_TRAINING_SELECT", id, serial, slot, position, newObj()->put("position_id", kPositionNames[position]));
+  };
+  auto onlyResult = [](const ObjP& r, const char* key) {
+    for (const char* k : {"skill_training_result", "ability_training_result", "position_training_result"})
+      if ((std::string(k) == key) != r->has(k)) return false;
+    return true;
+  };
+
+  // The login shows K as Konami lists it, and L as Konami would have it: LMF at 0 + 1, ST at its own 1.
+  {
+    ClientCard k = shown(723), l = shown(724);
+    check(k.level[9] == 1 && k.slot[0] == 9, ("login: a card with Konami's own learned position is listed as Konami lists it, " + describe(k)).c_str());
+    check(l.level[6] == 1 && l.level[11] == 1 && l.level[9] == 2 && l.slot[0] == 6,
+        ("login: a card fix2 saved with learned positions at level 2 is shown with its own level plus one, " + describe(l)).c_str());
+    auto detail = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", L)->put("serial", 724)));
+    ClientCard d = clientCard(detail);  // the detail answer has no additional_position
+    d.slot[0] = l.slot[0], d.slot[1] = l.slot[1];
+    check(sameCard(d, l), ("player detail: the same levels as the login, " + describe(clientCard(detail))).c_str());
+  }
+  // A learned position at own level 0 is level 1, not 2 (Konami: LWG and RMF at 0 are 1).
+  {
+    auto r = pick(R, 721, 0, 10);
+    check(r->getJSONObject("position_training_result")->getString("is_success") == "YES" && shown(721).level[10] == 1,
+        "Position Select: RWG at the card's own level 0 is learned at level 1");
+    check(onlyResult(r, "position_training_result"), "Position Select: a successful answer carries only the position result");
+  }
+  // Learning the position the other slot holds is offered by the client: one more level.
+  {
+    ClientCard c = shown(721);
+    check(clientOffers(c, 1, 10), "the client offers RWG for slot 1 while slot 0 holds it at level 1");
+    auto r = pick(R, 721, 1, 10)->getJSONObject("position_training_result");
+    check(r->getString("is_success") == "YES" && shown(721).level[10] == 2, "Position Select: RWG in both slots is level 2");
+    pick(R, 721, 0, 9);  // LWG (1) replaces RWG in slot 0: RWG back to 1, LWG 2
+    c = shown(721);
+    check(c.level[10] == 1 && c.level[9] == 2 && c.slot[0] == 9 && c.slot[1] == 10, ("Position Select: replacing one of the two goes one level down, " + describe(c)).c_str());
+  }
+  // (S has no record.) DMF at its own 1 is learned at 2; when OMF replaces it, DMF is back to 1.
+  {
+    pick(S, 722, 0, 4);
+    check(shown(722).level[4] == 2, "Position Select: DMF at the card's own level 1 is learned at level 2");
+    pick(S, 722, 0, 8);
+    ClientCard c = shown(722);
+    check(c.level[4] == 1 && c.level[8] == 2, ("Position Select: a card without a record gets its own level back when a position is replaced, " + describe(c)).c_str());
+  }
+  // What the client does not offer is refused and changes nothing: CB is neither played by R nor next to ST.
+  {
+    auto before = saveDump(s);
+    auto r = pick(R, 721, 0, 1);
+    check(r->getJSONObject("position_training_result")->getString("is_success") == "NO" && firstDifference(before, saveDump(s)).empty() &&
+          onlyResult(r, "position_training_result"), "Position Select: a position the client does not offer is refused and nothing changes");
+  }
+  // A goalkeeper learns nothing.
+  for (int position : {12, 1}) {
+    auto before = saveDump(s);
+    auto a = pick(G, 725, 0, position), b = use("POSITION_TRAINING", G, 725, 0, 0, newObj());
+    check(a->getJSONObject("position_training_result")->getString("is_success") == "NO" && b->getJSONObject("position_training_result")->getString("is_success") == "NO" &&
+          firstDifference(before, saveDump(s)).empty(), "Position Training: a goalkeeper learns no position");
+  }
+  // Any sequence of picks and random trainings: after every answer the next login shows exactly
+  // what the client showed after that answer. Picks the client does not offer are refused.
+  for (long long serial : {721LL, 722LL, 723LL, 724LL}) {
+    long long id = bySerial(login(), serial)->getJSONObject("gameplayer_id")->getLong("id");
+    srand((unsigned)serial);
+    for (int step = 0; step < 60; ++step) {
+      ClientCard c = shown(serial);
+      int slot = c.slot[0] == 13 ? 0 : rand() % 2;  // the client opens slot 1 only once slot 0 holds a position
+      std::string what = "card " + std::to_string(serial) + " step " + std::to_string(step) + " slot " + std::to_string(slot);
+      if (rand() % 2) {
+        int position = rand() % 13;
+        auto r = pick(id, serial, slot, position)->getJSONObject("position_training_result");
+        if (clientOffers(c, slot, position)) {
+          check(r->getString("is_success") == "YES" && r->getString("additional_position") == kPositionNames[position], (what + ": the pick is learned").c_str());
+          clientLearns(c, slot, position);
+        } else {
+          check(r->getString("is_success") == "NO", (what + ": a pick the client does not offer is refused").c_str());
+        }
+      } else {
+        auto r = use("POSITION_TRAINING", id, serial, slot, 0, newObj())->getJSONObject("position_training_result");
+        int got = positionNumber(r->getString("additional_position"));
+        bool any = false;
+        for (int p = 0; p < 13; ++p) any |= clientOffers(c, slot, p);
+        check(any ? (r->getString("is_success") == "YES" && got >= 0 && clientOffers(c, slot, got)) : r->getString("is_success") == "NO",
+            (what + ": random training teaches a position the client offers, got " + r->getString("additional_position")).c_str());
+        if (any) clientLearns(c, slot, got);
+      }
+      ClientCard after = shown(serial);
+      check(sameCard(after, c), (what + ": the login shows " + describe(after) + ", the client showed " + describe(c)).c_str());
+    }
+  }
+  // The save keeps it: a new start shows the same cards.
+  {
+    std::vector<ClientCard> before;
+    for (long long serial : {721, 722, 723, 724}) before.push_back(shown(serial));
+    OfflineServer again(cfg);
+    auto list = call(again, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    int i = 0;
+    for (long long serial : {721, 722, 723, 724}) check(sameCard(clientCard(bySerial(list, serial)), before[i++]), "a new start shows the trained cards as before");
+  }
+  // Each answer carries only its own result. A booster answer also carries the card's sell value.
+  {
+    auto booster = use("ABILITY_TRAINING_SELECT", S, 722, 0, 0, newObj()->put("ability_id", 186));
+    check(booster->getJSONObject("ability_training_result")->getString("is_success") == "YES" && onlyResult(booster, "ability_training_result") &&
+          booster->optLong("gameplayer_sell_gp", -1) == 150000, ("Booster: only the booster result, and the card's sell value, " + booster->toString()).c_str());
+    booster = use("ABILITY_TRAINING_RANDOM", R, 721, 1, 0, newObj());
+    check(booster->getJSONObject("ability_training_result")->getString("is_success") == "YES" && onlyResult(booster, "ability_training_result") &&
+          booster->optLong("gameplayer_sell_gp", -1) == 230000, "Booster (random): only the booster result, and the card's sell value");
+    auto skill = use("SKILL_TRAINING", R, 721, 0, 0, newObj());
+    check(skill->getJSONObject("skill_training_result")->getString("is_success") == "YES" && onlyResult(skill, "skill_training_result"),
+        "Skill training: only the skill result");
+    auto level = use("LEVEL_TRAINING", R, 721, 0, 1, newObj());
+    check(onlyResult(level, ""), "Level training: no training result");
   }
 }
 
@@ -1638,6 +1877,7 @@ int main() {
     serialTests(root);
     starterSerialTests(root);
     selectTrainingTests(root);
+    positionTrainingTests(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
     check(child >= 0, "spawn abrupt-exit save test");
