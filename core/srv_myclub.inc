@@ -719,8 +719,10 @@ void applyZiruSkillTrainingResponse(const ObjP& jo, const ObjP& target) {
     if (*ziruItemType == "SKILL_TRAINING_SELECT") {
       int chosen = ziruAbilityId;
       if (chosen == 0 && ziruSkillItemEffect > 0) chosen = ziruSkillItemEffect;
-      bool learnedElsewhere = vcontains(al, chosen) && !(target >= 0 && al[target] == chosen);
-      if (isZiruLearnableSkill(chosen, goalkeeper) && !cardHas(chosen) && !learnedElsewhere) {
+      // A skill in any learned slot, the slot picked included, is one the client never offers
+      // (UtilityMyClubTraining::HasSkill 0x1048a5aec looks at all 5 slots).
+      bool learned = vcontains(al, chosen);
+      if (isZiruLearnableSkill(chosen, goalkeeper) && !cardHas(chosen) && !learned) {
         v = chosen;
       } else {
         // Never another skill than the one picked: the training is not successful, the card

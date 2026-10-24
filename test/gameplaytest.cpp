@@ -1367,7 +1367,9 @@ static void selectTrainingTests(const std::string& top) {
 
   // Skill Training (Select): every skill the client lets the user pick (the screen above),
   // each picked into the same slot, is the skill taught and answered: the outfield card's 39,
-  // and the goalkeeping ones on the goalkeeper.
+  // and the goalkeeping ones on the goalkeeper. Once the slot holds it the client greys it out
+  // (UtilityMyClubTraining::HasSkill 0x1048a5aec looks at all 5 slots), so picking it again is
+  // refused and changes nothing.
   struct Offer { long long id, serial; std::vector<int> wires; };
   for (const Offer& offer : {Offer{P, 701, outfieldOffered}, Offer{Q, 702, keeperOnly}}) {
     for (int wire : offer.wires) {
@@ -1375,9 +1377,15 @@ static void selectTrainingTests(const std::string& top) {
       check(isZiruTrainableSkill(internal), "every skill the client offers is a normal skill");
       for (int round = 0; round < 3; ++round) {
         srand(round * 7919 + wire);
-        auto r = skillSelectOn(offer.id, offer.serial, wire, 0)->getJSONObject("skill_training_result");
-        check(r->getString("is_success") == "YES" && r->getInt("additional_skill_id") == wire,
-            ("Skill Select: the picked skill is answered, in the client's numbers: " + std::to_string(wire)).c_str());
+        auto before = saveDump(s);
+        auto answer = skillSelectOn(offer.id, offer.serial, wire, 0);
+        auto r = answer->getJSONObject("skill_training_result");
+        if (round == 0)
+          check(r->getString("is_success") == "YES" && r->getInt("additional_skill_id") == wire,
+              ("Skill Select: the picked skill is answered, in the client's numbers: " + std::to_string(wire)).c_str());
+        else
+          check(r->getString("is_success") == "NO" && firstDifference(before, saveDump(s)).empty() && itemsKept(answer),
+              ("Skill Select: picking the skill the slot already holds is refused; nothing changes: " + std::to_string(wire)).c_str());
         check(s.sp("almanac_state").getString("ziru_skills_" + std::to_string(offer.serial), "") == std::to_string(internal) &&
               skillBit(saved(offer.serial), internal) == 1,
             ("Skill Select: the picked skill is the one learned: " + std::to_string(internal)).c_str());
