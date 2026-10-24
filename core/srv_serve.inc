@@ -598,6 +598,7 @@ Response serveInner(Request& r) {
   if (isCmd("CMD_SET_PLAYDATA_MATCH") && ziruMyLeagueIsActive()) return handleZiruLeagueStatic("responses/ZIRU_ML_SET_PLAYDATA_MATCH.json");
   if (isCmd("CMD_RECV_CAMPAIGN_PASS_REWARD") && ziruMyLeagueIsActive()) return handleZiruLeagueStatic("responses/ZIRU_ML_CAMPAIGN_PASS_REWARD.json");
   if (isCmd("CMD_GET_MYCLUB_PLAYER_DATA")) return handleZiruGetMyclubPlayerData(ziruLastRequestBody);
+  if (isCmd("CMD_DELETE_MYCLUB_SKILL")) return handleZiruDeleteMyclubSkill();
   if (isCmd("CMD_SET_MYCLUB_SQUAD_INFO")) return handleZiruSquadAck();
   if (isCmd("CMD_SELL_MYCLUB_GAMEPLAYER")) {
     auto x = handleZiruSellPlayer();

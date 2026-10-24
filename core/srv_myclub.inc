@@ -651,6 +651,35 @@ std::set<int> z27CardSkillParams(const ObjP& p) {
   return out;
 }
 
+// The learned skills of `card`, saved under `serial`, in slot order: its additional_skill_id, then
+// any skill saved for the serial that is not listed there, at most 5.
+std::vector<int32_t> z27LearnedSkills(const ObjP& card, int64_t serial) {
+  std::vector<int32_t> al;
+  ArrP sk = card->optJSONArray("additional_skill_id");
+  if (sk) {
+    for (int i = 0; i < sk->length(); i++) {
+      int v = ziruRepairLearnedSkill(sk->optInt(i));
+
+      if (isZiruSkillId(v)) {
+        if (vcontains(al, v)) continue;
+        if (al.size() >= 5) break;
+        al.push_back(v);
+      }
+    }
+  }
+  std::string s = sp("almanac_state").getString("ziru_skills_" + str(serial), "");
+  if (!s.empty()) {
+    for (auto& part : split(s, ',')) {
+      try {
+        int v = ziruRepairLearnedSkill(parseInt(part));
+        if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
+      } catch (const NumberFormat&) {
+      }
+    }
+  }
+  return al;
+}
+
 // Skill training on `target`, the card the client picked (z27TrainingTarget).
 // The learned skills saved for its serial are this card's.
 void applyZiruSkillTrainingResponse(const ObjP& jo, const ObjP& target) {
@@ -661,29 +690,7 @@ void applyZiruSkillTrainingResponse(const ObjP& jo, const ObjP& target) {
 
     zs::Prefs& prefs = sp("almanac_state");
     std::string key = "ziru_skills_" + str(j);
-    std::string s = prefs.getString(key, "");
-    std::vector<int32_t> al;
-    ArrP sk = owned->optJSONArray("additional_skill_id");
-    if (sk) {
-      for (int i = 0; i < sk->length(); i++) {
-        int v = ziruRepairLearnedSkill(sk->optInt(i));
-
-        if (isZiruSkillId(v)) {
-          if (vcontains(al, v)) continue;
-          if (al.size() >= 5) break;
-          al.push_back(v);
-        }
-      }
-    }
-    if (!s.empty()) {
-      for (auto& part : split(s, ',')) {
-        try {
-          int v = ziruRepairLearnedSkill(parseInt(part));
-          if (isZiruSkillId(v) && !vcontains(al, v) && al.size() < 5) al.push_back(v);
-        } catch (const NumberFormat&) {
-        }
-      }
-    }
+    std::vector<int32_t> al = z27LearnedSkills(owned, j);
     std::string pool = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71";
     if (*ziruItemType == "SKILL_TRAINING_CATEGORY") {
       std::string c = resolveZiruSkillCategory();
@@ -787,6 +794,54 @@ void applyZiruSkillTrainingResponse(const ObjP& jo, const ObjP& target) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_SKILL_V2] response/persistence failed ") + e.what());
     throw;
   }
+}
+
+// Skill Training: the player deletes a learned skill. The 11.1.1 client sends the card and the slot
+// (CmdDeleteMyclubSkillOption::PackJson 0x103b35d30: gameplayer_id, delete_skill_index) and reads only
+// the answer's result. On NOERR it clears the flag of the skill in that slot and moves the later
+// slots up one (CommandObjectCmdDeleteMyclubSkill::QuitCommand 0x104765ae4 ->
+// MyClubGamePlayer::DeleteAdditionalSkill 0x1047e8340); on any other result it leaves the card as it
+// is. The server does the same to the card it keeps, in both places learned skills are saved, so the
+// next training and the next login show what the client shows. The skill's flag stays on when the
+// card has the skill by itself. A request for a card that is not the one saved under that serial
+// (z27TrainingTarget), or for a slot without a learned skill, changes nothing and is answered with
+// an error, so the client changes nothing either.
+Response handleZiruDeleteMyclubSkill() {
+  ObjP req = decodeZiruRequestObject(ziruLastRequestBody);
+  long long rq = req ? req->optLong("rqid", 1) : 1;
+  ObjP gid = req ? req->optJSONObject("gameplayer_id") : nullptr;
+  int64_t id = gid ? gid->optLong("id", 0) : 0, serial = gid ? gid->optLong("serial", 0) : 0;
+  int slot = req && req->has("delete_skill_index") ? req->optInt("delete_skill_index", -1) : -1;
+  auto answer = [&](const char* result) {
+    return serveObjectAsEncryptedMsgPack(newObj()->put("result", result)->put("rqid", rq)->put("msgid", "CMD_DELETE_MYCLUB_SKILL"));
+  };
+  std::string what = "SKILL_DELETE id=" + str(id) + " serial=" + str(serial) + " slot=" + str(slot);
+  ObjP card = z27TrainingTarget(serial, id);
+  if (!card) {
+    logRequest("Z27_TRAINING_REFUSED", "[Z27_TRAINING_REFUSED] " + what + ": not the card saved under this serial, nor its own unsaved entry");
+    return answer("ERROR");
+  }
+  std::vector<int32_t> al = z27LearnedSkills(card, serial);
+  if (slot < 0 || slot >= (int)al.size()) {
+    logRequest("Z27_TRAINING_REFUSED", "[Z27_TRAINING_REFUSED] " + what + ": the card has " + str((int32_t)al.size()) + " learned skills");
+    return answer("ERROR");
+  }
+  std::set<int> cardSkills = z27CardSkillParams(card);
+  int32_t removed = al[slot];
+  al.erase(al.begin() + slot);
+  ArrP ja = newArr();
+  for (int skill : al) ja->put(skill);
+  card->put("additional_skill_id", ja);
+  ArrP params = card->optJSONArray("parameters");
+  int index = kZiruSkillParameters[removed];
+  if (params && isZiruSkillParameter(index) && index < params->length() && !cardSkills.count(index)) params->put(index, 0);
+  // A known card ends with exactly its own skills plus the learned ones.
+  z27ApplyCardIdentity(card);
+  sp("almanac_state").edit().putString("ziru_skills_" + str(serial), joinInts(al)).commit();
+  saveZiruPlayerToDb(card);
+  logRequest("ZIRU_SKILL_DELETE", "[ZIRU_SKILL_DELETE] serial=" + str(serial) + " slot=" + str(slot) + " skill=" + str(removed) +
+                                      " learned now: " + joinInts(al));
+  return answer("NOERR");
 }
 
 // Skill, booster and position training change exactly the card the client

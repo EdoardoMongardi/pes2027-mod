@@ -1647,6 +1647,217 @@ static void positionTrainingTests(const std::string& top) {
   }
 }
 
+// ---- Deleting a learned skill, as the 11.1.1 client does it ----------------------------------
+// In Skill Training the player can delete a learned skill. The client sends CMD_DELETE_MYCLUB_SKILL
+// with the card and the slot (CmdDeleteMyclubSkillOption::PackJson 0x103b35d30: gameplayer_id,
+// delete_skill_index) and reads only the answer's result. On NOERR it clears the flag of the skill in
+// that slot and moves the later slots up one (CommandObjectCmdDeleteMyclubSkill::QuitCommand
+// 0x104765ae4, MyClubGamePlayer::DeleteAdditionalSkill 0x1047e8340); on any other result it changes
+// nothing. Its screen then opens only the first empty slot for training
+// (AUCMenuMyClubMyTeamPlayerTrainingSkillAM::SetAdditionalSkillList 0x100d3f92c). Skill numbers here
+// are the client's (the wire format).
+static void clientLearnsSkill(const ObjP& card, int slot, int skill) {
+  auto learned = card->getJSONArray("additional_skill_id");
+  auto values = card->getJSONArray("parameters");
+  if (slot < learned->length()) values->put(kClientSkillLabel[learned->getInt(slot)], 0);
+  values->put(kClientSkillLabel[skill], 1);
+  if (slot < learned->length()) learned->put(slot, skill);
+  else learned->put(skill);
+}
+static void clientDeletesSkill(const ObjP& card, int slot) {
+  auto learned = card->getJSONArray("additional_skill_id");
+  card->getJSONArray("parameters")->put(kClientSkillLabel[learned->getInt(slot)], 0);
+  learned->remove(slot);
+}
+// What the client shows of a card's skills: its learned slots and every skill flag.
+static std::string skillView(const ObjP& card) {
+  std::string out = "learned " + card->getJSONArray("additional_skill_id")->toString() + " flags";
+  auto values = card->getJSONArray("parameters");
+  for (int i = 70; i < values->length() && i < 144; ++i) if (values->getInt(i) == 1) out += " " + std::to_string(i);
+  return out;
+}
+
+static void skillDeleteTests(const std::string& top) {
+  const std::string root = top + "/skill-delete";
+  std::filesystem::create_directories(root + "/responses");
+  const std::vector<int> none = {0, 0, 0, 0, 0, 0, 0};
+  // P: an LWF with a record, own skill Double Touch (1). N: a CF with a record that has Heading (3)
+  // by itself, which a save from an older build also lists as learned. U: an ST with only a starter
+  // entry, listed (as Konami lists such cards) with a learned Scissors Feint (6).
+  const long long P = 31 + (1LL << 40), N = 32 + (1LL << 40), U = 33 + (1LL << 40);
+  auto recordP = card(P, 0, 9, 9, 0, none, {1}, 108, 0, 149), recordN = card(N, 0, 12, 0, 0, none, {3}, 108, 0, 149);
+  asset(root, "ZIRU_PLAYER_RECORDS.json", newObj()->put(std::to_string(P), newObj()->put("gameplayer", recordP))
+      ->put(std::to_string(N), newObj()->put("gameplayer", recordN)));
+  auto starterP = card(P, 741, 9, 9, 0, none, {1}, 108, 0, 145), starterN = card(N, 742, 12, 0, 0, none, {3}, 108, 0, 145);
+  auto starterU = card(U, 743, 11, 0, 0, none, {6}, 108, 0, 145);
+  starterU->put("additional_skill_id", newArr()->put(6));
+  auto starters = newArr(), refs = newArr();
+  for (auto c : {starterP, starterN, starterU}) {
+    starters->put(c);
+    refs->put(newObj()->put("gameplayer_id", Object::parse(c->getJSONObject("gameplayer_id")->toString())));
+  }
+  auto squad = newObj()->put("player_list", refs)->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj());
+  asset(root, "CmdLogin.json", newObj()->put("entry_info", newObj()->put("main_squad_id", 9)->put("gameplayer_list", starters)
+      ->put("coach_list", newArr()->put(coachRef(100, 1000)))
+      ->put("squad_list", newArr()->put(newObj()->put("squad_id", 9)->put("squad_data", squad)->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))))));
+  asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline"})"));
+  asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
+  asset(root, "CMD_USE_MYCLUB_ITEM.json", obj(R"({"result":"NOERR","skill_training_result":{"additional_skill_id":22,"is_success":"YES"},
+      "item_list":[{"item":{"item_type":"SKILL_TRAINING_SELECT","grade":0,"effect":0},"inventory_num":1}]})"));
+  asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save"; cfg.iosPlayerLayout = true; cfg.logFile = root + "/offline_server.log";
+  std::filesystem::create_directories(cfg.dataDir);
+  {
+    // N as an older build saved it: Heading, which N has by itself, in its learned list too.
+    OfflineServer first(cfg);
+    auto row = Object::parse(starterN->toString())->put("additional_skill_id", newArr()->put(3));
+    first.ziruDb->savePlayer(742, N, row->toString());
+    first.sp("almanac_state").edit().putString("ziru_skills_742", "3").commit();
+  }
+  auto s = std::make_unique<OfflineServer>(cfg);
+  // Like call(), but an answer with another result than NOERR is returned, not thrown.
+  auto send = [&](const char* cmd, ObjP req) {
+    req->put("msgid", cmd)->put("rqid", 4242);
+    Request r; r.uri = std::string("/pes22/gate/gate_") + cmd + ".php";
+    r.body = zc::encodeRequest(Value(req)); r.headers["content-length"] = std::to_string(r.body.size());
+    Response resp = s->serve(r); Value result;
+    check(resp.status == 200 && zc::decodeResponse(resp.body, result) && result.o, "encrypted response");
+    check(result.o->optLong("rqid", 0) == 4242 && result.o->optString("msgid", "") == cmd, "the answer carries the request's rqid and msgid");
+    return result.o;
+  };
+  auto deleteSkill = [&](long long id, long long serial, ObjP index) {
+    auto req = newObj()->put("gameplayer_id", newObj()->put("id", id)->put("serial", serial));
+    for (const auto& k : index->keys()) req->put(k, index->get(k));
+    return send("CMD_DELETE_MYCLUB_SKILL", req);
+  };
+  auto deleteSlot = [&](long long id, long long serial, int slot) { return deleteSkill(id, serial, newObj()->put("delete_skill_index", slot)); };
+  auto shown = [&](long long serial) {
+    return bySerial(call(*s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list"), serial);
+  };
+  auto skillSelect = [&](long long id, long long serial, int wire, int index) {
+    auto req = newObj()->put("item_list", newArr()->put(newObj()->put("item", newObj()->put("item_type", "SKILL_TRAINING_SELECT")->put("grade", 0)->put("effect", wire))
+                                                        ->put("present_num", 100)))
+        ->put("auto_item_list", newArr())->put("is_auto_use_item", "NO")
+        ->put("gameplayer_id_list", newArr()->put(newObj()->put("id", id)->put("serial", serial)))
+        ->put("training_index", index)->put("ability_id", wire)->put("position_id", "");
+    return call(*s, "CMD_USE_MYCLUB_ITEM", req)->getJSONObject("skill_training_result");
+  };
+  auto learnable = call(*s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", P)->put("serial", 741)))
+                       ->getJSONArray("skillcard_id_list");
+  auto offered = [&](const ObjP& c) {
+    std::vector<int> out;
+    for (const auto& row : clientSkillSelectCategories(c, learnable))
+      for (int skill : row.pickable) if (std::find(out.begin(), out.end(), skill) == out.end()) out.push_back(skill);
+    return out;
+  };
+  int deletes = 0;
+  // The client's view of P, changed only as the client changes it.
+  auto client = Object::parse(shown(741)->toString());
+  auto sameAsClient = [&](const std::string& what) {
+    check(skillView(shown(741)) == skillView(client), (what + ": the next login shows " + skillView(shown(741)) + ", the client shows " + skillView(client)).c_str());
+  };
+  auto learn = [&](int skill) {
+    int slot = client->getJSONArray("additional_skill_id")->length();  // the first empty slot
+    auto r = skillSelect(P, 741, skill, slot);
+    check(r->getString("is_success") == "YES" && r->getInt("additional_skill_id") == skill,
+        ("Skill Select after a delete: the pick is learned in the first empty slot: " + std::to_string(skill)).c_str());
+    clientLearnsSkill(client, slot, skill);
+    sameAsClient("learned " + std::to_string(skill) + " in slot " + std::to_string(slot));
+  };
+  auto remove = [&](int slot) {
+    auto r = deleteSlot(P, 741, slot);
+    check(r->getString("result") == "NOERR", ("Skill delete: a learned slot is deleted, " + r->toString()).c_str());
+    deletes++;
+    clientDeletesSkill(client, slot);
+    sameAsClient("deleted slot " + std::to_string(slot));
+  };
+  std::vector<int> picks = offered(client);
+  check(picks.size() > 12, "the client offers skills to learn");
+  learn(picks[0]);
+  learn(picks[5]);
+  learn(picks[10]);
+  // Delete the middle one: the third moves up to slot 1.
+  const int deleted = picks[5];
+  remove(1);
+  check(client->getJSONArray("additional_skill_id")->toString() == "[" + std::to_string(picks[0]) + "," + std::to_string(picks[10]) + "]",
+      "the client moved the later skill up one slot");
+  // Train the first empty slot: it keeps every skill the client still shows.
+  int next = -1;
+  for (int skill : offered(client)) if (skill != deleted) { next = skill; break; }
+  learn(next);
+  // The deleted skill is offered again, and learning it with a Select token works.
+  auto again = offered(client);
+  check(std::find(again.begin(), again.end(), deleted) != again.end(), "the client offers the deleted skill again");
+  learn(deleted);
+  // Slots the client does not hold a learned skill in, a missing or negative slot, and a card that is
+  // not the one under that serial: nothing changes and the answer is not NOERR, so the client keeps
+  // the card as it is too.
+  {
+    struct Refusal { const char* what; long long id, serial; ObjP index; };
+    for (const Refusal& no : {Refusal{"the first empty slot", P, 741, newObj()->put("delete_skill_index", 4)},
+                              Refusal{"a slot past the five", P, 741, newObj()->put("delete_skill_index", 5)},
+                              Refusal{"a negative slot", P, 741, newObj()->put("delete_skill_index", -1)},
+                              Refusal{"no slot", P, 741, newObj()},
+                              Refusal{"a card that is not the one under that serial", P, 743, newObj()->put("delete_skill_index", 0)},
+                              Refusal{"an unknown card", 999999, 741, newObj()->put("delete_skill_index", 0)}}) {
+      auto before = saveDump(*s);
+      auto r = deleteSkill(no.id, no.serial, no.index);
+      check(r->getString("result") != "NOERR" && firstDifference(before, saveDump(*s)).empty(),
+          (std::string("Skill delete: ") + no.what + " is refused and nothing changes, " + r->toString()).c_str());
+    }
+    sameAsClient("after the refused deletes");
+  }
+  // Delete the first, then the last, then the rest.
+  remove(0);
+  remove(client->getJSONArray("additional_skill_id")->length() - 1);
+  while (client->getJSONArray("additional_skill_id")->length() > 0) remove(0);
+  check(s->sp("almanac_state").getString("ziru_skills_741", "") == "" &&
+        Object::parse(*s->loadPlayer(741))->getJSONArray("additional_skill_id")->length() == 0,
+      "Skill delete: the save lists no learned skill once all are deleted");
+  check(skillBit(Object::parse(*s->loadPlayer(741)), 1) == 1, "Skill delete: the card keeps its own skill");
+  learn(deleted);
+  {
+    // A new start shows the same card, and so does its player data.
+    s = std::make_unique<OfflineServer>(cfg);
+    sameAsClient("after a new start");
+    auto detail = call(*s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", P)->put("serial", 741)));
+    check(skillView(detail->put("additional_skill_id", client->getJSONArray("additional_skill_id"))) == skillView(client),
+        "player data: the same skill flags as the login");
+  }
+  // N: deleting a learned skill the card has by itself leaves the card's own skill.
+  {
+    auto r = deleteSlot(N, 742, 0);
+    deletes++;
+    auto row = Object::parse(*s->loadPlayer(742));
+    check(r->getString("result") == "NOERR" && row->getJSONArray("additional_skill_id")->length() == 0 && skillBit(row, 3) == 1 &&
+          s->sp("almanac_state").getString("ziru_skills_742", "x") == "",
+        "Skill delete: a learned skill the card also has by itself leaves the card's own flag on");
+    auto login = shown(742);
+    check(login->getJSONArray("additional_skill_id")->length() == 0 && login->getJSONArray("parameters")->getInt(kClientSkillLabel[3]) == 1,
+        "Skill delete: the next login shows the card's own skill and no learned one");
+  }
+  // U: a card with only its starter entry, which lists a learned skill: the save gets the card without it.
+  {
+    auto view = Object::parse(shown(743)->toString());
+    check(view->getJSONArray("additional_skill_id")->toString() == "[6]", "login: U lists its learned skill");
+    auto r = deleteSlot(U, 743, 0);
+    deletes++;
+    clientDeletesSkill(view, 0);
+    check(r->getString("result") == "NOERR" && skillView(shown(743)) == skillView(view),
+        ("Skill delete: a starter card's learned skill is deleted as the client shows it, " + skillView(shown(743))).c_str());
+    s = std::make_unique<OfflineServer>(cfg);
+    check(skillView(shown(743)) == skillView(view), "Skill delete: a new start does not bring the starter entry's learned skill back");
+  }
+  // Every delete is in offline_server.log.
+  {
+    std::ifstream in(cfg.logFile);
+    std::string line;
+    int logged = 0;
+    while (std::getline(in, line)) logged += line.find("[ZIRU_SKILL_DELETE]") != std::string::npos;
+    check(logged == deletes, ("Skill delete: every delete is logged, " + std::to_string(logged) + " of " + std::to_string(deletes)).c_str());
+  }
+}
+
 // CMD_GET_MYCLUB_PLAYER_DATA's skill list for the card in Konami's own answer
 // (ziru-extra/responses/get_myclub_player_data.json, an outfield card, numbered like the
 // server): exactly Konami's list.
@@ -2051,6 +2262,7 @@ int main() {
     starterSerialTests(root);
     selectTrainingTests(root);
     positionTrainingTests(root);
+    skillDeleteTests(root);
     konamiPlayerDataSkillListTest(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
