@@ -816,34 +816,41 @@ void applyZiruSkillTrainingResponse(const ObjP& jo, const ObjP& target) {
 }
 
 // Skill Training: the player deletes a learned skill. The 11.1.1 client sends the card and the slot
-// (CmdDeleteMyclubSkillOption::PackJson 0x103b35d30: gameplayer_id, delete_skill_index) and reads only
-// the answer's result. On NOERR it clears the flag of the skill in that slot and moves the later
-// slots up one (CommandObjectCmdDeleteMyclubSkill::QuitCommand 0x104765ae4 ->
-// MyClubGamePlayer::DeleteAdditionalSkill 0x1047e8340); on any other result it leaves the card as it
-// is. The server does the same to the card it keeps, in both places learned skills are saved, so the
-// next training and the next login show what the client shows. The skill's flag stays on when the
-// card has the skill by itself. A request for a card that is not the one saved under that serial
-// (z27TrainingTarget), or for a slot without a learned skill, changes nothing and is answered with
-// an error, so the client changes nothing either.
+// (CmdDeleteMyclubSkillOption::PackJson 0x103b35d30: gameplayer_id, delete_skill_index). On NOERR it
+// turns off the flag of the skill in that slot and moves the later slots up one
+// (CommandObjectCmdDeleteMyclubSkill::QuitCommand 0x104765ae4 ->
+// MyClubGamePlayer::DeleteAdditionalSkill 0x1047e8340). The server does the same to the card it keeps,
+// in both places learned skills are saved, so the next training and the next login show what the
+// client shows. One difference is on purpose: when the card also has the skill by itself, the game
+// turns its flag off all the same, but the server keeps it on, so the card keeps its own skill, and
+// the game shows it again after the next login.
+// A request for a card that is not the one saved under that serial (z27TrainingTarget), or for a slot
+// without a learned skill, changes nothing and gets an error answer shaped like z27Error's. On any
+// result other than NOERR the client ends the command as failed without running QuitCommand
+// (CommandObjectBase::actionMain 0x1048d3928), so its card stays as it is too. "ERROR" is not one of
+// the results the client treats as fatal (CommandObjectBase::IsFatalError 0x1048d296c), so it is an
+// ordinary error and the player stays in the menu; only fatal ones go back to the top menu
+// (onlinemode::CommandErrorManager::JumpForTopMenuFatal 0x10486cce0).
 Response handleZiruDeleteMyclubSkill() {
   ObjP req = decodeZiruRequestObject(ziruLastRequestBody);
   long long rq = req ? req->optLong("rqid", 1) : 1;
   ObjP gid = req ? req->optJSONObject("gameplayer_id") : nullptr;
   int64_t id = gid ? gid->optLong("id", 0) : 0, serial = gid ? gid->optLong("serial", 0) : 0;
   int slot = req && req->has("delete_skill_index") ? req->optInt("delete_skill_index", -1) : -1;
-  auto answer = [&](const char* result) {
-    return serveObjectAsEncryptedMsgPack(newObj()->put("result", result)->put("rqid", rq)->put("msgid", "CMD_DELETE_MYCLUB_SKILL"));
+  auto refuse = [&]() {
+    return serveObjectAsEncryptedMsgPack(
+        newObj()->put("msgid", "CMD_DELETE_MYCLUB_SKILL")->put("rqid", rq)->put("result", "ERROR")->put("errcode", "ERROR"));
   };
   std::string what = "SKILL_DELETE id=" + str(id) + " serial=" + str(serial) + " slot=" + str(slot);
   ObjP card = z27TrainingTarget(serial, id);
   if (!card) {
     logRequest("Z27_TRAINING_REFUSED", "[Z27_TRAINING_REFUSED] " + what + ": not the card saved under this serial, nor its own unsaved entry");
-    return answer("ERROR");
+    return refuse();
   }
   std::vector<int32_t> al = z27LearnedSkills(card, serial);
   if (slot < 0 || slot >= (int)al.size()) {
     logRequest("Z27_TRAINING_REFUSED", "[Z27_TRAINING_REFUSED] " + what + ": the card has " + str((int32_t)al.size()) + " learned skills");
-    return answer("ERROR");
+    return refuse();
   }
   std::set<int> cardSkills = z27CardSkillParams(card);
   int32_t removed = al[slot];
@@ -853,6 +860,7 @@ Response handleZiruDeleteMyclubSkill() {
   card->put("additional_skill_id", ja);
   ArrP params = card->optJSONArray("parameters");
   int index = kZiruSkillParameters[removed];
+  // The card's own skill stays on (see above).
   if (params && isZiruSkillParameter(index) && index < params->length() && !cardSkills.count(index)) params->put(index, 0);
   // A known card ends with exactly its own skills plus the learned ones.
   z27ApplyCardIdentity(card);
@@ -860,7 +868,7 @@ Response handleZiruDeleteMyclubSkill() {
   saveZiruPlayerToDb(card);
   logRequest("ZIRU_SKILL_DELETE", "[ZIRU_SKILL_DELETE] serial=" + str(serial) + " slot=" + str(slot) + " skill=" + str(removed) +
                                       " learned now: " + joinInts(al));
-  return answer("NOERR");
+  return serveObjectAsEncryptedMsgPack(newObj()->put("result", "NOERR")->put("rqid", rq)->put("msgid", "CMD_DELETE_MYCLUB_SKILL"));
 }
 
 // Skill, booster and position training change exactly the card the client

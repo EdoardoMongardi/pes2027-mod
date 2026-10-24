@@ -1657,12 +1657,12 @@ static void positionTrainingTests(const std::string& top) {
 // ---- Deleting a learned skill, as the 11.1.1 client does it ----------------------------------
 // In Skill Training the player can delete a learned skill. The client sends CMD_DELETE_MYCLUB_SKILL
 // with the card and the slot (CmdDeleteMyclubSkillOption::PackJson 0x103b35d30: gameplayer_id,
-// delete_skill_index) and reads only the answer's result. On NOERR it clears the flag of the skill in
-// that slot and moves the later slots up one (CommandObjectCmdDeleteMyclubSkill::QuitCommand
-// 0x104765ae4, MyClubGamePlayer::DeleteAdditionalSkill 0x1047e8340); on any other result it changes
-// nothing. Its screen then opens only the first empty slot for training
-// (AUCMenuMyClubMyTeamPlayerTrainingSkillAM::SetAdditionalSkillList 0x100d3f92c). Skill numbers here
-// are the client's (the wire format).
+// delete_skill_index). On NOERR it turns off the flag of the skill in that slot and moves the later
+// slots up one (CommandObjectCmdDeleteMyclubSkill::QuitCommand 0x104765ae4,
+// MyClubGamePlayer::DeleteAdditionalSkill 0x1047e8340); on any other result it changes nothing, and
+// "ERROR" is not a result it treats as fatal. Its screen then opens only the first empty slot for
+// training (AUCMenuMyClubMyTeamPlayerTrainingSkillAM::SetAdditionalSkillList 0x100d3f92c). Skill
+// numbers here are the client's (the wire format).
 static void clientLearnsSkill(const ObjP& card, int slot, int skill) {
   auto learned = card->getJSONArray("additional_skill_id");
   auto values = card->getJSONArray("parameters");
@@ -1797,8 +1797,8 @@ static void skillDeleteTests(const std::string& top) {
   check(std::find(again.begin(), again.end(), deleted) != again.end(), "the client offers the deleted skill again");
   learn(deleted);
   // Slots the client does not hold a learned skill in, a missing or negative slot, and a card that is
-  // not the one under that serial: nothing changes and the answer is not NOERR, so the client keeps
-  // the card as it is too.
+  // not the one under that serial: nothing changes and the answer is the server's usual error answer
+  // (result and errcode ERROR, as z27Error sends), so the client keeps the card as it is too.
   {
     struct Refusal { const char* what; long long id, serial; ObjP index; };
     for (const Refusal& no : {Refusal{"the first empty slot", P, 741, newObj()->put("delete_skill_index", 4)},
@@ -1809,7 +1809,7 @@ static void skillDeleteTests(const std::string& top) {
                               Refusal{"an unknown card", 999999, 741, newObj()->put("delete_skill_index", 0)}}) {
       auto before = saveDump(*s);
       auto r = deleteSkill(no.id, no.serial, no.index);
-      check(r->getString("result") != "NOERR" && firstDifference(before, saveDump(*s)).empty(),
+      check(r->getString("result") == "ERROR" && r->optString("errcode", "") == "ERROR" && firstDifference(before, saveDump(*s)).empty(),
           (std::string("Skill delete: ") + no.what + " is refused and nothing changes, " + r->toString()).c_str());
     }
     sameAsClient("after the refused deletes");
@@ -1831,7 +1831,8 @@ static void skillDeleteTests(const std::string& top) {
     check(skillView(detail->put("additional_skill_id", client->getJSONArray("additional_skill_id"))) == skillView(client),
         "player data: the same skill flags as the login");
   }
-  // N: deleting a learned skill the card has by itself leaves the card's own skill.
+  // N: deleting a learned skill the card has by itself leaves the card's own skill. The game turns the
+  // flag off until the next login; the server keeps it on on purpose.
   {
     auto r = deleteSlot(N, 742, 0);
     deletes++;
