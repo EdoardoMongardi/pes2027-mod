@@ -119,7 +119,10 @@ python tools/build_ipa.py `
    - **Booster**: sau mỗi lần dùng vé booster, kể cả khi không thành công, thẻ vẫn giữ đúng giá bán (trước đây có lúc hiện 0).
    - **Thẻ đội tuyển quốc gia** hiện cờ quốc gia trên mặt thẻ, còn thẻ câu lạc bộ có kỹ năng Low Screamer không còn hiện nhầm cờ. Phần chi tiết thẻ ghi câu lạc bộ của cầu thủ vào thời điểm thẻ ra mắt (theo dữ liệu chính thức khi có, nếu không thì là ước tính) hoặc không ghi câu lạc bộ, thay vì tên quốc gia.
    - **Xem trước gói thẻ**: các kỹ năng nổi bật là đúng kỹ năng của từng thẻ (trước đây bị lệch và ô trống hiện "Fighting Spirit"); kỹ năng đặc biệt ở màn hình thay người trong trận cũng đúng.
+   - Cờ quốc gia, câu lạc bộ của thẻ đội tuyển quốc gia và kỹ năng nổi bật (cùng kỹ năng ở màn hình thay người) đến từ các file dữ liệu đi kèm IPA fix3 (file `dt870` mới và dữ liệu câu lạc bộ của thẻ), không phải từ mã nguồn. Một bản tự build chỉ từ mã nguồn trong kho này vẫn dùng file dữ liệu cũ nên chưa có ba sửa đổi đó.
    - Khi khởi động, mod tự thay file `dt870` cũ trong thư mục dữ liệu (bản gốc của Konami hoặc bản mà các phiên bản mod trước đã cài) bằng bản mới đi kèm; file khác do người chơi tự đặt vào được giữ nguyên, kể cả file quá lớn hoặc không đọc được (`IOS_TABLE_FIX` trong `ziru.log`). Thư mục `PES2027-repair-backups` không còn nhận thêm file sau mỗi lần mở app.
+   - Mod chép file vào thư mục `Download` dưới một tên tạm và chỉ đổi sang tên thật khi đã chép xong, nên tắt app giữa chừng không còn để lại file chép dở. Nếu trong `Download` có một bản `dt870` đi kèm bị chép dở (chỉ có phần đầu của file), mod chuyển nó vào `PES2027-repair-backups` và chép lại bản đầy đủ.
+6. **Quay lại bản fix2**: trước khi cài lại IPA fix2, mở app **Tệp (Files)**, vào *Trên iPhone › PES 2027 › Download* và xóa hai file `dt870_mobile_and.cpk` và `dt870_mobile_ios.cpk`. Nếu không xóa, fix2 coi file `dt870` mới là file riêng của người chơi và giữ nguyên nó; khi đã xóa, lần mở đầu tiên của fix2 tự chép lại file của chính nó.
 
 ---
 
