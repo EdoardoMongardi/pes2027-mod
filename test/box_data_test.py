@@ -1,4 +1,5 @@
-"""Checks on the box config: tools/box_layout.py (the converter and its check)."""
+"""Checks on the box config: tools/box_layout.py (the converter and its check), and the config this
+repository holds (ziru-extra/responses/ZIRU_PACKS_CONFIG.json)."""
 import contextlib
 import io
 import json
@@ -129,6 +130,62 @@ class BoxLayoutToolTest(unittest.TestCase):
         self.assertIn("only 5 cards", warnings[0])
         self.assertEqual([r[0] for r in rows], [1368, 1348])
         self.assertNotEqual(self.errors({"schema": "something-else", "packs": v1["packs"]}), [])
+
+
+RESPONSES = ROOT / "ziru-extra" / "responses"
+
+
+class ShippedBoxesTest(unittest.TestCase):
+    """The box config in this repository (ziru-extra/responses), whatever layout it holds. gameplaytest
+    (shippedBoxesTest) serves it and checks that every box is in every box list with its price and its size."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.config = box_layout.load(RESPONSES / "ZIRU_PACKS_CONFIG.json")
+        cls.records = box_layout.load(RESPONSES / "ZIRU_PLAYER_RECORDS.json")
+        cls.shipped = box_layout.shipped_boxes(RESPONSES)
+        cls.packs = cls.config["packs"]
+
+    def test_the_check_finds_no_error(self):
+        errors, warnings, rows = box_layout.check(self.config, self.records, self.shipped)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(rows), len(self.packs))
+
+    def test_no_box_is_empty(self):
+        self.assertEqual([p["agent_id"] for p in self.packs if not p.get("player_ids")], [])
+
+    def test_every_box_card_has_a_record(self):
+        missing = [(p["agent_id"], c) for p in self.packs for c in p["player_ids"] if str(c) not in self.records]
+        self.assertEqual(missing, [])
+
+    def test_agent_ids_are_unique_and_below_2_to_the_31(self):
+        ids = [p["agent_id"] for p in self.packs]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertTrue(all(box_layout.is_int(a) and 0 < a < 2 ** 31 for a in ids), ids)
+        self.assertFalse(set(ids) & box_layout.RESERVED_AGENT_IDS)
+
+    def test_featured_cards_are_cards_of_their_box(self):
+        outside = [(p["agent_id"], c) for p in self.packs for c in p.get("pickup_ids") or [] if c not in set(p["player_ids"])]
+        self.assertEqual(outside, [])
+
+    def test_no_card_is_in_two_boxes(self):
+        if self.config.get("schema") == box_layout.SCHEMA_V1:
+            self.skipTest("version 1 config (Ziru's own layout): its cards may be in two boxes")
+        seen, twice = {}, []
+        for p in self.packs:
+            for c in set(p["player_ids"]):
+                if c in seen:
+                    twice.append((c, seen[c], p["agent_id"]))
+                seen[c] = p["agent_id"]
+        self.assertEqual(twice, [])
+
+    def test_the_template_has_a_box_entry_and_a_price_for_1_and_10_cards(self):
+        lists = box_layout.load(RESPONSES / "CmdGetMyclubAgentlist.json")
+        self.assertTrue(lists.get("agent_list"))
+        prices = lists.get("agent_price_list") or []
+        self.assertTrue(prices)
+        counts = {x.get("multiple_count") for x in prices[0].get("price_list") or []}
+        self.assertTrue({1, box_layout.TEN_DRAW} <= counts, counts)
 
 
 if __name__ == "__main__":

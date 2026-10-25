@@ -2392,6 +2392,130 @@ static void noStarterTests(const std::string& top) {
   }
 }
 
+static std::string repoDir() {
+  // The Makefile passes the repository's folder (GAMEPLAYTEST_REPO_DIR), so the files are read from the repository
+  // this test was built from, whatever the working directory.
+#ifdef GAMEPLAYTEST_REPO_DIR
+  return GAMEPLAYTEST_REPO_DIR;
+#else
+  return std::filesystem::path(__FILE__).parent_path().string() + "/..";
+#endif
+}
+
+// The boxes of the box config in this repository (ziru-extra/responses), as a new save gets them: every box with a
+// card to draw is in every box list, with its price, in the config's order, with its size, all of it left, and
+// featured cards of its own only.
+static void shippedBoxesTest(const std::string& top) {
+  const std::string extra = repoDir() + "/ziru-extra";
+  auto config = Object::parse(fileBytes(extra + "/responses/ZIRU_PACKS_CONFIG.json"));
+  auto records = Object::parse(fileBytes(extra + "/responses/ZIRU_PLAYER_RECORDS.json"));
+  // What the config says: each box's cards that have a record, by order (else place in the file), one box per id.
+  std::vector<std::pair<long long, ObjP>> byOrder;
+  auto packs = config->getJSONArray("packs");
+  for (int i = 0; i < packs->length(); ++i) byOrder.push_back({packs->getJSONObject(i)->optLong("order", i + 1), packs->getJSONObject(i)});
+  std::stable_sort(byOrder.begin(), byOrder.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+  std::vector<long long> expected;
+  std::map<long long, std::set<long long>> cardsOf;
+  for (const auto& entry : byOrder) {
+    long long agent = entry.second->getLong("agent_id");
+    if (cardsOf.count(agent)) continue;
+    std::set<long long> cards;
+    auto ids = entry.second->getJSONArray("player_ids");
+    for (int i = 0; i < ids->length(); ++i)
+      if (records->has(std::to_string(ids->getLong(i)))) cards.insert(ids->getLong(i));
+    cardsOf[agent] = cards;
+    if (!cards.empty()) expected.push_back(agent);
+  }
+  check(!expected.empty(), "the repository's config has boxes");
+  Config cfg; cfg.assetsDir = extra; cfg.dataDir = top + "/shipped-boxes"; cfg.iosPlayerLayout = true;
+  std::filesystem::create_directories(cfg.dataDir);
+  OfflineServer s(cfg);
+  call(s, "CMD_LOGIN");
+  auto boxes = call(s, "CMD_GET_MYCLUB_AGENTLIST");
+  auto list = boxes->getJSONArray("agent_list");
+  check(agentIds(list) == expected, ("shipped boxes: every box of the config with a card to draw is listed, in order: " + showAgents(agentIds(list))).c_str());
+  check(agentIds(boxes->getJSONArray("agent_price_list")) == expected, "shipped boxes: every box has its price");
+  for (long long agent : expected) {
+    auto e = agentById(list, agent);
+    int size = (int)cardsOf[agent].size();
+    std::string at = "shipped box " + std::to_string(agent) + ": ";
+    check(e->getInt("player_list_total") == size && countSum(e->getJSONArray("base_player_count")) == size,
+        (at + "its size is its number of cards, " + std::to_string(e->getInt("player_list_total")) + " for " + std::to_string(size)).c_str());
+    check(countSum(e->getJSONArray("remaining_player_count")) == size, (at + "a new save has all of it left").c_str());
+    auto picks = pickupIds(e);
+    check(!picks.empty(), (at + "it shows featured cards, the same in its four lists").c_str());
+    for (long long id : picks) check(cardsOf[agent].count(id), (at + "a featured card " + std::to_string(id) + " is not a card of the box").c_str());
+    check(offered(s, agent) == cardsOf[agent], (at + "its contents are its cards").c_str());
+  }
+  auto menu = call(s, "CMD_GET_MYCLUB_MAINMENU_INFO");
+  check(agentIds(menu->getJSONArray("agent_list")) == expected && agentIds(menu->getJSONArray("agent_price_list")) == expected,
+      "shipped boxes: the main menu lists every box with its price");
+  check(menu->getJSONArray("agent_list")->toString() == list->toString(), "shipped boxes: the main menu's box entries are the box list's");
+  auto banners = menu->getJSONArray("banner_list");
+  for (int i = 0; i < banners->length(); ++i) {
+    auto b = banners->getJSONObject(i);
+    check(b->getString("announcement_type") != "AGENT" || cardsOf.count(b->getLong("entity_id")) && !cardsOf[b->getLong("entity_id")].empty(),
+        "shipped boxes: a main-menu banner opens a listed box");
+  }
+  auto drawn = call(s, "CMD_USE_MYCLUB_AGENT", newObj()->put("agent_id", expected[0])->put("count", 1));
+  auto got = cardIds(drawn->getJSONArray("gameplayer_list"));
+  check(got.size() == 1 && cardsOf[expected[0]].count(got[0]), "shipped boxes: a draw gives a card of the box");
+  check(agentIds(drawn->getJSONArray("agent_list")) == expected &&
+        countSum(agentById(drawn->getJSONArray("agent_list"), expected[0])->getJSONArray("remaining_player_count")) == (int)cardsOf[expected[0]].size() - 1,
+        "shipped boxes: the draw reply lists every box, with the drawn card taken out");
+}
+
+// The tests of the main flow that read card 0 of a fresh login, on a new save: its first card comes from a box.
+static void newSaveCareerTests(const std::string& top) {
+  const std::string root = top + "/new-save-career";
+  writeBoxAssets(root);
+  // Box card A at level limit 5: 60 bonus points plus 2 for each level above 1.
+  auto records = Object::parse(fileBytes(root + "/responses/ZIRU_PLAYER_RECORDS.json"));
+  records->getJSONObject(std::to_string(kBoxA))->getJSONObject("gameplayer")->put("level_info", obj(R"({"level":1,"level_limit":5,"customize_point":0})"));
+  asset(root, "ZIRU_PLAYER_RECORDS.json", records);
+  writeBoxLayout(root, {{7001, {kBoxA}}});
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
+  std::filesystem::create_directories(cfg.dataDir);
+  auto first = [](OfflineServer& s) {
+    auto list = call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    check(list->length() == 1, ("new save: the club has the one card drawn, has " + std::to_string(list->length())).c_str());
+    return list->getJSONObject(0);
+  };
+  auto plan = [](OfflineServer& s, const ObjP& card, const ArrP& uses, const ArrP& params) {
+    auto use = newObj()->put("gameplayer_id", card->getJSONObject("gameplayer_id"))->put("use_list", uses);
+    if (params) use->put("parameters", params);
+    return call(s, "CMD_USE_MYCLUB_CAREERPLAN", newObj()->put("gameplayer_use_list", newArr()->put(use)))
+        ->getJSONArray("careerplan_result_list")->getJSONObject(0)->getJSONObject("gameplayer");
+  };
+  {
+    OfflineServer s(cfg);
+    check(call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list")->length() == 0, "new save: no players before the first draw");
+    check(drawFrom(s, 7001, 1) == std::vector<long long>{kBoxA}, "new save: the first card comes from a box");
+    auto card = first(s);
+    check(card->getJSONObject("gameplayer_id")->getLong("id") == kBoxA && card->getJSONObject("level_info")->getInt("customize_point") == 68,
+        "new save: 60 bonus plus level points");
+    auto trained = Array::parse(card->getJSONArray("parameters")->toString()); trained->put(14, 80);
+    auto spent = plan(s, card, newArr()->put(newObj()->put("parameter_type", "SHOOT")->put("point", 60)), trained);
+    check(spent->getJSONObject("level_info")->getInt("customize_point") == 8 && spent->getJSONArray("parameters")->getInt(14) == 80,
+        "new save: the bonus can be spent and the upgraded stats are returned");
+  }
+  {
+    OfflineServer s(cfg);
+    auto card = first(s);
+    check(card->getJSONObject("level_info")->getInt("customize_point") == 8 && card->getJSONArray("parameters")->getInt(14) == 80,
+        "new save: training and remaining balance survive restart and login");
+    call(s, "CMD_LOGIN");
+    check(first(s)->getJSONObject("level_info")->getInt("customize_point") == 8, "new save: the bonus is not added again");
+    auto reset = plan(s, card, newArr(), nullptr);
+    check(reset->getJSONObject("level_info")->getInt("customize_point") == 68 && reset->getJSONArray("parameters")->getInt(14) == 70,
+        "new save: a reset refunds the whole budget");
+    plan(s, newObj()->put("gameplayer_id", newObj()->put("id", kBoxS1)->put("serial", kBoxS1Serial)),
+         newArr()->put(newObj()->put("parameter_type", "SHOOT")->put("point", 10)), nullptr);
+    check(first(s)->getJSONObject("gameplayer_id")->getLong("id") == kBoxA && !s.loadPlayer(kBoxS1Serial),
+        "new save: a careerplan naming a starter card changes nothing");
+  }
+}
+
 int main() {
   try {
     zs::setVerbose(false);
@@ -2763,6 +2887,8 @@ int main() {
     boxRemainingTests(root);
     boxListTests(root);
     noStarterTests(root);
+    newSaveCareerTests(root);
+    shippedBoxesTest(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
     check(child >= 0, "spawn abrupt-exit save test");
