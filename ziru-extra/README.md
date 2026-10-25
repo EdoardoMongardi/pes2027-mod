@@ -62,6 +62,11 @@ A new save (one that holds nothing yet) starts with no players: none of the star
 squad and an empty first MyLeague squad; the coaches and the formation stay. There the starter cards are offered by the
 boxes like any other card. A save that already holds anything keeps its starter cards.
 
+A card drawn from a box keeps its own id: only a starter card, held under the serial `CmdLogin.json` lists it under,
+is shown as the Big Time Neymar 89133993205152 when it is the Standard Neymar 40352, or as the Show Time De Bruyne
+106788187843931 when it is the Standard De Bruyne 44379. The five cards whose card background the client lacks
+(Casemiro, Eriksen, Mkhitaryan, Calhanoglu, Fati) are still shown as the card of that player it has, as before.
+
 Version 1 (`ziru-runtime-pack-config-v1`, Ziru's own file) has `agent_id`, `pack_id`, `title`, `category`,
 `base_count` and `player_ids`: boxes are listed in file order, a card may be in two boxes, and the featured cards are
 those of the box's template entry that are in the box.

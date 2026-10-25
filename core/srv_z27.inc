@@ -196,6 +196,7 @@ struct ZiruStarters {
   std::map<std::pair<int64_t, int64_t>, ObjP> bySerialId;
   std::unordered_map<int64_t, ObjP> byId;          // id -> first card listed with it
   std::unordered_map<int64_t, ObjP> byUpgradedId;  // upgraded id -> first card listed with the old id
+  std::set<int64_t> serials;                       // every serial a starter card is listed under
 };
 ZiruStarters ziruStarters;
 int ziruLoginParses = 0;  // how often CmdLogin.json was parsed (checked by the tests)
@@ -218,6 +219,7 @@ const ZiruStarters& z27Starters() {
     int64_t upgraded = z27UpgradeIosCardPid(id, card->optInt("initial_base_team_id", 0));
     ziruStarters.bySerialId.emplace(std::make_pair(serial, id), card);
     ziruStarters.byId.emplace(id, card);
+    ziruStarters.serials.insert(serial);
     if (upgraded != id) {
       ziruStarters.bySerialId.emplace(std::make_pair(serial, upgraded), card);
       ziruStarters.byUpgradedId.emplace(upgraded, card);
@@ -230,7 +232,10 @@ ObjP z27Entry() { return z27Clone(nn(z27Starters().entry)); }
 
 int32_t z27Main() { return z27Int("main_squad_id", nn(z27Starters().entry)->getInt("main_squad_id")); }
 
-inline int64_t z27UpgradeIosCardPid(int64_t pid, int32_t teamId = 0) {
+// The two Standard cards of Konami's captured starter squad that the iOS client knows by another card: the Neymar
+// 40352 as the Big Time Neymar 89133993205152 (88029918174624 with team 1254) and the De Bruyne 44379 as the Show Time
+// De Bruyne 106788187843931. This applies to starter cards only (z28ShownCardId).
+inline int64_t z27UpgradeStarterPid(int64_t pid, int32_t teamId) {
   int32_t bid = (int32_t)(pid & 0xFFFFFF);
   if (bid == 40352 && pid <= 0xFFFFFF) {
     return (teamId == 1254) ? 88029918174624LL : 89133993205152LL;
@@ -238,6 +243,15 @@ inline int64_t z27UpgradeIosCardPid(int64_t pid, int32_t teamId = 0) {
   if (bid == 44379 && pid <= 0xFFFFFF) {
     return 106788187843931LL;
   }
+  return pid;
+}
+
+// The id the iOS client knows a card by: the starter upgrade above, or for the cards below (Casemiro, Eriksen,
+// Mkhitaryan, Calhanoglu, Fati) another card of the same player whose card background the client has.
+inline int64_t z27UpgradeIosCardPid(int64_t pid, int32_t teamId = 0) {
+  int32_t bid = (int32_t)(pid & 0xFFFFFF);
+  int64_t starter = z27UpgradeStarterPid(pid, teamId);
+  if (starter != pid) return starter;
   if ((bid == 42669 || bid == 100780) && (pid == 89131308852909LL || pid <= 0xFFFFFF)) {
     return 89132651030189LL;
   }
@@ -254,6 +268,14 @@ inline int64_t z27UpgradeIosCardPid(int64_t pid, int32_t teamId = 0) {
     return 105628546762847LL;
   }
   return pid;
+}
+
+// The id the client knows a card held under `serial` by. The starter upgrade applies only to a starter card (held
+// under the serial CmdLogin.json lists it under): a Standard Neymar 40352 drawn from a box stays 40352 and never
+// becomes the BIG TIME box's Neymar. The card background upgrades apply to every card, as before.
+int64_t z28ShownCardId(int64_t pid, int32_t teamId, int64_t serial) {
+  if (!z28IsStarterSerial(serial) && z27UpgradeStarterPid(pid, teamId) != pid) return pid;
+  return z27UpgradeIosCardPid(pid, teamId);
 }
 
 ObjP z27Squad(int32_t id) {
@@ -282,7 +304,7 @@ ObjP z27Squad(int32_t id) {
       if (gid) {
         int64_t pid = gid->optLong("id", 0);
         int team = item ? item->optInt("initial_base_team_id", 0) : 0;
-        int64_t upPid = z27UpgradeIosCardPid(pid, team);
+        int64_t upPid = z28ShownCardId(pid, team, gid->optLong("serial", 0));
         if (upPid != pid) {
           gid->put("id", upPid);
           mod = true;
@@ -601,7 +623,7 @@ void z27Restore(const ObjP& jo) {
         int64_t serial = p->getJSONObject("gameplayer_id")->optLong("serial", 0);
         int64_t pPid = p->getJSONObject("gameplayer_id")->getLong("id");
         int team = p->optInt("initial_base_team_id", 0);
-        int64_t upPid = z27UpgradeIosCardPid(pPid, team);
+        int64_t upPid = z28ShownCardId(pPid, team, serial);
         if (upPid != pPid) {
           pPid = upPid;
           p->getJSONObject("gameplayer_id")->put("id", pPid);
@@ -612,7 +634,7 @@ void z27Restore(const ObjP& jo) {
           if (sv->optJSONObject("gameplayer")) sv = sv->getJSONObject("gameplayer");
           int64_t svPid = sv->getJSONObject("gameplayer_id")->getLong("id");
           int svTeam = sv->optInt("initial_base_team_id", 0);
-          int64_t upSvPid = z27UpgradeIosCardPid(svPid, svTeam);
+          int64_t upSvPid = z28ShownCardId(svPid, svTeam, serial);
           if (upSvPid != svPid) {
             svPid = upSvPid;
             sv->getJSONObject("gameplayer_id")->put("id", svPid);
@@ -996,7 +1018,7 @@ ObjP z27TrainingTarget(int64_t serial, int64_t id) {
   if (!entry) return nullptr;
   ObjP gid = entry->getJSONObject("gameplayer_id");
   gid->put("serial", (long long)serial);
-  gid->put("id", (long long)z27UpgradeIosCardPid(gid->optLong("id", 0), entry->optInt("initial_base_team_id", 0)));
+  gid->put("id", (long long)z28ShownCardId(gid->optLong("id", 0), entry->optInt("initial_base_team_id", 0), serial));
   z27PrepareFreshCard(entry, serial);
   return entry;
 }
@@ -1035,7 +1057,7 @@ ObjP z27Player(const ObjP& gid) {
   }
   int64_t pid = gid->getLong("id");
   int team = p->optInt("initial_base_team_id", 0);
-  int64_t upPid = z27UpgradeIosCardPid(pid, team);
+  int64_t upPid = z28ShownCardId(pid, team, gid->optLong("serial", 0));
   if (upPid != pid) {
     pid = upPid;
     gid->put("id", pid);

@@ -2068,6 +2068,15 @@ static void writeBoxLayout(const std::string& root, const BoxLayout& layout) {
   asset(root, "CmdGetMyclubAgentlist.json", lists);
   asset(root, "get_myclub_agentlist.json", lists);
 }
+// The templates of the box replies (a draw, a box's contents, its info, a reset), each carrying card T.
+static void writeBoxReplies(const std::string& root) {
+  asset(root, "CmdUseMyclubAgent.json", newObj()->put("gameplayer_list", newArr()->put(newObj()->put("gameplayer", boxCard(kBoxT, 1))))
+      ->put("agent_list", newArr())->put("result", "NOERR"));
+  asset(root, "CmdGetMyclubProcurableGameplayerlist.json", newObj()->put("gameplayer_list", newArr()->put(newObj()->put("gameplayer", boxCard(kBoxT, 0))))
+      ->put("result", "NOERR"));
+  asset(root, "CmdGetMyclubAgentBoxInfo.json", obj(R"({"result":"NOERR","can_reset":"NO","remaining_player_count":[0,0,0,0,23],"base_player_count":[0,0,0,0,23]})"));
+  asset(root, "CmdResetMyclubAgent.json", obj(R"({"result":"NOERR","msgid":"CMD_RESET_MYCLUB_AGENT"})"));
+}
 // Records of every box card, two starter cards in a squad, and the templates of the box replies.
 static void writeBoxAssets(const std::string& root) {
   std::filesystem::create_directories(root + "/responses");
@@ -2086,12 +2095,7 @@ static void writeBoxAssets(const std::string& root) {
           ->put("base_team", newArr()->put(newObj()->put("base_team_id", 108)))))));
   asset(root, "CmdCreateUser.json", obj(R"({"user_code":"offline"})"));
   asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
-  asset(root, "CmdUseMyclubAgent.json", newObj()->put("gameplayer_list", newArr()->put(newObj()->put("gameplayer", boxCard(kBoxT, 1))))
-      ->put("agent_list", newArr())->put("result", "NOERR"));
-  asset(root, "CmdGetMyclubProcurableGameplayerlist.json", newObj()->put("gameplayer_list", newArr()->put(newObj()->put("gameplayer", boxCard(kBoxT, 0))))
-      ->put("result", "NOERR"));
-  asset(root, "CmdGetMyclubAgentBoxInfo.json", obj(R"({"result":"NOERR","can_reset":"NO","remaining_player_count":[0,0,0,0,23],"base_player_count":[0,0,0,0,23]})"));
-  asset(root, "CmdResetMyclubAgent.json", obj(R"({"result":"NOERR","msgid":"CMD_RESET_MYCLUB_AGENT"})"));
+  writeBoxReplies(root);
   asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
 }
 static int countSum(const ArrP& counts) {
@@ -2516,6 +2520,77 @@ static void newSaveCareerTests(const std::string& top) {
   }
 }
 
+// A card drawn from a box is the card it is. Only a starter card, held under its starter serial, is shown under the id
+// the client knows it by: the Standard Neymar 40352 as 89133993205152 and the Standard De Bruyne 44379 as
+// 106788187843931. The same Standard cards drawn from a box keep their own ids. A card whose background the client
+// lacks (the Big Time Casemiro 89131308852909) is still shown as the card of that player it has (89132651030189).
+static void drawnCardIdTests(const std::string& top) {
+  const std::string root = top + "/drawn-ids";
+  writeStarterAssets(root, true);
+  writeBoxReplies(root);
+  const long long NEYMAR = 40352, DE_BRUYNE = 44379, BIG_TIME_NEYMAR = 89133993205152LL, SHOW_TIME_DE_BRUYNE = 106788187843931LL,
+      CASEMIRO = 89131308852909LL, CASEMIRO_SHOWN = 89132651030189LL;
+  auto records = Object::parse(fileBytes(root + "/responses/ZIRU_PLAYER_RECORDS.json"));
+  for (long long id : {NEYMAR, DE_BRUYNE, CASEMIRO}) records->put(std::to_string(id), newObj()->put("gameplayer", boxCard(id, 0)));
+  asset(root, "ZIRU_PLAYER_RECORDS.json", records);
+  writeBoxLayout(root, {{7001, {NEYMAR, DE_BRUYNE, BIG_TIME_NEYMAR, CASEMIRO}}});
+  const std::set<long long> box = {NEYMAR, DE_BRUYNE, BIG_TIME_NEYMAR, CASEMIRO}, drawn = {NEYMAR, DE_BRUYNE, BIG_TIME_NEYMAR, CASEMIRO_SHOWN};
+  auto rowIds = [](OfflineServer& s) {
+    std::set<long long> ids;
+    for (auto& row : s.ziruDb->loadAllPlayerRows()) {
+      auto p = Object::parse(row.second);
+      if (p->optJSONObject("gameplayer")) p = p->getJSONObject("gameplayer");
+      ids.insert(p->getJSONObject("gameplayer_id")->getLong("id"));
+    }
+    return ids;
+  };
+  auto squadIds = [](const ObjP& login) {
+    auto squads = login->getJSONObject("entry_info")->getJSONArray("squad_list");
+    std::set<long long> ids;
+    for (int i = 0; i < squads->length(); ++i)
+      if (squads->getJSONObject(i)->getInt("squad_id") == 9)
+        for (long long id : cardIds(squads->getJSONObject(i)->getJSONObject("squad_data")->getJSONArray("player_list"))) ids.insert(id);
+    return ids;
+  };
+  auto ids = [](const std::set<long long>& set) {
+    std::string s;
+    for (long long id : set) s += (s.empty() ? "" : " ") + std::to_string(id);
+    return "{" + s + "}";
+  };
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/new";
+  {
+    OfflineServer s(cfg);
+    check(listedIds(call(s, "CMD_LOGIN")).empty(), "drawn ids: a new save has no players");
+    check(idSet(drawFrom(s, 7001, 10)) == box, "drawn ids: the draw gives the box's four cards");
+    auto login = call(s, "CMD_LOGIN");
+    check(listedIds(login) == drawn, ("drawn ids: the club lists the Standard cards under their own ids and Casemiro as the card the client has, lists " +
+                                       ids(listedIds(login))).c_str());
+    check(rowIds(s) == drawn, ("drawn ids: each saved card keeps its id, saved " + ids(rowIds(s))).c_str());
+    // The drawn cards in the squad.
+    auto refs = newArr();
+    auto list = login->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    for (int i = 0; i < list->length(); ++i)
+      refs->put(newObj()->put("gameplayer_id", Object::parse(list->getJSONObject(i)->getJSONObject("gameplayer_id")->toString()))->put("uniform_number", i + 1));
+    call(s, "CMD_SET_MYCLUB_SQUAD_INFO", newObj()->put("squad_id", 9)->put("squad_data", newObj()->put("player_list", refs)
+        ->put("coach", newArr()->put(coachRef(100, 1000)))->put("squad_gameplan", newObj())));
+    check(squadIds(call(s, "CMD_LOGIN")) == drawn, "drawn ids: the squad holds the drawn cards under their own ids");
+  }
+  {
+    OfflineServer s(cfg);
+    auto login = call(s, "CMD_LOGIN");
+    check(listedIds(login) == drawn && squadIds(login) == drawn && rowIds(s) == drawn, "drawn ids after a restart: still their own ids");
+  }
+  // A save that has the starter cards shows them under the ids the client knows them by, as before.
+  {
+    Config old = cfg; old.dataDir = root + "/old";
+    seedOldSave(old.dataDir);
+    OfflineServer s(old);
+    auto have = listedIds(call(s, "CMD_LOGIN"));
+    check(have.count(BIG_TIME_NEYMAR) && have.count(SHOW_TIME_DE_BRUYNE) && !have.count(NEYMAR) && !have.count(DE_BRUYNE),
+        "a save with the starter cards: the starter Neymar and De Bruyne are shown under the ids the client knows them by");
+  }
+}
+
 int main() {
   try {
     zs::setVerbose(false);
@@ -2888,6 +2963,7 @@ int main() {
     boxListTests(root);
     noStarterTests(root);
     newSaveCareerTests(root);
+    drawnCardIdTests(root);
     shippedBoxesTest(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();

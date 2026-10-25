@@ -286,8 +286,4 @@ bool z28NoStarters() {
 }
 
 // Whether a serial is one a starter card is listed under in CmdLogin.json.
-bool z28IsStarterSerial(int64_t serial) {
-  for (const auto& kv : z27Starters().bySerialId)
-    if (kv.first.first == serial) return true;
-  return false;
-}
+bool z28IsStarterSerial(int64_t serial) { return z27Starters().serials.count(serial) > 0; }
