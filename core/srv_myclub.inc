@@ -643,6 +643,11 @@ void applyZiruResetBox(const ObjP& jo) {
       edit.commit();
       jo->put("agent_id", (long long)j);
       ziruAttachResetCounts(jo, j);
+      // The client reads only an "agent" object from this reply (CmdResetMyclubAgent result unpack 0x103af2c24) and
+      // puts it in place of its copy of the box (CommandObjectCmdResetMyclubAgent::QuitCommand 0x10476cbc8,
+      // CheangeAgent matches it by agent_id): the box's full entry, as the box list has it now.
+      if (ObjP pack = ziruPack(j))
+        if (ObjP agent = ziruBoxEntry(pack)) jo->put("agent", agent);
       logRequest("ZIRU_V14_RESET", "[ZIRU_V14_RESET] agent_id=" + str(j) + " restored");
     }
   } catch (const std::exception& e) {

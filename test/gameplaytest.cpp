@@ -2298,6 +2298,15 @@ static void boxListTests(const std::string& top) {
   auto reset = call(s, "CMD_RESET_MYCLUB_AGENT", newObj()->put("agent_id", 7001LL));
   check(reset->getJSONArray("remaining_player_count")->toString() == "[0,0,2,0,0]" && reset->getJSONArray("base_player_count")->toString() == "[0,0,2,0,0]",
         "reset: the box's counts from the config");
+  // The client takes the reset box only from the reply's "agent" object.
+  auto agent = reset->optJSONObject("agent");
+  check(agent && agent->optLong("agent_id") == 7001 && countSum(agent->optJSONArray("remaining_player_count")) == 2,
+        "reset: the reply has the box's entry, full again");
+  check(agent->toString() == agentById(call(s, "CMD_GET_MYCLUB_AGENTLIST")->getJSONArray("agent_list"), 7001)->toString(),
+        "reset: the box's entry is the one the box list has");
+  check(!call(s, "CMD_RESET_MYCLUB_AGENT", newObj()->put("agent_id", 7002LL))->has("agent") &&
+        !call(s, "CMD_RESET_MYCLUB_AGENT", newObj()->put("agent_id", 4242LL))->has("agent"),
+        "reset: a box that is not listed gets no entry");
 }
 
 int main() {
