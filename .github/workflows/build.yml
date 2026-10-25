@@ -26,6 +26,8 @@ jobs:
         run: python3 -m unittest discover -s test -p 'ios_tables_test.py' -v
       - name: shipped player data (playing styles, copies match the player records)
         run: python3 -m unittest discover -s test -p 'player_data_test.py' -v
+      - name: box config (tools/box_layout.py and the shipped boxes)
+        run: python3 -m unittest discover -s test -p 'box_data_test.py' -v
       - name: online encrypted two-client integration tests
         run: |
           python3 -m pip install -r online/requirements.txt

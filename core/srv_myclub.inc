@@ -83,13 +83,26 @@ ObjP ziruPack(int64_t agent) {
   return nullptr;
 }
 
-// A box's cards: its player_ids, each card once.
+// A box's cards, the ones a draw can give: its player_ids that have a player record, each card once. A card
+// without a record cannot be drawn (the draw would hand out a copy of the template card with its id), so it is
+// left out, and logged once.
+std::set<std::pair<int64_t, int64_t>> ziruBoxCardLogged;  // (agent id, card id) already reported
+
 ArrP ziruBoxCards(const ObjP& pack) {
   ArrP ids = pack ? pack->optJSONArray("player_ids") : nullptr;
+  ObjP records = ziruPlayerRecords();
   ArrP cards = newArr();
   std::set<int64_t> seen;
-  for (int i = 0; ids && i < ids->length(); i++)
-    if (seen.insert(ids->optLong(i)).second) cards->put(ids->opt(i));
+  for (int i = 0; ids && i < ids->length(); i++) {
+    int64_t id = ids->optLong(i);
+    if (!seen.insert(id).second) continue;
+    if (records && records->has(str(id))) {
+      cards->put(ids->opt(i));
+    } else if (ziruBoxCardLogged.insert({pack->optLong("agent_id"), id}).second) {
+      logRequest("ZIRU_BOX_CARD", "[ZIRU_BOX_CARD] agent_id=" + str(pack->optLong("agent_id")) + " card " + str(id) +
+                                      " has no player record: left out of the box");
+    }
+  }
   return cards;
 }
 
@@ -166,6 +179,12 @@ ArrP ziruBoxCounts(int count) {
   ArrP c = newArr();
   for (int i = 0; i < kZiruBoxCountSlots; i++) c->put(i == kZiruBoxCountSlot ? count : 0);
   return c;
+}
+
+int countZiruBox(const ArrP& counts) {
+  int n = 0;
+  for (int i = 0; counts && i < counts->length(); i++) n += counts->optInt(i);
+  return n;
 }
 
 void applyZiruDynamicRecruit(const ObjP& jo) {
@@ -463,22 +482,153 @@ void applyZiruProgressionToCareerList(const ArrP& ja, int64_t j) {
   }
 }
 
-void applyZiruRemainingCounts(const ObjP& jo) {
-  try {
-    ArrP list = jo->optJSONArray("agent_list");
-    if (!list) return;
-    for (int i = 0; i < list->length(); i++) {
-      ObjP a = list->optJSONObject(i);
-      if (!a) continue;
-      int64_t id = a->optLong("agent_id");
-      ObjP pack = ziruPack(id);
-      if (!pack) continue;
-      int len = ziruBoxRemaining(id, ziruBoxCards(pack))->length();
-      a->put("remaining_player_count", ziruBoxCounts(len));
-      logRequest("ZIRU_V12_2_REMAINING", "[ZIRU_V12_2_REMAINING] agent_id=" + str(id) + " remaining=" + str(len));
+// ---- The box list the client gets ----
+// Every list of boxes the client gets (agent_list and agent_price_list in the box list reply and in the main menu,
+// agent_list in the draw reply) is made here from the box config, so these lists cannot differ from each other or
+// from the boxes a draw uses. Each box entry and price entry starts from a template: the shipped box list's
+// (CmdGetMyclubAgentlist.json) entry with the same agent id, else its first entry. The config gives the box's id,
+// title, cards and counts, and when it has them, its label (subcategory), colours, banner pictures and featured
+// cards.
+
+// The shipped box list, read at most once per request (serve() clears it).
+ObjP ziruBoxListCache;
+
+ObjP ziruBoxListTemplate() {
+  if (!ziruBoxListCache) ziruBoxListCache = nn(loadZiruJsonAssetObject("responses/CmdGetMyclubAgentlist.json"));
+  return ziruBoxListCache;
+}
+
+// The template of a box's entry in one of the shipped box list's lists: the entry with the box's agent id, else
+// the first entry (null when the list is empty). `own` tells whether it is the box's own entry.
+ObjP ziruBoxTemplate(const std::string& list, int64_t agent, bool& own) {
+  ArrP entries = ziruBoxListTemplate()->optJSONArray(list);
+  ObjP first;
+  own = false;
+  for (int i = 0; entries && i < entries->length(); i++) {
+    ObjP e = entries->optJSONObject(i);
+    if (!e) continue;
+    if (!first) first = e;
+    if (e->optLong("agent_id") == agent) {
+      own = true;
+      return e;
     }
+  }
+  return first;
+}
+
+// The featured cards of a box (pickup_list, banner_a/c_pickup_list, pickup_cardtype_list): the config's
+// pickup_ids, else the ones of the box's own template entry, keeping only cards of this box. When none is left,
+// the box's first cards, as many as the template shows.
+std::set<std::pair<int64_t, int64_t>> ziruBoxPickupLogged;  // (agent id, card id) already reported
+
+ArrP ziruBoxPickups(const ObjP& pack, const ArrP& cards, const ObjP& base, bool ownTemplate) {
+  int64_t agent = pack->optLong("agent_id");
+  std::set<int64_t> inBox;
+  for (int i = 0; i < cards->length(); i++) inBox.insert(cards->optLong(i));
+  ArrP wanted = pack->optJSONArray("pickup_ids");
+  if (!wanted && ownTemplate && base) {
+    wanted = newArr();
+    ArrP shown = base->optJSONArray("pickup_cardtype_list");
+    for (int i = 0; shown && i < shown->length(); i++)
+      if (ObjP c = shown->optJSONObject(i)) wanted->put(c->optLong("id"));
+  }
+  ArrP picks = newArr();
+  std::set<int64_t> seen;
+  for (int i = 0; wanted && i < wanted->length(); i++) {
+    int64_t id = wanted->optLong(i);
+    if (inBox.count(id)) {
+      if (seen.insert(id).second) picks->put((long long)id);
+    } else if (ziruBoxPickupLogged.insert({agent, id}).second) {
+      logRequest("ZIRU_BOX_PICKUP", "[ZIRU_BOX_PICKUP] agent_id=" + str(agent) + " featured card " + str(id) +
+                                        " is not a card of the box: not shown");
+    }
+  }
+  ArrP shown = base ? base->optJSONArray("pickup_list") : nullptr;
+  int count = shown ? shown->length() : 0;
+  for (int i = 0; picks->length() == 0 && i < cards->length() && i < count; i++) picks->put(cards->opt(i));
+  return picks;
+}
+
+// A box's entry in the box list, or null when the box has no card to draw (it could never be opened).
+ObjP ziruBoxEntry(const ObjP& pack) {
+  int64_t agent = pack->optLong("agent_id");
+  ArrP cards = ziruBoxCards(pack);
+  if (cards->length() == 0) return nullptr;
+  bool own = false;
+  ObjP base = ziruBoxTemplate("agent_list", agent, own);
+  // A copy of the template, without its featured cards (they are made below).
+  static const std::set<std::string> kFeatured = {"pickup_list", "banner_a_pickup_list", "banner_c_pickup_list", "pickup_cardtype_list"};
+  ObjP a = newObj();
+  for (const auto& kv : base ? base->kv : std::vector<std::pair<std::string, Value>>{}) {
+    if (kFeatured.count(kv.first)) continue;
+    Value v = kv.second;
+    if (v.t == Value::OBJ) v = Value(Object::parse(v.o->toString()));
+    if (v.t == Value::ARR) v = Value(Array::parse(v.a->toString()));
+    a->put(kv.first, v);
+  }
+  a->put("agent_id", (long long)agent);
+  for (const char* key : {"title", "subcategory", "banner_file_c_name", "banner_file_d_name", "text_color_a", "text_color_b"}) {
+    Value v = pack->opt(key);
+    if (v.t == Value::OBJ) v = Value(Object::parse(v.o->toString()));
+    if (!v.isJavaNull()) a->put(key, v);
+  }
+  int total = cards->length(), left = ziruBoxRemaining(agent, cards)->length();
+  a->put("player_list_total", total);
+  a->put("probability", str(total));  // the shipped box lists give the box's number of cards here
+  a->put("base_player_count", ziruBoxCounts(total));
+  a->put("remaining_player_count", ziruBoxCounts(left));
+  ArrP pickupIds = ziruBoxPickups(pack, cards, base, own);
+  ArrP pickups = newArr(), cardTypes = newArr();
+  for (int i = 0; i < pickupIds->length(); i++) {
+    ObjP w = getZiruPlayerWrapper(pickupIds->opt(i), false);
+    ObjP gp = w ? w->optJSONObject("gameplayer") : nullptr;
+    if (!gp) continue;
+    pickups->put(gp);
+    cardTypes->put(newObj()->put("id", (long long)pickupIds->optLong(i))->put("serial", 0));
+  }
+  a->put("pickup_list", pickups);
+  a->put("banner_a_pickup_list", Array::parse(pickups->toString()));
+  a->put("banner_c_pickup_list", Array::parse(pickups->toString()));
+  a->put("pickup_cardtype_list", cardTypes);
+  return a;
+}
+
+// A box's price entry: the template's, under the box's agent id.
+ObjP ziruBoxPrice(int64_t agent) {
+  bool own = false;
+  ObjP base = ziruBoxTemplate("agent_price_list", agent, own);
+  ObjP p = base ? Object::parse(base->toString()) : newObj();
+  p->put("agent_id", (long long)agent);
+  return p;
+}
+
+// Puts the box list into a reply: agent_list, and agent_price_list when `prices`. Every box of the config is
+// listed once, by its order (a box without one by its place in the file), except a box with no card to draw.
+// When the config cannot be read, the reply keeps the lists it has.
+void ziruPutBoxList(const ObjP& jo, bool prices) {
+  try {
+    ArrP packs = ziruPacksConfig()->optJSONArray("packs");
+    std::vector<std::pair<int64_t, ObjP>> ordered;
+    for (int i = 0; packs && i < packs->length(); i++)
+      if (ObjP p = packs->optJSONObject(i)) ordered.push_back({p->optLong("order", i + 1), p});
+    std::stable_sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    ArrP agents = newArr(), priceList = newArr();
+    std::set<int64_t> listed;
+    for (const auto& entry : ordered) {
+      int64_t agent = entry.second->optLong("agent_id");
+      if (!listed.insert(agent).second) continue;  // the first box with an id is the one a draw uses (ziruPack)
+      ObjP a = ziruBoxEntry(entry.second);
+      if (!a) continue;
+      agents->put(a);
+      if (prices) priceList->put(ziruBoxPrice(agent));
+      logRequest("ZIRU_V12_2_REMAINING", "[ZIRU_V12_2_REMAINING] agent_id=" + str(agent) + " remaining=" +
+                                             str(countZiruBox(a->getJSONArray("remaining_player_count"))));
+    }
+    jo->put("agent_list", agents);
+    if (prices) jo->put("agent_price_list", priceList);
   } catch (const std::exception& e) {
-    zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V12_2_REMAINING_ERR] failed ") + e.what());
+    zs::loge("OFFLINE_SERVER", std::string("[ZIRU_BOX_LIST_ERR] ") + e.what());
+    logRequest("ZIRU_BOX_LIST", std::string("[ZIRU_BOX_LIST_ERR] the box list is left as it is: ") + e.what());
   }
 }
 

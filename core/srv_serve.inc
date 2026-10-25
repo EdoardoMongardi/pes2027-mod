@@ -54,20 +54,11 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     if (name == "responses/CmdResetMyclubAgent.json") applyZiruResetBox(jo);
     if (name == "responses/CmdUseMyclubAgent.json") {
       applyZiruDynamicRecruit(jo);
-      // The client refreshes its pack list from this response's agent_list. Ziru's file always carries one entry
-      // (agent 1368) whatever pack was opened, so after one pull every other pack (BIG TIME 1348, SHOW TIME 1374 ...)
-      // vanished from the client's list and its banner opened an empty page ("%s"). Send the whole pack list with
-      // the current remaining counts instead.
-      try {
-        ObjP al = loadZiruJsonAssetObject("responses/CmdGetMyclubAgentlist.json");
-        ArrP full = al ? al->optJSONArray("agent_list") : nullptr;
-        if (full && full->length()) {
-          jo->put("agent_list", Array::parse(full->toString()));
-          applyZiruRemainingCounts(jo);
-        }
-      } catch (const std::exception& e) {
-        zs::loge("OFFLINE_SERVER", std::string("[IOS_AGENT] agent_list refresh failed ") + e.what());
-      }
+      // Ziru's file carries one box (agent 1368) whatever box was opened, and a client that takes its box list from
+      // this reply lost every other box. The reply gets the whole box list with the counts after this draw, the same
+      // list as the box list reply. (The 11.1.1 client reads the box list again after the draw:
+      // AUCMenuMyClubAgentBannerList::CallbackConfirmRewardDialog 0x100d9dd4c.)
+      ziruPutBoxList(jo, false);
       ObjP ci = jo->optJSONObject("coin_info");
       if (!ci) { ci = newObj(); jo->put("coin_info", ci); }
       ci->put("coin", 9999999);
@@ -161,7 +152,7 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     ObjP user = jo->optJSONObject("user");
     if (user) user->put("gp", 999999999LL);
   }
-  if (jo && (name == "responses/CmdGetMyclubAgentlist.json" || name == "responses/get_myclub_mainmenu_info.json")) applyZiruRemainingCounts(jo);
+  if (jo && (name == "responses/CmdGetMyclubAgentlist.json" || name == "responses/get_myclub_mainmenu_info.json")) ziruPutBoxList(jo, true);
   if (jo && name == "responses/get_myclub_mainmenu_info.json") {
     jo->put("gp", 999999999LL);
     ObjP ci = jo->optJSONObject("coin_info");
@@ -171,20 +162,16 @@ Response serveJsonAsEncryptedMsgPack(const std::string& name) {
     // The client's EAnnouncementType has only AGENT(0) EVENT CAMPAIGN PACK COMPETITION COMEBACK_ACHIEVEMENT
     // (CmdGetMainmenuInfo literals); there is no NONE, so "NONE" falls back to AGENT 0 and tapping the banner opens an
     // empty pack page ("%s"). Ziru's "ZIRU OFFICIAL" banner is NONE, and ab162b9 made every pack banner NONE.
-    // A banner whose type is unknown, or an AGENT banner whose agent does not exist, now opens Ziru's first pack.
+    // A banner whose type is unknown, or an AGENT banner whose box is not in the box list, now opens the first box.
     ArrP bl = jo->optJSONArray("banner_list");
     if (bl) {
       std::vector<long long> order;
       std::set<long long> agents;
-      try {
-        ObjP al = loadZiruJsonAssetObject("responses/get_myclub_agentlist.json");
-        ArrP l = al ? al->optJSONArray("agent_list") : nullptr;
-        for (int i = 0; l && i < l->length(); i++) {
-          ObjP a = l->optJSONObject(i);
-          long long id = a ? a->optLong("agent_id", 0) : 0;
-          if (id && agents.insert(id).second) order.push_back(id);
-        }
-      } catch (const std::exception&) {
+      ArrP l = jo->optJSONArray("agent_list");
+      for (int i = 0; l && i < l->length(); i++) {
+        ObjP a = l->optJSONObject(i);
+        long long id = a ? a->optLong("agent_id", 0) : 0;
+        if (id && agents.insert(id).second) order.push_back(id);
       }
       static const std::set<std::string> known = {"AGENT", "EVENT", "CAMPAIGN", "PACK", "COMPETITION", "COMEBACK_ACHIEVEMENT"};
       for (int i = 0; i < bl->length(); i++) {

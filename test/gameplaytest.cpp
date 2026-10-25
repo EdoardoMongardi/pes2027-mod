@@ -2186,6 +2186,120 @@ static void boxRemainingTests(const std::string& top) {
   }
 }
 
+static std::vector<long long> agentIds(const ArrP& list) {
+  std::vector<long long> ids;
+  for (int i = 0; list && i < list->length(); ++i) ids.push_back(list->getJSONObject(i)->getLong("agent_id"));
+  return ids;
+}
+static ObjP agentById(const ArrP& list, long long agent) {
+  for (int i = 0; list && i < list->length(); ++i)
+    if (list->getJSONObject(i)->getLong("agent_id") == agent) return list->getJSONObject(i);
+  throw std::runtime_error("box " + std::to_string(agent) + " missing from the box list");
+}
+static std::string showAgents(const std::vector<long long>& ids) {
+  std::string s;
+  for (long long id : ids) s += (s.empty() ? "" : " ") + std::to_string(id);
+  return "[" + s + "]";
+}
+// The featured cards of a box entry, from each of its four lists; empty when the four lists differ.
+static std::vector<long long> pickupIds(const ObjP& entry) {
+  auto ids = cardIds(entry->getJSONArray("pickup_list"));
+  std::vector<long long> types;
+  auto t = entry->getJSONArray("pickup_cardtype_list");
+  for (int i = 0; i < t->length(); ++i) types.push_back(t->getJSONObject(i)->getLong("id"));
+  if (cardIds(entry->getJSONArray("banner_a_pickup_list")) != ids || cardIds(entry->getJSONArray("banner_c_pickup_list")) != ids || types != ids)
+    return {};
+  return ids;
+}
+
+// The box lists the client gets (box list reply, main menu, draw reply) are made from the box config.
+static void boxListTests(const std::string& top) {
+  const std::string root = top + "/box-list";
+  writeBoxAssets(root);
+  const long long M = 699 + (0x50LL << 40);  // a card listed in boxes, without a record
+  // The shipped lists, which are only templates now: one box (1368) whose featured card is in no box of the config.
+  // The main menu file lists boxes of an older layout, and two of its banners open boxes that are gone.
+  auto templates = newObj()->put("agent_list", newArr()->put(boxEntry(1368, "ZIRU EPIC 01", 148, kBoxT)))
+      ->put("agent_price_list", newArr()->put(boxPrice(1368)))->put("result", "NOERR");
+  asset(root, "CmdGetMyclubAgentlist.json", templates);
+  asset(root, "get_myclub_agentlist.json", templates);
+  auto banner = [](const char* type, long long entity) {
+    return newObj()->put("announcement_type", type)->put("entity_id", entity)->put("title_text", std::string(type) + " " + std::to_string(entity));
+  };
+  asset(root, "get_myclub_mainmenu_info.json", newObj()
+      ->put("agent_list", newArr()->put(boxEntry(1368, "ZIRU EPIC 01", 148, kBoxT))->put(boxEntry(6201, "ZIRU SHOW TIME", 132, kBoxT)))
+      ->put("agent_price_list", newArr()->put(boxPrice(1368))->put(boxPrice(6201)))
+      ->put("banner_list", newArr()->put(banner("NONE", 0))->put(banner("AGENT", 1368))->put(banner("AGENT", 6201)))->put("result", "NOERR"));
+  // The config lists its boxes out of order: by order the list is 7003, 7001, then 7002 (no cards), 7004 (only a
+  // card without a record) and 7005. 7003 names a featured card of another box.
+  auto pack = [](long long agent, int order, const char* title, const std::vector<long long>& cards) {
+    return newObj()->put("agent_id", agent)->put("order", order)->put("title", title)->put("category", "epic")->put("player_ids", idList(cards));
+  };
+  auto bigTime = pack(7003, 1, "ZIRU BIG TIME", {kBoxA, kBoxB, kBoxC})->put("category", "bigtime")->put("subcategory", "Big Time")
+      ->put("banner_file_c_name", "/banner/agent/001374/c-big-time")->put("banner_file_d_name", "/banner/agent/001374/d-big-time")
+      ->put("text_color_a", obj(R"({"color_r":0,"color_g":213,"color_b":255})"))->put("pickup_ids", idList({kBoxA, kBoxD}));
+  asset(root, "ZIRU_PACKS_CONFIG.json", newObj()->put("schema", "ziru-runtime-pack-config-v2")->put("packs", newArr()
+      ->put(pack(7001, 2, "ZIRU EPIC: CF", {kBoxD, kBoxE, M}))->put(bigTime)->put(pack(7002, 3, "ZIRU EMPTY", {}))
+      ->put(pack(7004, 4, "ZIRU NO RECORDS", {M}))->put(pack(7005, 5, "ZIRU OTHERS", {kBoxF, kBoxG, kBoxS1}))));
+  const std::vector<long long> listed = {7003, 7001, 7005};
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
+  std::filesystem::create_directories(cfg.dataDir);
+  OfflineServer s(cfg);
+  call(s, "CMD_LOGIN");
+  auto reply = call(s, "CMD_GET_MYCLUB_AGENTLIST");
+  auto boxes = reply->getJSONArray("agent_list");
+  check(agentIds(boxes) == listed, ("box list: the config's boxes in its order, without the boxes that have no card to draw: " + showAgents(agentIds(boxes))).c_str());
+  check(agentIds(reply->getJSONArray("agent_price_list")) == listed, "box list: every listed box has its price entry");
+  for (long long agent : listed)
+    check(agentById(reply->getJSONArray("agent_price_list"), agent)->getJSONArray("price_list")->toString() == boxPrice(1368)->getJSONArray("price_list")->toString(),
+        "box list: a box's prices are the template's");
+  auto big = agentById(boxes, 7003), cf = agentById(boxes, 7001), others = agentById(boxes, 7005);
+  check(big->getString("title") == "ZIRU BIG TIME" && big->getString("subcategory") == "Big Time" &&
+        big->getString("banner_file_c_name") == "/banner/agent/001374/c-big-time" && big->getString("banner_file_d_name") == "/banner/agent/001374/d-big-time" &&
+        big->getJSONObject("text_color_a")->getInt("color_g") == 213, "box entry: title, label, banner pictures and colour from the config");
+  check(cf->getString("title") == "ZIRU EPIC: CF" && cf->getString("subcategory") == "Epic" && cf->getString("banner_file_c_name") == "/banner/agent/001348/c",
+        "box entry: what the config does not give comes from the template");
+  check(big->getInt("player_list_total") == 3 && cf->getInt("player_list_total") == 2 && others->getInt("player_list_total") == 3,
+        "box entry: the number of cards is the config's, without a card that has no record");
+  for (long long agent : listed) {
+    auto e = agentById(boxes, agent);
+    check(countSum(e->getJSONArray("base_player_count")) == e->getInt("player_list_total") && e->getString("probability") == std::to_string(e->getInt("player_list_total")),
+        "box entry: the base count is the box's number of cards");
+  }
+  check(countSum(big->getJSONArray("remaining_player_count")) == 3 && countSum(others->getJSONArray("remaining_player_count")) == 2,
+        "box entry: what is left, without the starter card the user has");
+  check(pickupIds(big) == std::vector<long long>{kBoxA}, "box entry: a featured card of another box is not shown");
+  check(pickupIds(cf) == std::vector<long long>{kBoxD}, "box entry: without featured cards of its own a box shows its first card");
+  {
+    auto contents = call(s, "CMD_GET_MYCLUB_PROCURABLE_GAMEPLAYERLIST", newObj()->put("agent_id", 7003LL))->getJSONArray("gameplayer_list");
+    std::string listedA;
+    for (int i = 0; i < contents->length(); ++i) {
+      auto gp = contents->getJSONObject(i)->getJSONObject("gameplayer");
+      if (gp->getJSONObject("gameplayer_id")->getLong("id") == kBoxA) listedA = gp->toString();
+    }
+    check(!listedA.empty() && big->getJSONArray("pickup_list")->getJSONObject(0)->toString() == listedA,
+        "box entry: a featured card is the card the box contents list, made from its record");
+  }
+  auto menu = call(s, "CMD_GET_MYCLUB_MAINMENU_INFO");
+  check(agentIds(menu->getJSONArray("agent_list")) == listed && agentIds(menu->getJSONArray("agent_price_list")) == listed,
+        "main menu: the same box list and prices as the box list reply");
+  check(menu->getJSONArray("agent_list")->toString() == boxes->toString(), "main menu: the box entries are the box list reply's");
+  auto banners = menu->getJSONArray("banner_list");
+  for (int i = 0; i < banners->length(); ++i)
+    check(banners->getJSONObject(i)->getString("announcement_type") == "AGENT" && banners->getJSONObject(i)->getLong("entity_id") == 7003,
+        "main menu: a banner that opens no listed box opens the first box");
+  auto drawn = call(s, "CMD_USE_MYCLUB_AGENT", newObj()->put("agent_id", 7001LL)->put("count", 10));
+  check(idSet(cardIds(drawn->getJSONArray("gameplayer_list"))) == idSet({kBoxD, kBoxE}), "a draw gives only cards of the box that have a record");
+  check(agentIds(drawn->getJSONArray("agent_list")) == listed && countSum(agentById(drawn->getJSONArray("agent_list"), 7001)->getJSONArray("remaining_player_count")) == 0,
+        "draw reply: the same box list, with the counts after the draw");
+  auto info = call(s, "CMD_GET_MYCLUB_AGENT_BOX_INFO", newObj()->put("agent_id", 7003LL));
+  check(info->getJSONArray("base_player_count")->toString() == "[0,0,3,0,0]" && info->getJSONArray("remaining_player_count")->toString() == "[0,0,3,0,0]",
+        "box info: the box's counts from the config");
+  auto reset = call(s, "CMD_RESET_MYCLUB_AGENT", newObj()->put("agent_id", 7001LL));
+  check(reset->getJSONArray("remaining_player_count")->toString() == "[0,0,2,0,0]" && reset->getJSONArray("base_player_count")->toString() == "[0,0,2,0,0]",
+        "reset: the box's counts from the config");
+}
+
 int main() {
   try {
     zs::setVerbose(false);
@@ -2554,6 +2668,7 @@ int main() {
     goalkeeperSkillMigrationTests(root);
     konamiPlayerDataSkillListTest(root);
     boxRemainingTests(root);
+    boxListTests(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
     check(child >= 0, "spawn abrupt-exit save test");

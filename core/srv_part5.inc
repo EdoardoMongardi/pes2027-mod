@@ -754,23 +754,16 @@ void z28PreserveCareerTraining(const ObjP& jo, const ArrP& params) {
   }
 }
 
+// The counts of a box that holds all its cards (after a reset, and the base count of the box info), from the
+// box config.
 void ziruAttachResetCounts(const ObjP& jo, int64_t agent) {
   try {
-    ArrP list = nn(loadZiruJsonAssetObject("responses/CmdGetMyclubAgentlist.json"))->optJSONArray("agent_list");
-    if (!list) return;
-    for (int i = 0; i < list->length(); i++) {
-      ObjP a = list->optJSONObject(i);
-      if (a && a->optLong("agent_id") == agent) {
-        ArrP b = a->optJSONArray("base_player_count");
-        if (b) {
-          ArrP c = Array::parse(b->toString());
-          jo->put("remaining_player_count", c);
-          jo->put("base_player_count", c);
-          jo->put("can_reset", "YES");
-        }
-        return;
-      }
-    }
+    ObjP pack = ziruPack(agent);
+    if (!pack) return;
+    int total = ziruBoxCards(pack)->length();
+    jo->put("remaining_player_count", ziruBoxCounts(total));
+    jo->put("base_player_count", ziruBoxCounts(total));
+    jo->put("can_reset", "YES");
   } catch (const std::exception&) {
   }
 }
