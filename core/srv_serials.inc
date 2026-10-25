@@ -30,6 +30,7 @@ bool ziruSerialWaitingLogged = false;
 void z27MigrateSave() {
   if (ziruSaveChecked) return;
   try {
+    z28MarkEmptyStart();  // before the moves below write their flags
     z27MigrateSavedCards();
     ziruSaveChecked = z27MigrateStarterSerials();
   } catch (const std::exception& e) {
@@ -255,4 +256,38 @@ bool z27MigrateStarterSerials() {
     logRequest("Z27_SERIAL_MIGRATION", std::string("[Z27_SERIAL_MIGRATION_ERR] ") + e.what() + "; tried again with the next request");
     return false;
   }
+}
+
+// ---- A new save starts with no players ----
+// A save that holds nothing yet (the first start after a fresh install) is marked once, before the save moves
+// (z27MigrateSavedCards, z27MigrateStarterSerials) write their flags. Its club then has none of the starter cards of CmdLogin.json (no starting eleven, no bench, no
+// reserves) and an empty squad; the coaches, the formation and every other setting stay. A request naming a starter
+// card is refused there (z27TrainingTarget), and the starter cards do not count as the user's cards
+// (ziruOwnedCardIds), so the boxes offer them. A save that already holds anything (every save an earlier build has
+// opened carries the flag z27MigrateSavedCards writes at its first start) keeps its starter cards as before.
+int ziruNoStartersState = -1;  // whether this save has no starter cards: -1 not read yet, 0 no, 1 yes
+
+void z28MarkEmptyStart() {
+  if (loadMeta("z28_no_starters")) return;
+  if (loadMeta("z27_card_identity_v2") || loadMeta("z27_starter_serials_v1")) return;
+  if (!ziruDb->loadAllPlayerRows().empty() || !ziruDb->loadAllSquadRows().empty()) return;
+  if (sp("almanac_state").data->length() > 0) return;
+  ziruDb->saveMeta("z28_no_starters", "1");
+  ziruNoStartersState = 1;
+  logRequest("Z28_NO_STARTERS", "[Z28_NO_STARTERS] new save: the club starts with no players");
+}
+
+bool z28NoStarters() {
+  if (ziruNoStartersState < 0) {
+    JStr m = loadMeta("z28_no_starters");
+    ziruNoStartersState = m && *m == "1" ? 1 : 0;
+  }
+  return ziruNoStartersState == 1;
+}
+
+// Whether a serial is one a starter card is listed under in CmdLogin.json.
+bool z28IsStarterSerial(int64_t serial) {
+  for (const auto& kv : z27Starters().bySerialId)
+    if (kv.first.first == serial) return true;
+  return false;
 }

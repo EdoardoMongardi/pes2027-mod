@@ -54,9 +54,13 @@ config's values put in.
 | `text_color_a`, `text_color_b` | optional | The colours of the box's texts (else the template's). |
 
 What is left in each box is kept in the save with a fingerprint of the box's cards. When a box is new to the save, or
-its cards change, it starts again as its cards minus the cards the user has (saved and drawn cards and the starter
-cards; sold cards do not count), so a save moved to a new layout is offered nothing it already has. A reset box holds
-all its cards again.
+its cards change, it starts again as its cards minus the cards the user has (saved and drawn cards, and the starter
+cards of a save that has them; sold cards do not count), so a save moved to a new layout is offered nothing it already
+has. A reset box holds all its cards again.
+
+A new save (one that holds nothing yet) starts with no players: none of the starter cards of `CmdLogin.json`, an empty
+squad and an empty first MyLeague squad; the coaches and the formation stay. There the starter cards are offered by the
+boxes like any other card. A save that already holds anything keeps its starter cards.
 
 Version 1 (`ziru-runtime-pack-config-v1`, Ziru's own file) has `agent_id`, `pack_id`, `title`, `category`,
 `base_count` and `player_ids`: boxes are listed in file order, a card may be in two boxes, and the featured cards are

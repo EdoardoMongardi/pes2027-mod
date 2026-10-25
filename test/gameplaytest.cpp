@@ -23,6 +23,12 @@ static ObjP call(OfflineServer& srv, const char* cmd, ObjP req = newObj()) {
   check(result.o->optString("result") != "ERROR", result.o->toString().c_str());
   return result.o;
 }
+// A save an earlier build has opened: it carries the flag z27MigrateSavedCards writes at its first start, so it keeps
+// its starter cards (a save that holds nothing yet starts with no players).
+static void seedOldSave(const std::string& dataDir) {
+  std::filesystem::create_directories(dataDir);
+  zs::ZiruDb(dataDir + "/ziru_save.db").saveMeta("z27_card_identity_v2", "1");
+}
 static ObjP coachRef(int id, int serial) {
   return newObj()->put("coach_id", newObj()->put("id", id)->put("serial", serial));
 }
@@ -500,7 +506,7 @@ static void cardIdentityTests(const std::string& top) {
     // The 11.1.1 client sends the skill picked in Skill Training (Select) as ability_id and as the
     // item's effect, in its own skill numbers; booster training sends a booster id as ability_id.
     Config wireCfg = cfg; wireCfg.dataDir = root + "/select-ios-train"; wireCfg.iosPlayerLayout = true;
-    std::filesystem::create_directories(wireCfg.dataDir);
+    seedOldSave(wireCfg.dataDir);
     OfflineServer w(wireCfg);
     call(w, "CMD_LOGIN");
     auto pick = [&](const char* type, int index, int ability) {
@@ -903,12 +909,12 @@ static std::string firstDifference(const std::map<std::string, std::string>& a, 
 static void starterSerialTests(const std::string& top) {
   const long long DUP1 = 17592454614461LL, DUP2 = 88035823874881LL, OLD = 359042717000000000LL;
   auto oldSerial = [&](int last) { return OLD + last; };
-  // ---- A new save with Konami's serials: every starter card is its own card ----
+  // ---- A save that has the starter cards, with Konami's serials: every starter card is its own card ----
   {
     std::string root = top + "/serials-fresh";
     writeStarterAssets(root, true);
     Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
-    std::filesystem::create_directories(cfg.dataDir);
+    seedOldSave(cfg.dataDir);
     OfflineServer s(cfg);
     call(s, "CMD_CREATE_USER");
     auto login = call(s, "CMD_LOGIN")->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
@@ -926,7 +932,7 @@ static void starterSerialTests(const std::string& top) {
       check((int)serials.size() == kStarters, "70 cards, 70 serials");
     }
     check((int)s.ziruDb->loadAllPlayerRows().size() == kStarters, "a row for every starter card");
-    check(s.loadMeta("z27_starter_serials_v1") && !s.loadMeta("z27_starter_serials_backup"), "a new save only gets the done flag");
+    check(s.loadMeta("z27_starter_serials_v1") && !s.loadMeta("z27_starter_serials_backup"), "a save with nothing under the old serials only gets the done flag");
     // MyLeague: the CPU team plays Konami's captured squad. Those cards are not the user's,
     // and the captured result's per-card stats and advice are not about the user's cards.
     std::set<std::pair<long long, long long>> mine;
@@ -1291,7 +1297,7 @@ static void selectTrainingTests(const std::string& top) {
       "item_list":[{"item":{"item_type":"POSITION_TRAINING_SELECT","grade":0,"effect":0},"inventory_num":1}]})"));
   asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
   Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save"; cfg.iosPlayerLayout = true;
-  std::filesystem::create_directories(cfg.dataDir);
+  seedOldSave(cfg.dataDir);
   OfflineServer s(cfg);
   call(s, "CMD_LOGIN");
   // The card as the client holds it (login, client numbers) and the player data it asks for
@@ -2002,7 +2008,7 @@ static void konamiPlayerDataSkillListTest(const std::string& top) {
   asset(root, "ZIRU_MATCH_TEAMS.json", obj(R"({"teams":{"108":{"base_team_id":108,"team_name":"Test","team_name_short":"TST","kits":[{"id":1,"shirt_rgb":[0,0,0]},{"id":2,"shirt_rgb":[255,255,255]}]}}})"));
   asset(root, "generic.json", obj(R"({"result":"NOERR"})"));
   Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
-  std::filesystem::create_directories(cfg.dataDir);
+  seedOldSave(cfg.dataDir);
   OfflineServer s(cfg);
   call(s, "CMD_LOGIN");
   auto answer = call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", K)->put("serial", 901)));
@@ -2129,7 +2135,7 @@ static void boxRemainingTests(const std::string& top) {
   const std::string root = top + "/boxes";
   writeBoxAssets(root);
   Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save"; cfg.logFile = root + "/server.log";
-  std::filesystem::create_directories(cfg.dataDir);
+  seedOldSave(cfg.dataDir);
   // A save an older build (fix3) wrote with its layout, where box 1368 held A, B, C and D: it drew A and C from
   // 1368 and saved what was left of it, but no fingerprint of the box's cards. C was sold since.
   writeBoxLayout(root, {{1368, {kBoxA, kBoxB, kBoxC, kBoxD}}});
@@ -2243,7 +2249,7 @@ static void boxListTests(const std::string& top) {
       ->put(pack(7004, 4, "ZIRU NO RECORDS", {M}))->put(pack(7005, 5, "ZIRU OTHERS", {kBoxF, kBoxG, kBoxS1}))));
   const std::vector<long long> listed = {7003, 7001, 7005};
   Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
-  std::filesystem::create_directories(cfg.dataDir);
+  seedOldSave(cfg.dataDir);
   OfflineServer s(cfg);
   call(s, "CMD_LOGIN");
   auto reply = call(s, "CMD_GET_MYCLUB_AGENTLIST");
@@ -2309,6 +2315,83 @@ static void boxListTests(const std::string& top) {
         "reset: a box that is not listed gets no entry");
 }
 
+static std::set<long long> listedIds(const ObjP& reply) { return idSet(cardIds(reply->getJSONObject("entry_info")->getJSONArray("gameplayer_list"))); }
+
+// A new save starts with no players; a save that holds anything keeps its starter cards.
+static void noStarterTests(const std::string& top) {
+  const std::string root = top + "/no-starters";
+  writeBoxAssets(root);
+  writeBoxLayout(root, {{7001, {kBoxA, kBoxB, kBoxS1}}, {7002, {kBoxC, kBoxS2}}});
+  asset(root, "CMD_USE_MYCLUB_ITEM.json", obj(R"({"result":"NOERR","item_list":[{"item":{"item_type":"SKILL_TRAINING","grade":0,"effect":0},"inventory_num":5}]})"));
+  // MyLeague's captured first squad lists the starter cards.
+  auto starterRefs = newArr()->put(newObj()->put("gameplayer_id", newObj()->put("id", kBoxS1)->put("serial", kBoxS1Serial)))
+      ->put(newObj()->put("gameplayer_id", newObj()->put("id", kBoxS2)->put("serial", kBoxS2Serial)));
+  asset(root, "ZIRU_ML_SET_SEASON_ENTER.json", newObj()->put("special_dream_squad_data", newObj()->put("squad_data", newObj()
+      ->put("player_list", starterRefs)->put("coach", newArr()->put(coachRef(100, 1000))))->put("initial_settings", "YES"))->put("result", "NOERR"));
+  const std::set<long long> starters = {kBoxS1, kBoxS2};
+  Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/new"; cfg.logFile = root + "/server.log";
+  auto noRow = [](OfflineServer& s) { return s.ziruDb->loadAllPlayerRows().empty(); };
+  {
+    OfflineServer s(cfg);
+    for (const char* cmd : {"CMD_LOGIN", "CMD_CREATE_USER", "CMD_GET_MYCLUB_ENTRY_INFO"}) {
+      auto entry = call(s, cmd)->getJSONObject("entry_info");
+      std::string what = std::string("new save, ") + cmd + ": ";
+      check(entry->getJSONArray("gameplayer_list")->length() == 0, (what + "the club has no players").c_str());
+      auto squad = entry->getJSONArray("squad_list")->getJSONObject(0)->getJSONObject("squad_data");
+      check(squad->getJSONArray("player_list")->length() == 0, (what + "the squad is empty").c_str());
+      check(squad->getJSONArray("coach")->length() == 1 && squad->getJSONArray("coach")->getJSONObject(0)->getJSONObject("coach_id")->getInt("id") == 100 &&
+            entry->getJSONArray("coach_list")->length() == 1, (what + "the coach and the coaches stay").c_str());
+    }
+    check(s.loadMeta("z28_no_starters") && *s.loadMeta("z28_no_starters") == "1" && noRow(s), "new save: marked once, and no starter card is saved");
+    // Requests that name a starter card are refused, and the club still has no players.
+    auto starterRef = newObj()->put("id", kBoxS1)->put("serial", kBoxS1Serial);
+    auto skill = call(s, "CMD_USE_MYCLUB_ITEM", newObj()->put("gameplayer_id_list", newArr()->put(starterRef))->put("training_index", 0)
+        ->put("item_list", newArr()->put(newObj()->put("present_num", 1)->put("item", newObj()->put("item_type", "SKILL_TRAINING")))));
+    check(skill->getJSONObject("skill_training_result")->getString("is_success") == "NO" && noRow(s), "new save: skill training on a starter card is refused");
+    auto position = call(s, "CMD_USE_MYCLUB_ITEM", newObj()->put("gameplayer_id_list", newArr()->put(starterRef))->put("training_index", 0)
+        ->put("item_list", newArr()->put(newObj()->put("present_num", 1)->put("item", newObj()->put("item_type", "POSITION_TRAINING")))));
+    check(position->getJSONObject("position_training_result")->getString("is_success") == "NO" && noRow(s), "new save: position training on a starter card is refused");
+    call(s, "CMD_USE_MYCLUB_CAREERPLAN", newObj()->put("gameplayer_use_list", newArr()->put(newObj()->put("gameplayer_id", starterRef)
+        ->put("use_list", newArr()->put(newObj()->put("parameter_type", "SHOOT")->put("point", 1))))));
+    check(noRow(s) && listedIds(call(s, "CMD_LOGIN")).empty(), "new save: a careerplan on a starter card is refused; the club still has no players");
+    // The starter cards are not the user's here, so the boxes offer them.
+    auto left = shownLeft(call(s, "CMD_GET_MYCLUB_AGENTLIST"));
+    check(left[7001] == 3 && left[7002] == 2 && offered(s, 7001) == idSet({kBoxA, kBoxB, kBoxS1}),
+        ("new save: the boxes offer the starter cards, shown " + std::to_string(left[7001]) + " and " + std::to_string(left[7002])).c_str());
+    auto drawn = drawFrom(s, 7002, 10);
+    check(idSet(drawn) == idSet({kBoxC, kBoxS2}) && listedIds(call(s, "CMD_LOGIN")) == idSet({kBoxC, kBoxS2}),
+        "new save: a starter card drawn from a box is the user's card");
+    s.ziruMyLeagueSetActive(1);
+    auto enter = call(s, "CMD_SET_SEASON_ENTER");
+    s.ziruMyLeagueSetActive(0);
+    check(enter->getJSONObject("special_dream_squad_data")->getJSONObject("squad_data")->getJSONArray("player_list")->length() == 0,
+        "new save: MyLeague's first squad lists no starter card");
+  }
+  {
+    OfflineServer s(cfg);
+    auto login = call(s, "CMD_LOGIN");
+    check(listedIds(login) == idSet({kBoxC, kBoxS2}), "new save after a restart: only the drawn cards");
+    for (long long serial : {kBoxS1Serial, kBoxS2Serial}) check(!s.loadPlayer(serial), "new save after a restart: no starter serial is saved");
+    check(logLines(cfg.logFile, "[Z28_NO_STARTERS]") == 1, "a save is marked once");
+  }
+  // Saves that hold anything keep their starter cards: one an earlier build has opened, one with a saved card and no
+  // flag, one with only box progress in its prefs. There the starter cards are the user's, so the boxes leave them out.
+  for (int kind = 0; kind < 3; ++kind) {
+    Config old = cfg; old.dataDir = root + "/old-" + std::to_string(kind);
+    std::string what = kind == 0 ? "a save an earlier build opened" : kind == 1 ? "a save with a card" : "a save with box progress";
+    if (kind == 0) seedOldSave(old.dataDir);
+    OfflineServer s(old);
+    if (kind == 1) s.ziruDb->savePlayer(5, kBoxA, boxCard(kBoxA, 5)->toString());
+    if (kind == 2) s.sp("almanac_state").edit().putString("ziru_remaining_7002", "[]").commit();
+    auto have = listedIds(call(s, "CMD_LOGIN"));
+    check(have.count(kBoxS1) && have.count(kBoxS2) && !s.loadMeta("z28_no_starters"), (what + ": keeps its starter cards").c_str());
+    if (kind == 0) {
+      auto left = shownLeft(call(s, "CMD_GET_MYCLUB_AGENTLIST"));
+      check(left[7001] == 2 && left[7002] == 1, (what + ": the boxes leave out the starter cards the user has").c_str());
+    }
+  }
+}
+
 int main() {
   try {
     zs::setVerbose(false);
@@ -2368,6 +2451,7 @@ int main() {
     std::string root(temp);
     std::filesystem::create_directories(root + "/responses");
     Config cfg; cfg.assetsDir = root; cfg.dataDir = root + "/save";
+    seedOldSave(cfg.dataDir);
     {
       Config stadiumCfg = cfg; stadiumCfg.downloadDir = root + "/stadiums";
       std::filesystem::create_directories(stadiumCfg.downloadDir);
@@ -2678,6 +2762,7 @@ int main() {
     konamiPlayerDataSkillListTest(root);
     boxRemainingTests(root);
     boxListTests(root);
+    noStarterTests(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();
     check(child >= 0, "spawn abrupt-exit save test");

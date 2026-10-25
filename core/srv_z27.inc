@@ -269,6 +269,8 @@ ObjP z27Squad(int32_t id) {
       if (sq->optInt("squad_id", -1) == id) { res = z27Copy(sq->getJSONObject("squad_data")); break; }
     }
     if (!res && list->length() > 0) res = z27Copy(list->getJSONObject(0)->getJSONObject("squad_data"));
+    // The starter squad lists the starter cards: a club without them has no one in its squad yet.
+    if (res && z28NoStarters()) res->put("player_list", newArr());
   }
   if (!res) throw IllegalState("Unknown squad " + str(id));
   ArrP pl = res->optJSONArray("player_list");
@@ -528,7 +530,7 @@ void z27Restore(const ObjP& jo) {
       ObjP s = squads->getJSONObject(i);
       int id = s->getInt("squad_id");
       if (id == mainId) found = true;
-      if (loadSquad(id)) {
+      if (loadSquad(id) || z28NoStarters()) {
         ObjP sqData = z27Squad(id);
         ArrP coachArr = sqData->optJSONArray("coach");
         if (!coachArr || coachArr->length() == 0) {
@@ -578,7 +580,9 @@ void z27Restore(const ObjP& jo) {
       ArrP kept = newArr();
       for (int i = 0; i < gl->length(); i++) {
         ObjP p = gl->getJSONObject(i);
-        if (!isZiruPlayerSold(p->getJSONObject("gameplayer_id")->getLong("serial"))) kept->put(p);
+        int64_t listedSerial = p->getJSONObject("gameplayer_id")->getLong("serial");
+        if (z28NoStarters() && z28IsStarterSerial(listedSerial)) continue;  // a club that started with no players
+        if (!isZiruPlayerSold(listedSerial)) kept->put(p);
       }
       target->put("gameplayer_list", kept);
       ArrP all = Array::parse(ziruDb->loadAllPlayersJson());
@@ -986,7 +990,8 @@ ObjP z27TrainingTarget(int64_t serial, int64_t id) {
   if (ObjP saved = z27SavedCardFor(serial, id)) return saved;
   JStr row = loadPlayer(serial);
   if (row && !row->empty()) return nullptr;
-  ObjP entry = z27StarterEntry(serial, id);
+  // A club that started with no players has no starter card: a request naming one is refused.
+  ObjP entry = z28NoStarters() ? nullptr : z27StarterEntry(serial, id);
   if (!entry) entry = z27RecruitedEntry(serial, id);
   if (!entry) return nullptr;
   ObjP gid = entry->getJSONObject("gameplayer_id");

@@ -820,6 +820,8 @@ void patchZiruMyLeagueCommonState(const ObjP& jo) {
           data->put("team_id", team);
           data->put("set_uniform_list", kits);
           data->put("coach", Array::parse(z27Squad(z27Main())->getJSONArray("coach")->toString()));
+          // The captured MyLeague squad lists the starter cards: a club without them has none to list.
+          if (z28NoStarters()) data->put("player_list", newArr());
         }
         hydrateZiruMyLeagueCoachV73(sd);
       }

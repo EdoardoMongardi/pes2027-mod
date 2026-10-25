@@ -119,9 +119,9 @@ std::string ziruBoxSignature(const ArrP& cards) {
   return std::to_string(ids.size()) + ":" + std::to_string(h);
 }
 
-// The card ids the user has: every saved card, every drawn card and the starter cards (also under the id the iOS
-// client knows a starter card by), leaving out sold ones. Built at most once per request (serve() clears it, and a
-// draw clears it again).
+// The card ids the user has: every saved card, every drawn card and, on a save that has them (z28NoStarters), the
+// starter cards (also under the id the iOS client knows a starter card by), leaving out sold ones. Built at most once
+// per request (serve() clears it, and a draw clears it again).
 std::optional<std::set<int64_t>> ziruOwnedCache;
 
 const std::set<int64_t>& ziruOwnedCardIds() {
@@ -140,8 +140,9 @@ const std::set<int64_t>& ziruOwnedCardIds() {
     ArrP list = Array::parse(recruited);
     for (int i = 0; i < list->length(); i++) add(list->optJSONObject(i));
   }
-  for (const auto& kv : z27Starters().bySerialId)
-    if (!isZiruPlayerSold(kv.first.first)) own.insert(kv.first.second);
+  if (!z28NoStarters())
+    for (const auto& kv : z27Starters().bySerialId)
+      if (!isZiruPlayerSold(kv.first.first)) own.insert(kv.first.second);
   ziruOwnedCache = std::move(own);
   return *ziruOwnedCache;
 }
