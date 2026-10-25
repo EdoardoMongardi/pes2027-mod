@@ -107,6 +107,11 @@ of the card's own entry in `CmdLogin.json` (its first entry when it is listed tw
 - A card's styles, AI styles, club, nation and own skills are read from the starter entry, not from the copy, and a
   build 138 save treats the copy as no record when it is moved, since build 138 had no such records. So a copy keeps
   the entry's card (styles, club, nation, parameters, boosters, rarity, type and level cap) and may differ only in the
-  state of Konami's captured account (level, experience, points, games, sell value, serial);
-  `test/player_data_test.py` checks it.
+  state of Konami's captured account (level, experience, points, games, sell value, serial).
+- That state includes the progression points the account spent on the card, and those raised its ability values
+  (parameters 14..42). A record is the untrained card, the one the server adds a box card's points to, so a copy's
+  ability values are the card's own untrained values from Konami's player database: the entry must be the copy plus
+  exactly the points its owner spent (2 per level above 1, minus the points left). A Standard card's values change
+  with Konami's live updates, so a Standard copy takes today's values, which no entry captured earlier can show.
+  `test/player_data_test.py` checks all of this.
 - The mark is for the server: no answer the client gets carries it.

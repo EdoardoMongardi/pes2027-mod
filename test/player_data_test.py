@@ -40,6 +40,15 @@ STARTER_FILES = {"CmdLogin.json", "CmdGetEntryInfo.json", "CmdGetMyclubEntryInfo
 STARTER_COPY = "starter_copy"
 STARTER_COPY_FIELDS = ("play_style", "initial_base_team_id", "initial_base_national_team_id", "initial_booster_id_list",
                        "default_rarity", "type")
+# A card's ability values (parameters 14..42). Progression points raise them by training group: each step of a group
+# adds 1 to each of its values, a step costs 1 point for steps 1 to 4, 2 for steps 5 to 8 and so on, and a card earns
+# 2 points for every level above 1. Jumping (39) is in two groups. Weak Foot Accuracy (33), Form (41) and Injury
+# Resistance (42) are in none.
+ABILITIES = range(14, 43)
+TRAINING_GROUPS = {"Shooting": (20, 27, 28), "Passing": (21, 22), "Dribbling": (17, 18, 19), "Dexterity": (14, 36, 38),
+                   "Lower Body Strength": (34, 37, 40), "Aerial Strength": (23, 35, 39), "Defending": (15, 24, 25, 26),
+                   "GK 1": (16, 39), "GK 2": (30, 32), "GK 3": (29, 31)}
+STANDARD = 0x00   # card type (id bits 40..47) of a Standard card, whose values change with Konami's live updates
 SPECIAL_SKILLS = range(114, 142)
 DUMMY_SKILLS = {9, 14, 42, 50, 51, 72, 73}
 
@@ -78,6 +87,27 @@ def players(node, where=""):
 def card_id(player):
     gid = player.get("gameplayer_id")
     return gid.get("id") if isinstance(gid, dict) else None
+
+
+def step_cost(steps):
+    return sum(1 + step // 4 for step in range(steps))
+
+
+def training_steps(trained, untrained):
+    """Steps per training group that turn the values `untrained` into `trained`, or None when no such steps exist."""
+    gain = {i: trained[i] - untrained[i] for i in ABILITIES}
+    jump = 39
+    steps = {}
+    for group, values in TRAINING_GROUPS.items():
+        own = [gain[i] for i in values if i != jump]
+        if len(set(own)) != 1 or own[0] < 0:
+            return None
+        steps[group] = own[0]
+    if gain[jump] != steps["Aerial Strength"] + steps["GK 1"]:
+        return None
+    if any(gain[i] for i in ABILITIES if not any(i in values for values in TRAINING_GROUPS.values())):
+        return None
+    return steps
 
 
 def style_problems(player):
@@ -194,10 +224,14 @@ class PlayerDataTest(unittest.TestCase):
         self.assertEqual(bad, [])
         self.assertGreater(checked, 0)
 
-    def test_starter_copies_are_their_starter_entry(self):
+    def test_starter_copies_are_their_untrained_starter_entry(self):
         # The server reads a starter copy's card (styles, club, nation, own skills) from the starter entry, and a copy
-        # drawn from a box gets the record's stats, boosters and level cap: both must be the entry's. Only the state
-        # of Konami's captured account (level, experience, points, games, sell value, serial) may differ.
+        # drawn from a box gets the record's other values, boosters and level cap: all must be the entry's. Only the
+        # state of Konami's captured account (level, experience, points, games, sell value, serial) may differ, and
+        # the ability values: the entry is the card of an account that may have spent progression points on it, while
+        # a record is the untrained card the server adds a box card's points to. So the entry must be the copy plus
+        # exactly the points its owner spent. A Standard card's values change with Konami's live updates, and its
+        # entry was captured under older ones, so only the rest of a Standard copy is compared.
         login = json.loads((RESPONSES / "CmdLogin.json").read_bytes())["entry_info"]["gameplayer_list"]
         entries = {}
         for player in login:
@@ -214,8 +248,18 @@ class PlayerDataTest(unittest.TestCase):
             for field in STARTER_COPY_FIELDS:
                 if copy.get(field) != entry.get(field):
                     bad.append("%s %s %r, starter entry %r" % (key, field, copy.get(field), entry.get(field)))
-            if copy["parameters"][:len(entry["parameters"])] != entry["parameters"]:
-                bad.append("%s parameters differ from the starter entry's" % key)
+            params, own = copy["parameters"], entry["parameters"]
+            if [v for i, v in enumerate(params[:len(own)]) if i not in ABILITIES] != [v for i, v in enumerate(own) if i not in ABILITIES]:
+                bad.append("%s parameters outside the ability values differ from the starter entry's" % key)
+            if (int(key) >> 40) & 0xFF != STANDARD:
+                level = entry["level_info"]
+                spent = 2 * (level["level"] - 1) - level["customize_point"]
+                steps = training_steps(own, params)
+                if steps is None:
+                    bad.append("%s the starter entry's ability values are not the copy's plus training" % key)
+                elif sum(step_cost(n) for n in steps.values()) != spent:
+                    bad.append("%s the starter entry is the copy plus %d points of training, its owner spent %d" % (
+                        key, sum(step_cost(n) for n in steps.values()), spent))
             if copy["level_info"]["level_limit"] != entry["level_info"]["level_limit"]:
                 bad.append("%s level cap %r, starter entry %r" % (key, copy["level_info"]["level_limit"], entry["level_info"]["level_limit"]))
             if copy.get("additional_skill_id") or copy.get("additional_position"):
