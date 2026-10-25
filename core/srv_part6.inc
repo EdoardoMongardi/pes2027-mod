@@ -304,10 +304,10 @@ ObjP ziruSyncActiveBooster(const ObjP& jo) {
     ObjP gid;
     if (params && params->length() >= 145 && (gid = jo->optJSONObject("gameplayer_id"))) {
       int64_t id = gid->optLong("id");
-      ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
+      ObjP w = z28RecordFor(id, gid->optLong("serial", 0), true);
       ObjP base = w ? w->optJSONObject("gameplayer") : nullptr;
       if (!base) {
-        // A starter card without a record: its own starter entry (read only).
+        // A starter card without a record of its own: its starter entry (read only).
         auto it = z27Starters().byId.find(id);
         if (it == z27Starters().byId.end()) return jo;
         base = it->second;

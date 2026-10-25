@@ -35,6 +35,11 @@ LOGIN_CAPTURE = "CmdLoginbackup.json"
 # Older entry-info layout: play_style is a single number and there is no parameters list.
 OLD_FORMAT_FILES = {"CmdSetMyclubEntryInfo.json", "set_myclub_entry_info.json"}
 STARTER_FILES = {"CmdLogin.json", "CmdGetEntryInfo.json", "CmdGetMyclubEntryInfo.json"}
+# The mark of a record that is a copy of a starter card's CmdLogin.json entry, made for the boxes (ziru-extra/README.md),
+# and the card fields it keeps from that entry.
+STARTER_COPY = "starter_copy"
+STARTER_COPY_FIELDS = ("play_style", "initial_base_team_id", "initial_base_national_team_id", "initial_booster_id_list",
+                       "default_rarity", "type")
 SPECIAL_SKILLS = range(114, 142)
 DUMMY_SKILLS = {9, 14, 42, 50, 51, 72, 73}
 
@@ -164,7 +169,9 @@ class PlayerDataTest(unittest.TestCase):
         self.assertEqual(bad, [])
         self.assertGreater(checked, 500)
 
-    def test_starter_cards_without_a_record_use_konamis_login_values(self):
+    def test_starter_cards_without_their_own_record_use_konamis_login_values(self):
+        # A starter copy is not the starter card's own record: the server shows a save's starter card from its starter
+        # entry, so that entry is checked too.
         capture = json.loads((RESPONSES / LOGIN_CAPTURE).read_bytes())["entry_info"]["gameplayer_list"]
         konami = {}
         for player in capture:
@@ -174,7 +181,7 @@ class PlayerDataTest(unittest.TestCase):
             squad = json.loads((RESPONSES / name).read_bytes())["entry_info"]["gameplayer_list"]
             for i, player in enumerate(squad):
                 cid = card_id(player)
-                if str(cid) in self.records:
+                if str(cid) in self.records and self.records[str(cid)].get(STARTER_COPY) != "YES":
                     continue
                 checked += 1
                 want_style, want_params = konami[cid]
@@ -186,6 +193,34 @@ class PlayerDataTest(unittest.TestCase):
                     bad.append("%s[%d] %s: original_parameters 61..69 %r, Konami %r" % (name, i, cid, original[61:70], want_params))
         self.assertEqual(bad, [])
         self.assertGreater(checked, 0)
+
+    def test_starter_copies_are_their_starter_entry(self):
+        # The server reads a starter copy's card (styles, club, nation, own skills) from the starter entry, and a copy
+        # drawn from a box gets the record's stats, boosters and level cap: both must be the entry's. Only the state
+        # of Konami's captured account (level, experience, points, games, sell value, serial) may differ.
+        login = json.loads((RESPONSES / "CmdLogin.json").read_bytes())["entry_info"]["gameplayer_list"]
+        entries = {}
+        for player in login:
+            entries.setdefault(card_id(player), player)
+        copies = {key: record for key, record in self.records.items() if record.get(STARTER_COPY) == "YES"}
+        if not copies:
+            self.skipTest("these records have no starter copy")
+        bad = []
+        for key, record in copies.items():
+            copy, entry = record["gameplayer"], entries.get(int(key))
+            if entry is None:
+                bad.append("%s: a starter copy of a card that is not a starter card" % key)
+                continue
+            for field in STARTER_COPY_FIELDS:
+                if copy.get(field) != entry.get(field):
+                    bad.append("%s %s %r, starter entry %r" % (key, field, copy.get(field), entry.get(field)))
+            if copy["parameters"][:len(entry["parameters"])] != entry["parameters"]:
+                bad.append("%s parameters differ from the starter entry's" % key)
+            if copy["level_info"]["level_limit"] != entry["level_info"]["level_limit"]:
+                bad.append("%s level cap %r, starter entry %r" % (key, copy["level_info"]["level_limit"], entry["level_info"]["level_limit"]))
+            if copy.get("additional_skill_id") or copy.get("additional_position"):
+                bad.append("%s a starter copy carries learned skills or positions" % key)
+        self.assertEqual(bad, [])
 
 
 # Files with Konami's captured squads that refer to the user's starter cards by (id, serial).

@@ -644,7 +644,7 @@ void z27Restore(const ObjP& jo) {
           // player is another card, even though it has the same player number.
           if (svPid == pPid) {
             z27ApplyAppearanceAndClub(sv);
-            ObjP w = getZiruPlayerWrapper(Value((long long)sv->getJSONObject("gameplayer_id")->getLong("id")), false);
+            ObjP w = z28RecordFor(sv->getJSONObject("gameplayer_id")->getLong("id"), serial, true);
             ArrP baseParams = (w && w->optJSONObject("gameplayer")) ? w->getJSONObject("gameplayer")->optJSONArray("parameters") : nullptr;
             ArrP svParams = sv->optJSONArray("parameters");
             if (baseParams && svParams && baseParams->length() >= 142) {
@@ -1041,7 +1041,7 @@ ObjP z27Player(const ObjP& gid) {
     if (listed != starters.bySerialId.end()) p = z27Clone(listed->second);
     if (!p && serial == 0) p = z27RentalCard(id);
     if (!p) {
-      ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
+      ObjP w = z28RecordFor(id, serial, false);
       if (w && w->optJSONObject("gameplayer")) p = z27Copy(w->getJSONObject("gameplayer"));
     }
     if (!p && serial != 0) p = z27RentalCard(id);

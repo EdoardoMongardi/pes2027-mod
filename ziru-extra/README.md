@@ -88,3 +88,25 @@ fails on: an agent id out of range, reserved or used twice; a box without cards;
 without a record; a featured card that is not in its box; a bad banner path or colour; and in version 2 also a missing
 `order` or `category`, two boxes with one title or one order, boxes not listed in their order, and a card in more than
 one box. It warns about a box with fewer than 10 cards, whose 10-card draw the game never offers.
+
+## `ZIRU_PLAYER_RECORDS.json`: starter copies
+
+A box can hand out a card only when the card has a record. The record of a starter card made for the boxes is a copy
+of the card's own entry in `CmdLogin.json` (its first entry when it is listed twice), marked in its wrapper:
+
+```json
+"17592186051927": {"gameplayer": {"gameplayer_id": {"id": 17592186051927, "serial": 0}, ...}, "is_dummy": "NO", "starter_copy": "YES"}
+```
+
+- On a save without the starter cards, the copy is the card a box gives: the drawn card, its training and its match
+  data come from the record.
+- On a save with the starter cards, the starter card it holds stays exactly as before such records existed: it comes
+  from its starter entry and what the save holds for it, and so does a card of that id the client names under a serial
+  that does not hold it. A copy that save draws from a box (after a reset) is held under its own serial and is the
+  record's card.
+- A card's styles, AI styles, club, nation and own skills are read from the starter entry, not from the copy, and a
+  build 138 save treats the copy as no record when it is moved, since build 138 had no such records. So a copy keeps
+  the entry's card (styles, club, nation, parameters, boosters, rarity, type and level cap) and may differ only in the
+  state of Konami's captured account (level, experience, points, games, sell value, serial);
+  `test/player_data_test.py` checks it.
+- The mark is for the server: no answer the client gets carries it.

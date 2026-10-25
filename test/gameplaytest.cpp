@@ -2520,6 +2520,180 @@ static void newSaveCareerTests(const std::string& top) {
   }
 }
 
+// ---- Starter copies ----
+// A box can hand out a starter card only when the card has a record; that record is a copy of the card's starter entry
+// marked "starter_copy": "YES". A save that has the starter cards keeps them exactly as they were before such records
+// existed (also a save of build 138 that is moved at its first start); a copy drawn from a box is the record's card.
+// The fixture's copies differ from their starter entries (level cap, one stat, boosters, sell value), so any use of a
+// copy for a starter card shows.
+static void starterCopyTests(const std::string& top) {
+  // Positions in kZiruStarterSerials. Z and Z2 get starter copies. W is the same player as Z (player 7511), W2 the
+  // same player as Z2 (player 133543); neither has a record. Y is another card of player 7511 with a record of its own,
+  // the first record of that player.
+  const int Z = 7, W = 1, Z2 = 28, W2 = 14;
+  const long long zId = kZiruStarterSerials[Z].id, z2Id = kZiruStarterSerials[Z2].id, Y = (0x50LL << 40) + 7511;
+  const long long zSerial = kZiruStarterSerials[Z].now, wSerial = kZiruStarterSerials[W].now, z2Serial = kZiruStarterSerials[Z2].now,
+      w2Serial = kZiruStarterSerials[W2].now;
+  const int kStarterSell = 150000, kCopySell = 7500, kCopyStat = 90, kCopyCap = 20, kYBooster = 21, kZBooster = 38, kZ2Booster = 55;
+  check((zId & 0xFFFFFF) == (kZiruStarterSerials[W].id & 0xFFFFFF) && (z2Id & 0xFFFFFF) == (kZiruStarterSerials[W2].id & 0xFFFFFF) &&
+        zId != kZiruStarterSerials[W].id && z2Id != kZiruStarterSerials[W2].id, "starter copies: the fixture's players");
+  auto withBooster = [](ObjP c, int booster) {
+    c->getJSONArray("initial_booster_id_list")->put(0, booster);
+    c->getJSONArray("parameters")->put(142, booster);
+    return c;
+  };
+  auto setUp = [&](const std::string& root, bool copies) {
+    writeStarterAssets(root, true);
+    writeBoxReplies(root);
+    asset(root, "CMD_USE_MYCLUB_ITEM.json", obj(R"({"result":"NOERR","item_list":[{"item":{"item_type":"ABILITY_TRAINING_SELECT","grade":0,"effect":0},"inventory_num":5}]})"));
+    auto login = Object::parse(fileBytes(root + "/responses/CmdLogin.json"));
+    auto list = login->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    for (int i = 0; i < list->length(); ++i) list->getJSONObject(i)->put("sell_gp", kStarterSell);
+    asset(root, "CmdLogin.json", login);
+    auto shipped = Object::parse(fileBytes(root + "/responses/ZIRU_PLAYER_RECORDS.json"));
+    auto records = newObj()->put(std::to_string(Y), newObj()->put("gameplayer", withBooster(card(Y, 0, 9, 0, 0, kNoAi, {}, 108, 0, 149), kYBooster)));
+    for (const auto& k : shipped->keys()) records->put(k, shipped->get(k));
+    if (copies) {
+      for (auto [pos, booster] : {std::pair<int, int>{Z, kZBooster}, {Z2, kZ2Booster}}) {
+        auto c = Object::parse(list->getJSONObject(pos)->toString());
+        c->getJSONObject("gameplayer_id")->put("serial", 0);
+        while (c->getJSONArray("parameters")->length() < 149) c->getJSONArray("parameters")->put(0);
+        c->getJSONArray("parameters")->put(47, kCopyStat);
+        c->put("level_info", Object::parse("{\"level\":1,\"level_limit\":" + std::to_string(kCopyCap) + ",\"customize_point\":0}"))->put("sell_gp", kCopySell);
+        records->put(std::to_string(kZiruStarterSerials[pos].id), newObj()->put("gameplayer", withBooster(c, booster))->put("is_dummy", "NO")->put("starter_copy", "YES"));
+      }
+    }
+    asset(root, "ZIRU_PLAYER_RECORDS.json", records);
+    writeBoxLayout(root, {{7001, {zId, z2Id}}});
+  };
+  const std::string plainRoot = top + "/starter-copies/plain", copyRoot = top + "/starter-copies/copies";
+  setUp(plainRoot, false);
+  setUp(copyRoot, true);
+  auto bySerialOf = [](const ObjP& reply) {
+    std::map<long long, std::string> out;
+    auto list = reply->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    for (int i = 0; i < list->length(); ++i) out[list->getJSONObject(i)->getJSONObject("gameplayer_id")->getLong("serial")] = list->getJSONObject(i)->toString();
+    return out;
+  };
+  auto marked = [](const ObjP& reply) { return reply->toString().find("starter_copy") != std::string::npos; };
+  // The same requests on a save in each fixture: every answer and the save end up the same.
+  auto sameOnBoth = [&](const std::string& what, const std::function<void(const std::string&)>& seed,
+                        const std::function<std::vector<std::string>(OfflineServer&)>& run) {
+    std::vector<std::string> answers[2];
+    std::map<std::string, std::string> saves[2];
+    for (int k = 0; k < 2; ++k) {
+      Config cfg; cfg.assetsDir = k ? copyRoot : plainRoot; cfg.dataDir = cfg.assetsDir + "/" + what;
+      seed(cfg.dataDir);
+      {
+        OfflineServer s(cfg);
+        answers[k] = run(s);
+      }
+      OfflineServer s(cfg);  // after a restart
+      answers[k].push_back(call(s, "CMD_LOGIN")->toString());
+      saves[k] = saveDump(s);
+    }
+    for (size_t i = 0; i < answers[0].size(); ++i) {
+      check(answers[0][i].find("starter_copy") == std::string::npos && answers[1][i].find("starter_copy") == std::string::npos,
+            (what + ": no answer carries the starter_copy mark").c_str());
+      check(answers[0][i] == answers[1][i], (what + ": answer " + std::to_string(i) + " is the same with the starter copies").c_str());
+    }
+    check(saves[0] == saves[1], (what + ": the save is the same with the starter copies, first difference " + firstDifference(saves[0], saves[1])).c_str());
+  };
+  auto item = [](OfflineServer& s, long long id, long long serial) {
+    return call(s, "CMD_USE_MYCLUB_ITEM", newObj()->put("gameplayer_id_list", newArr()->put(newObj()->put("id", id)->put("serial", serial)))
+        ->put("training_index", 1)->put("ability_id", 186)
+        ->put("item_list", newArr()->put(newObj()->put("present_num", 1)->put("item", newObj()->put("item_type", "ABILITY_TRAINING_SELECT")))));
+  };
+  auto career = [](OfflineServer& s, long long id, long long serial) {
+    return call(s, "CMD_USE_MYCLUB_CAREERPLAN", newObj()->put("gameplayer_use_list", newArr()->put(newObj()
+        ->put("gameplayer_id", newObj()->put("id", id)->put("serial", serial))->put("use_list", newArr()->put(newObj()->put("parameter_type", "SHOOT")->put("point", 6))))));
+  };
+  // A save an earlier build opened: its starter cards, their detail, a booster, a refused booster (named under a serial
+  // that does not hold the card) and a careerplan on a starter card that has a copy.
+  sameOnBoth("an opened save", seedOldSave, [&](OfflineServer& s) {
+    std::vector<std::string> out;
+    out.push_back(call(s, "CMD_LOGIN")->toString());
+    out.push_back(call(s, "CMD_GET_MYCLUB_PLAYER_DATA", newObj()->put("gameplayer_id", newObj()->put("id", zId)->put("serial", zSerial)))->toString());
+    out.push_back(item(s, zId, zSerial)->toString());
+    out.push_back(item(s, zId, zSerial + 1000)->toString());
+    out.push_back(career(s, z2Id, z2Serial)->toString());
+    out.push_back(call(s, "CMD_LOGIN")->toString());
+    out.push_back(call(s, "CMD_GET_MYCLUB_ENTRY_INFO")->toString());
+    return out;
+  });
+  // A save of build 138, moved at its first start, whose cards hold boosters: Z holds the booster it borrowed from Y,
+  // the first record of its player, which the move resets because Z had no record then; W2 holds the booster of Z2's
+  // copy, which it never borrowed (its player had no record then), so it stays.
+  sameOnBoth("a build 138 save", [&](const std::string& dir) {
+    std::filesystem::create_directories(dir);
+    zs::ZiruDb db(dir + "/ziru_save.db");
+    db.savePlayer(zSerial, zId, withBooster(starterCard(Z, true), kYBooster)->toString());
+    db.savePlayer(w2Serial, kZiruStarterSerials[W2].id, withBooster(starterCard(W2, true), kZ2Booster)->toString());
+    db.savePlayer(wSerial, kZiruStarterSerials[W].id, starterCard(W, true)->toString());
+  }, [&](OfflineServer& s) {
+    auto login = call(s, "CMD_LOGIN");
+    auto cards = bySerialOf(login);
+    check(Object::parse(cards.at(zSerial))->getJSONArray("initial_booster_id_list")->getInt(0) == 0 &&
+          Object::parse(cards.at(w2Serial))->getJSONArray("initial_booster_id_list")->getInt(0) == kZ2Booster,
+          "a build 138 save: the borrowed booster is reset, the other one kept");
+    return std::vector<std::string>{login->toString()};
+  });
+  // A new save: a box hands out the copies, as the records' cards.
+  {
+    Config cfg; cfg.assetsDir = copyRoot; cfg.dataDir = copyRoot + "/new";
+    OfflineServer s(cfg);
+    auto draw = call(s, "CMD_USE_MYCLUB_AGENT", newObj()->put("agent_id", 7001)->put("count", 10));
+    check(idSet(cardIds(draw->getJSONArray("gameplayer_list"))) == idSet({zId, z2Id}) && !marked(draw), "a new save: the box gives both copies, without the mark");
+    auto login = call(s, "CMD_LOGIN");
+    auto list = login->getJSONObject("entry_info")->getJSONArray("gameplayer_list");
+    check(list->length() == 2 && !marked(login), "a new save: the club has the two drawn cards");
+    for (int i = 0; i < list->length(); ++i) {
+      auto c = list->getJSONObject(i);
+      int booster = c->getJSONObject("gameplayer_id")->getLong("id") == zId ? kZBooster : kZ2Booster;
+      check(c->getJSONArray("parameters")->getInt(47) == kCopyStat && c->getJSONObject("level_info")->getInt("level_limit") == kCopyCap &&
+            c->getJSONArray("initial_booster_id_list")->getInt(0) == booster && c->getInt("sell_gp") == kCopySell,
+            "a new save: a drawn copy is the record's card");
+    }
+    auto drawnZ = byId(list, zId);
+    auto planned = career(s, zId, drawnZ->getJSONObject("gameplayer_id")->getLong("serial"))->getJSONArray("careerplan_result_list")->getJSONObject(0)->getJSONObject("gameplayer");
+    check(planned->getJSONObject("level_info")->getInt("customize_point") < drawnZ->getJSONObject("level_info")->getInt("customize_point"),
+          "a new save: a careerplan on a drawn copy spends its points");
+  }
+  // A save with the starter cards that resets the box and draws a copy: the copy is the record's card, the starter card
+  // with the same id stays its starter entry.
+  {
+    Config cfg; cfg.assetsDir = copyRoot; cfg.dataDir = copyRoot + "/opened-draw";
+    seedOldSave(cfg.dataDir);
+    OfflineServer s(cfg);
+    call(s, "CMD_LOGIN");
+    call(s, "CMD_RESET_MYCLUB_AGENT", newObj()->put("agent_id", 7001LL));
+    auto drawn = cardIds(call(s, "CMD_USE_MYCLUB_AGENT", newObj()->put("agent_id", 7001)->put("count", 10))->getJSONArray("gameplayer_list"));
+    check(idSet(drawn) == idSet({zId, z2Id}), "an opened save: after a reset the box gives the copies");
+    auto cards = bySerialOf(call(s, "CMD_LOGIN"));
+    int copiesSeen = 0;
+    for (const auto& [serial, text] : cards) {
+      auto c = Object::parse(text);
+      if (c->getJSONObject("gameplayer_id")->getLong("id") != zId) continue;
+      bool starter = serial == zSerial || serial == kZiruStarterSerials[19].now;
+      int stat = c->getJSONArray("parameters")->getInt(47);
+      if (starter) check(stat == 40 + (serial == zSerial ? Z : 19) && c->getInt("sell_gp") == kStarterSell, "an opened save: the starter card keeps its starter entry");
+      else { check(stat == kCopyStat && c->getInt("sell_gp") == kCopySell, "an opened save: the drawn copy is the record's card"); copiesSeen++; }
+    }
+    check(copiesSeen == 1, "an opened save: one drawn copy of Z next to its two starter cards");
+    // Its careerplan points can be spent and given back, as on any card from a box.
+    long long copySerial = 0;
+    for (const auto& [serial, text] : cards)
+      if (Object::parse(text)->getJSONObject("gameplayer_id")->getLong("id") == zId && serial != zSerial && serial != kZiruStarterSerials[19].now) copySerial = serial;
+    auto points = [](const ObjP& reply) {
+      return reply->getJSONArray("careerplan_result_list")->getJSONObject(0)->getJSONObject("gameplayer")->getJSONObject("level_info")->getInt("customize_point");
+    };
+    int spent = points(career(s, zId, copySerial));
+    int back = points(call(s, "CMD_USE_MYCLUB_CAREERPLAN", newObj()->put("gameplayer_use_list", newArr()->put(newObj()
+        ->put("gameplayer_id", newObj()->put("id", zId)->put("serial", copySerial))->put("use_list", newArr())))));
+    check(back > spent, "an opened save: a careerplan reset gives the drawn copy its points back");
+  }
+}
+
 // A card drawn from a box is the card it is. Only a starter card, held under its starter serial, is shown under the id
 // the client knows it by: the Standard Neymar 40352 as 89133993205152 and the Standard De Bruyne 44379 as
 // 106788187843931. The same Standard cards drawn from a box keep their own ids. A card whose background the client
@@ -2964,6 +3138,7 @@ int main() {
     noStarterTests(root);
     newSaveCareerTests(root);
     drawnCardIdTests(root);
+    starterCopyTests(root);
     shippedBoxesTest(root);
     std::filesystem::create_directories(root + "/kill-save");
     pid_t child = fork();

@@ -98,7 +98,7 @@ ArrP buildZiruMlLeaderboardV85(const std::string& key) {
 // its record, its own boosters kept.
 ObjP buildZiruResetPlayer(int64_t playerId, int64_t serial, const ObjP& target) {
   try {
-    ObjP w = getZiruPlayerWrapper(Value((long long)playerId), true);
+    ObjP w = z28RecordFor(playerId, serial, true, true);
     ObjP base;
     if (!w || !(base = w->optJSONObject("gameplayer"))) return nullptr;
     ObjP jo = z27Copy(target);
@@ -426,6 +426,7 @@ ObjP getZiruPlayerWrapper(const Value& obj, bool warehouse = false) {
     ObjP rec = recs->optJSONObject(key);
     if (!rec) return nullptr;
     ObjP jo = Object::parse(rec->toString());
+    jo->remove("starter_copy");  // a mark for the server (z28IsStarterCopy); the client never gets it
     if (warehouse) { jo->remove("is_dummy"); jo->put("is_warehouse", "NO"); }
     else { jo->remove("is_warehouse"); jo->put("is_dummy", "NO"); }
     ObjP gp, li;
@@ -442,6 +443,28 @@ ObjP getZiruPlayerWrapper(const Value& obj, bool warehouse = false) {
     zs::loge("OFFLINE_SERVER", std::string("[ZIRU_V12_RECORD_ERR] failed ") + e.what());
     return nullptr;
   }
+}
+
+// ---- Starter copies ----
+// A box can hand out a starter card (a card of CmdLogin.json) only when the card has a record. Such a record is a
+// copy of the card's starter entry and is marked "starter_copy": "YES" (ziru-extra/README.md). It describes the card
+// a box gives. A save that has the starter cards keeps its own starter card exactly as its starter entry and the save
+// make it, as before these records existed: for that card the record does not count (z28RecordFor).
+bool z28IsStarterCopy(int64_t id) {
+  ObjP recs = ziruPlayerRecords();
+  ObjP rec = recs ? recs->optJSONObject(str(id)) : nullptr;
+  return rec && rec->optString("starter_copy", "") == "YES";
+}
+
+// The record of card `id` for a card the club holds under `serial` (`held`), or for a card the client names under a
+// serial that does not hold it (`held` false). A starter copy counts only for a copy the save got from a box: on a
+// save without the starter cards (z28NoStarters), and for a card held under a serial that is not a starter serial.
+// On a save with the starter cards, its starter card, and a card of that id named under another serial, take the
+// starter entry instead.
+ObjP z28RecordFor(int64_t id, int64_t serial, bool held, bool warehouse = false) {
+  bool fromBox = z28NoStarters() || (held && !z28IsStarterSerial(serial));
+  if (!fromBox && z28IsStarterCopy(id)) return nullptr;
+  return getZiruPlayerWrapper(Value((long long)id), warehouse);
 }
 
 Response handleZiruAdjustParamMinimal() {
@@ -493,7 +516,7 @@ Response handleZiruCareerplan(Request& r) {
               i2++;
             }
             ObjP jo = z27TrainingTarget(ziruCareerSerial, ziruCareerPlayerId);
-            bool fail = !jo || (!found && !getZiruPlayerWrapper(Value((long long)ziruCareerPlayerId), true));
+            bool fail = !jo || (!found && !z28RecordFor(ziruCareerPlayerId, ziruCareerSerial, true, true));
             ObjP res;
             if (!fail) {
               if (ziruCareerSpent == 0) {

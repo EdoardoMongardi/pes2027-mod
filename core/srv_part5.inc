@@ -5,7 +5,8 @@
 // its AI playing styles (parameters 63..69), its club and nation, and the skills
 // it has by itself. Only the exact card id counts: another version of the same
 // player is a different card and is never used. Sources, first match wins:
-//   1. the player records (ZIRU_PLAYER_RECORDS.json),
+//   1. the player records (ZIRU_PLAYER_RECORDS.json); a starter copy (z28IsStarterCopy) is the card's
+//      starter entry, which is read instead,
 //   2. the starter squad (CmdLogin.json),
 //   3. the MyLeague rental list (ZIRU_ML_RENTAL_LIST.json).
 // A missing file is skipped, never an error.
@@ -48,7 +49,7 @@ ObjP z27CardSource(int64_t id) {
   if (id <= 0) return nullptr;
   ObjP recs = ziruPlayerRecords();
   ObjP rec = recs ? recs->optJSONObject(str(id)) : nullptr;
-  ObjP card = rec ? rec->optJSONObject("gameplayer") : nullptr;
+  ObjP card = rec && !z28IsStarterCopy(id) ? rec->optJSONObject("gameplayer") : nullptr;
   if (card) return card;
   auto starter = z27Starters().byId.find(id);
   if (starter != z27Starters().byId.end()) return starter->second;
@@ -428,7 +429,7 @@ ObjP refreshZiruGameplayerFromCanonical(const ObjP& jo) {
         }
         bool serialState = own || fresh;
         // Only this exact card's record counts; another version of the player is another card.
-        ObjP w = getZiruPlayerWrapper(Value((long long)id), false);
+        ObjP w = z28RecordFor(id, serial, true);
         ObjP base = w ? w->optJSONObject("gameplayer") : nullptr;
         if (base) {
           ArrP ib = base->optJSONArray("initial_booster_id_list");
@@ -814,14 +815,15 @@ void ziruLeagueSaveInt(const std::string& k, int32_t v) { ziruDb->saveMeta(k, st
 // anything else is the player's and is kept. A trained booster that happens to
 // be the borrowed one cannot be told apart and is reset too (booster training
 // costs nothing here). Cards with their own record, or without any identity
-// source, never had anything borrowed and are left alone. Returns true when the
-// card changed.
+// source, never had anything borrowed and are left alone. Starter copies
+// (z28IsStarterCopy) were not in build 75288ee's records: a card that has one
+// had no record then. Returns true when the card changed.
 bool z27ResetBorrowedBoosters(const ObjP& card, const std::unordered_map<int32_t, ObjP>& firstRecordOfPlayer) {
   ObjP gid = card ? card->optJSONObject("gameplayer_id") : nullptr;
   int64_t id = gid ? gid->optLong("id", 0) : 0;
   if (id <= 0) return false;
   ObjP recs = ziruPlayerRecords();
-  if (recs && recs->has(str(id))) return false;
+  if (recs && recs->has(str(id)) && !z28IsStarterCopy(id)) return false;
   auto sibling = firstRecordOfPlayer.find((int32_t)(id & 0xFFFFFF));
   if (sibling == firstRecordOfPlayer.end()) return false;
   ObjP own = z27CardSource(id);
@@ -864,6 +866,7 @@ void z27MigrateSavedCards() {
       for (const auto& kv : recs->kv) {
         int64_t key = 0;
         try { key = parseLong(kv.first); } catch (const std::exception&) { continue; }
+        if (z28IsStarterCopy(key)) continue;  // not in 75288ee's records
         int32_t base = (int32_t)(key & 0xFFFFFF);
         ObjP gp = kv.second.t == Value::OBJ ? kv.second.o->optJSONObject("gameplayer") : nullptr;
         if (base > 0 && gp && !firstRecordOfPlayer.count(base)) firstRecordOfPlayer[base] = gp;
