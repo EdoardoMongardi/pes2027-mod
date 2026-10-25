@@ -125,7 +125,7 @@ python tools/build_ipa.py `
 6. **Quay lại bản fix2**: trước khi cài lại IPA fix2, mở app **Tệp (Files)**, vào *Trên iPhone › PES 2027 › Download* và xóa hai file `dt870_mobile_and.cpk` và `dt870_mobile_ios.cpk`. Nếu không xóa, fix2 coi file `dt870` mới là file riêng của người chơi và giữ nguyên nó; khi đã xóa, lần mở đầu tiên của fix2 tự chép lại file của chính nó.
 7. **Bản fix4: các gói thẻ mới**:
    - Các gói thẻ cũ được thay bằng 29 gói, xếp theo loại thẻ và vị trí đăng ký của thẻ:
-     - **ZIRU BIG TIME** (mọi thẻ Big Time) và **ZIRU LEGENDARY** (mọi thẻ Legendary).
+     - **ZIRU BIG TIME** và **ZIRU LEGENDARY**: mọi thẻ Big Time và mọi thẻ Legendary có hình trên iOS. Thẻ không có hình, thẻ trùng (bản Limited/Selection của một thẻ khác) và thẻ giữ chỗ của Konami không có trong gói nào; riêng một thẻ Big Time chỉ có hình dành cho Android nằm trong **ZIRU ART TEST**.
      - **ZIRU EPIC** và **ZIRU SHOW TIME**: mỗi loại 12 gói, mỗi gói một vị trí: GK, CB, LB, RB, DMF, CMF, LMF, RMF, AMF / SS (thẻ SS nằm chung gói với AMF), LWF, RWF, CF.
      - **ZIRU HIGHLIGHT** (các thẻ Highlight) và **ZIRU OTHERS** (các thẻ khởi đầu không thuộc gói nào ở trên).
      - **ZIRU ART TEST**: các thẻ có hình chỉ nằm trong IPA hoặc chỉ có bản dành cho Android, nên hình có thể không hiện trên iPhone/iPad. Gói này dùng để thử xem hình của các thẻ đó có hiện hay không; các thẻ này không có trong gói nào khác.
@@ -147,7 +147,8 @@ python tools/build_ipa.py `
     - Nếu sau đó lại cài fix4 (fix4 → fix3 → fix4):
       - trên save mới không có cầu thủ, fix3 thêm 70 thẻ khởi đầu vào save, và chúng ở lại luôn khi quay lại fix4;
       - các gói của fix4 có thể đưa ra lại những thẻ đã mở trong lúc dùng fix3;
-      - thẻ Neymar Standard hoặc De Bruyne Standard đã mở từ gói bị fix3 đổi hẳn thành Neymar Big Time hoặc De Bruyne Show Time, và vẫn như vậy khi quay lại fix4.
+      - thẻ Neymar Standard hoặc De Bruyne Standard đã mở từ gói bị fix3 đổi hẳn thành Neymar Big Time hoặc De Bruyne Show Time, và vẫn như vậy khi quay lại fix4;
+      - trên save đó, đặt lại điểm phát triển của một thẻ khởi đầu khi dùng fix4 đưa thẻ về chỉ số gốc chưa luyện, như thẻ đó khi mở từ gói (thẻ Standard lấy chỉ số hiện tại của Konami), và trả lại đủ điểm phát triển. Trên fix3, và trên save đang dùng khi lên fix4, đặt lại đưa thẻ khởi đầu về chỉ số trong dữ liệu khởi đầu của Konami (nhiều thẻ trong đó đã được luyện sẵn), cũng kèm đủ điểm.
 
 ---
 
