@@ -110,7 +110,7 @@ python tools/build_ipa.py `
    - Lần mở đầu tiên, save cũ được chuyển một lần: thẻ đang giữ tiến trình ở mỗi serial cũ được chuyển sang serial mới của chính nó cùng kỹ năng đã học, booster, vị trí, cấp độ và điểm phát triển; các thẻ khởi đầu khác bắt đầu với chỉ số gốc; đội hình và đội hình MyLeague trỏ sang serial mới; thẻ từ gói không bị động tới.
    - Bản sao dữ liệu cũ được giữ trong save (`meta` khóa `z27_starter_serials_backup`); mỗi bước được ghi vào `offline_server.log` với nhãn `Z27_SERIAL_MIGRATION`.
    - Yêu cầu huấn luyện cho một thẻ không nằm ở serial đó sẽ được trả lời là không thành công và không thay đổi gì (`Z27_TRAINING_REFUSED` trong log).
-5. **Những thay đổi trong bản này**:
+5. **Những thay đổi trong bản fix3**:
    - **Vé huấn luyện vị trí (chọn)**: thẻ học đúng vị trí đã chọn. Mỗi ô vị trí đã học nâng độ thành thạo ở vị trí đó thêm một bậc so với mức vốn có của thẻ (tối đa 2), như game gốc của Konami. Khi đăng nhập, các vị trí đã học trong save cũ được chỉnh lại theo quy tắc này, nên một số vị trí có thể giảm từ mức 2 xuống mức 1, đúng như game gốc.
    - **Vé huấn luyện kỹ năng (chọn)**: mod gửi cho game danh sách kỹ năng thẻ có thể học (40 kỹ năng thường; thủ môn có thêm 4 kỹ năng thủ môn), nên các nhóm kỹ năng không còn bị khóa với nhãn "(learned)" và thẻ học đúng kỹ năng đã chọn.
    - Với cả hai vé, lựa chọn mà game không cho chọn (ví dụ một kỹ năng thẻ đã có hoặc đã học) được trả lời là không thành công: thẻ giữ nguyên và không mất vé (`ZIRU_SKILL_SELECT_REFUSED` / `ZIRU_POSITION_REFUSED` trong `offline_server.log`; mỗi lần dùng vé được ghi với nhãn `ZIRU_ITEM`).
@@ -123,6 +123,31 @@ python tools/build_ipa.py `
    - Khi khởi động, mod tự thay file `dt870` cũ trong thư mục dữ liệu (bản gốc của Konami hoặc bản mà các phiên bản mod trước đã cài) bằng bản mới đi kèm; file khác do người chơi tự đặt vào được giữ nguyên, kể cả file quá lớn hoặc không đọc được (`IOS_TABLE_FIX` trong `ziru.log`). Thư mục `PES2027-repair-backups` không còn nhận thêm file sau mỗi lần mở app.
    - Mod chép file vào thư mục `Download` dưới một tên tạm và chỉ đổi sang tên thật khi đã chép xong, nên tắt app giữa chừng không còn để lại file chép dở. Nếu trong `Download` có một bản `dt870` đi kèm bị chép dở (chỉ có phần đầu của file), mod chuyển nó vào `PES2027-repair-backups` và chép lại bản đầy đủ.
 6. **Quay lại bản fix2**: trước khi cài lại IPA fix2, mở app **Tệp (Files)**, vào *Trên iPhone › PES 2027 › Download* và xóa hai file `dt870_mobile_and.cpk` và `dt870_mobile_ios.cpk`. Nếu không xóa, fix2 coi file `dt870` mới là file riêng của người chơi và giữ nguyên nó; khi đã xóa, lần mở đầu tiên của fix2 tự chép lại file của chính nó.
+7. **Bản fix4: các gói thẻ mới**:
+   - Các gói thẻ cũ được thay bằng 29 gói, xếp theo loại thẻ và vị trí đăng ký của thẻ:
+     - **ZIRU BIG TIME** (mọi thẻ Big Time) và **ZIRU LEGENDARY** (mọi thẻ Legendary).
+     - **ZIRU EPIC** và **ZIRU SHOW TIME**: mỗi loại 12 gói, mỗi gói một vị trí: GK, CB, LB, RB, DMF, CMF, LMF, RMF, AMF / SS (thẻ SS nằm chung gói với AMF), LWF, RWF, CF.
+     - **ZIRU HIGHLIGHT** (các thẻ Highlight) và **ZIRU OTHERS** (các thẻ khởi đầu không thuộc gói nào ở trên).
+     - **ZIRU ART TEST**: các thẻ có hình chỉ nằm trong IPA hoặc chỉ có bản dành cho Android, nên hình có thể không hiện trên iPhone/iPad. Gói này dùng để thử xem hình của các thẻ đó có hiện hay không; các thẻ này không có trong gói nào khác.
+   - Có tất cả 1.987 thẻ. Mỗi thẻ chỉ nằm trong một gói, và mọi thẻ của các gói cũ đều có trong các gói mới. Gói nhỏ nhất có 15 thẻ, nên gói nào cũng mở được 10 thẻ một lần khi còn đủ 10 thẻ.
+   - Một gói chỉ đưa ra những thẻ mà câu lạc bộ chưa có. Sau khi bấm **Reset**, gói có lại đủ thẻ, kể cả những thẻ đã có.
+   - Các gói mới và dữ liệu cầu thủ của các thẻ trong gói đến từ các file dữ liệu đi kèm IPA fix4, không phải từ mã nguồn. Một bản tự build chỉ từ mã nguồn trong kho này vẫn dùng các gói cũ.
+8. **Bản fix4: save mới bắt đầu không có cầu thủ**:
+   - Chỉ một save hoàn toàn mới bắt đầu với câu lạc bộ trống, không có 70 thẻ khởi đầu. Save đang dùng vẫn giữ 70 thẻ khởi đầu (mục 9).
+   - Cách có save mới: xóa app (save hiện tại và dữ liệu đã nhập cũng bị xóa theo), cài lại IPA fix4, rồi nhập lại gói dữ liệu hoặc chép lại thư mục `PES2027-data` như ở mục 2.
+   - Mở thẻ từ các gói, rồi vào **Game Plan** để xếp đội hình: kéo một thẻ từ danh sách **RES** (dự bị) thả vào ô trống, hoặc bấm **Auto Placement** để game tự xếp. Chạm vào ô trống không có tác dụng gì.
+   - Phải có đủ 23 cầu thủ khác nhau và một huấn luyện viên trong đội hình thì mới thi đấu được.
+   - Đội hình MyLeague là đội hình riêng và cũng bắt đầu trống: xếp nó trong Game Plan của MyLeague theo cách trên.
+9. **Bản fix4: save đang dùng**:
+   - Save giữ nguyên 70 thẻ khởi đầu, mọi thẻ đã mở và đội hình.
+   - Vì gói không đưa ra thẻ mà câu lạc bộ đã có, các gói gồm nhiều thẻ khởi đầu gần như hết ngay: **ZIRU OTHERS** có thể hiện còn 0 thẻ và **ZIRU HIGHLIGHT** còn 1 thẻ. Bấm **Reset** trong gói đó để có lại đủ thẻ (cần làm trước khi mở 10 thẻ một lần ở hai gói này).
+   - Thẻ nổi bật trên banner của một gói mà câu lạc bộ đã có thì chỉ ra sau khi Reset gói đó.
+10. **Quay lại bản fix3**:
+    - Chỉ cần cài lại IPA fix3. fix4 dùng đúng file `dt870` của fix3, nên không cần xóa hai file `dt870` trong `Download` (việc đó chỉ cần khi quay lại fix2, mục 6).
+    - Nếu sau đó lại cài fix4 (fix4 → fix3 → fix4):
+      - trên save mới không có cầu thủ, fix3 thêm 70 thẻ khởi đầu vào save, và chúng ở lại luôn khi quay lại fix4;
+      - các gói của fix4 có thể đưa ra lại những thẻ đã mở trong lúc dùng fix3;
+      - thẻ Neymar Standard hoặc De Bruyne Standard đã mở từ gói bị fix3 đổi hẳn thành Neymar Big Time hoặc De Bruyne Show Time, và vẫn như vậy khi quay lại fix4.
 
 ---
 
