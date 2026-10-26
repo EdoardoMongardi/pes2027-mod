@@ -11,11 +11,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev zlib1g-dev libssl-dev
+      - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev zlib1g-dev libssl-dev clang
       - name: build host tools
-        run: make -j2 build/runcpp build/packtest build/gameplaytest build/modtest build/folderroutetest build/datapacktest
+        run: make -j2 build/runcpp build/packtest build/gameplaytest build/modtest build/folderroutetest build/jerseynametest build/jerseyhooktest build/datapacktest
       - name: data folder links (Documents/pak, cpk, livedata)
         run: ./build/folderroutetest
+      - name: player names in the match and on the shirt
+        run: ./build/jerseynametest
+      - name: the jersey hook's own lookups leave the match data alone
+        run: ./build/jerseyhooktest
       - name: data-pack ZIP layouts and moved-aside folders
         run: python3 test/datapack_fixtures.py /tmp/datapack-test && ./build/datapacktest /tmp/datapack-test
       - name: user mod ZIP installation and recovery
@@ -28,6 +32,8 @@ jobs:
         run: python3 -m unittest discover -s test -p 'player_data_test.py' -v
       - name: box config (tools/box_layout.py and the shipped boxes)
         run: python3 -m unittest discover -s test -p 'box_data_test.py' -v
+      - name: IPA builder patch table (Konami's ConvertAllCaps left alone)
+        run: python3 -m unittest discover -s test -p 'build_ipa_test.py' -v
       - name: online encrypted two-client integration tests
         run: |
           python3 -m pip install -r online/requirements.txt

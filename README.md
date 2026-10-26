@@ -157,8 +157,8 @@ python tools/build_ipa.py `
 Dự án tích hợp sẵn bộ test đầy đủ để xác minh tính tương thích trước khi phát hành:
 
 ```bash
-# 1. Biên dịch bộ công cụ test trên Linux / macOS:
-make -j2 build/runcpp build/packtest build/gameplaytest build/modtest build/folderroutetest build/datapacktest
+# 1. Biên dịch bộ công cụ test trên Linux / macOS (build/jerseyhooktest cần clang++):
+make -j2 build/runcpp build/packtest build/gameplaytest build/modtest build/folderroutetest build/jerseynametest build/jerseyhooktest build/datapacktest
 
 # 2. Chạy hồi quy kiểm thử logic gameplay (division, career, progression, skills):
 ./build/gameplaytest
@@ -178,6 +178,17 @@ python3 test/datapack_fixtures.py /tmp/datapack-test && ./build/datapacktest /tm
 #    play_style khớp tham số 61/62, mọi bản sao của một thẻ khớp với ZIRU_PLAYER_RECORDS.json,
 #    mỗi thẻ khởi đầu có serial riêng của Konami và bảng chuyển save core/starter_serials.inc khớp dữ liệu):
 python3 -m unittest discover -s test -p 'player_data_test.py' -v
+
+# 7. Kiểm thử tên cầu thủ trong trận và tên in trên áo (core/jerseyname.hpp): tên trong trận giữ nguyên như game ghi
+#    ("van Dijk", "McTominay"), tên trên áo là ô tên áo viết hoa ("MESSI", "Mbappé" -> "MBAPPE"), không đoán tên theo id cầu thủ:
+./build/jerseynametest
+#    Chạy chính hook tên áo (ios/ZiruJersey.inc) trên dữ liệu trận giả: tìm đúng cầu thủ theo số áo và theo id,
+#    và không sửa byte nào của dữ liệu trận:
+./build/jerseyhooktest
+
+# 8. Kiểm tra bảng vá của tools/build_ipa.py: hàm ConvertAllCaps của Konami giữ nguyên, không bị vá thành kiểu
+#    chỉ viết hoa chữ đầu (kiểu đó đổi "van Dijk" thành "Van Dijk"):
+python3 -m unittest discover -s test -p 'build_ipa_test.py' -v
 ```
 
 ---

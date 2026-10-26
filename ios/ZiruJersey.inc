@@ -1,5 +1,9 @@
 // Native name-atlas fallback, PESmobile 11.1.101 only. These data vtable slots
 // are validated before writing; no executable page is modified at runtime.
+// The shirt name comes from the player's name slots in the match data (core/jerseyname.hpp);
+// the match data itself is only read, so the names shown in the match stay as the game wrote them.
+#include "../core/jerseyname.hpp"
+
 namespace zjersey {
 using LoadFn = void (*)(void*);
 using ReadyFn = bool (*)(void*);
@@ -85,135 +89,8 @@ static void draw(void* actor, void* canvas) {
 extern "C" int32_t gZiruHomeTeamId;
 extern "C" int32_t gZiruAwayTeamId;
 
-static std::string toTitleCase(const std::string& input) {
-  if (input.empty()) return "";
-  std::string out;
-  out.reserve(input.size());
-  bool newWord = true;
-  for (size_t i = 0; i < input.size(); ++i) {
-    unsigned char c = (unsigned char)input[i];
-    if (c == ' ' || c == '.' || c == '-' || c == '\'') {
-      out += (char)c;
-      newWord = true;
-    } else {
-      if (newWord) {
-        if (c >= 'a' && c <= 'z') out += (char)(c - 'a' + 'A');
-        else out += (char)c;
-        newWord = false;
-      } else {
-        if (c >= 'A' && c <= 'Z') out += (char)(c - 'A' + 'a');
-        else out += (char)c;
-      }
-    }
-  }
-  return out;
-}
-
-static std::string sanitizeShirtName(const char* s) {
-  if (!s || !s[0]) return "";
-  std::string raw;
-  raw.reserve(32);
-  for (size_t i = 0; s[i] != '\0' && raw.size() < 30; ++i) {
-    unsigned char c = (unsigned char)s[i];
-    if (c >= 'a' && c <= 'z') {
-      raw += (char)(c - 'a' + 'A');
-    } else if ((c >= 'A' && c <= 'Z') || c == ' ' || c == '.' || c == '-' || c == 0x27) {
-      raw += (char)c;
-    } else if (c == 0xC3 && s[i + 1] != '\0') {
-      unsigned char c2 = (unsigned char)s[++i];
-      if ((c2 >= 0x80 && c2 <= 0x85) || (c2 >= 0xA0 && c2 <= 0xA5)) raw += 'A';
-      else if (c2 == 0x86 || c2 == 0xA6) { raw += 'A'; raw += 'E'; }
-      else if (c2 == 0x87 || c2 == 0xA7) raw += 'C';
-      else if ((c2 >= 0x88 && c2 <= 0x8B) || (c2 >= 0xA8 && c2 <= 0xAB)) raw += 'E';
-      else if ((c2 >= 0x8C && c2 <= 0x8F) || (c2 >= 0xAC && c2 <= 0xAF)) raw += 'I';
-      else if (c2 == 0x90 || c2 == 0xB0) raw += 'D';
-      else if (c2 == 0x91 || c2 == 0xB1) raw += 'N';
-      else if ((c2 >= 0x92 && c2 <= 0x96) || c2 == 0x98 || (c2 >= 0xB2 && c2 <= 0xB6) || c2 == 0xB8) raw += 'O';
-      else if ((c2 >= 0x99 && c2 <= 0x9C) || (c2 >= 0xB9 && c2 <= 0xBC)) raw += 'U';
-      else if (c2 == 0x9D || c2 == 0xBD || c2 == 0xBF) raw += 'Y';
-      else if (c2 == 0x9F) { raw += 'S'; raw += 'S'; }
-    } else if (c == 0xC4 && s[i + 1] != '\0') {
-      unsigned char c2 = (unsigned char)s[++i];
-      if (c2 >= 0x80 && c2 <= 0x85) raw += 'A';
-      else if (c2 >= 0x86 && c2 <= 0x8D) raw += 'C';
-      else if (c2 >= 0x8E && c2 <= 0x91) raw += 'D';
-      else if (c2 >= 0x92 && c2 <= 0x9B) raw += 'E';
-      else if (c2 >= 0x9C && c2 <= 0x9F) raw += 'G';
-      else if (c2 >= 0xA8 && c2 <= 0xB1) raw += 'I';
-    } else if (c == 0xC5 && s[i + 1] != '\0') {
-      unsigned char c2 = (unsigned char)s[++i];
-      if (c2 >= 0x81 && c2 <= 0x84) raw += 'L';
-      else if (c2 >= 0x83 && c2 <= 0x8B) raw += 'N';
-      else if (c2 >= 0x8C && c2 <= 0x91) raw += 'O';
-      else if (c2 >= 0x94 && c2 <= 0x99) raw += 'R';
-      else if ((c2 >= 0x9A && c2 <= 0x9F) || (c2 >= 0xA0 && c2 <= 0xA3)) raw += 'S';
-      else if (c2 >= 0xA4 && c2 <= 0xA7) raw += 'T';
-      else if (c2 >= 0xAA && c2 <= 0xB3) raw += 'U';
-      else if (c2 >= 0xBD && c2 <= 0xC2) raw += 'Z';
-    }
-  }
-  while (!raw.empty() && raw.front() == ' ') raw.erase(raw.begin());
-  while (!raw.empty() && raw.back() == ' ') raw.pop_back();
-  if (raw.empty() || raw.size() > 30) return "";
-  return raw;
-}
-
-static std::string fallbackPlayerName(uint32_t baseId) {
-  static const std::unordered_map<uint32_t, const char*> sMap = {
-    {133580, "Haaland"}, {7511, "Messi"}, {4522, "C. Ronaldo"}, {40352, "Neymar Jr"},
-    {110718, "Mbappe"}, {44379, "De Bruyne"}, {138036, "Bellingham"}, {117047, "Vini Jr."},
-    {109005, "Rodri"}, {45260, "Salah"}, {40571, "Lewandowski"}, {47287, "Kane"},
-    {45023, "Son"}, {32664, "Modric"}, {36770, "Kroos"}, {33702, "Benzema"},
-    {36769, "Suarez"}, {42641, "Griezmann"}, {131976, "Saka"}, {118007, "Foden"},
-    {141673, "Musiala"}, {138384, "Pedri"}, {145952, "Gavi"}, {167375, "Lamine Yamal"},
-    {42668, "Courtois"}, {60512, "Alisson"}, {103380, "Ederson"}, {33145, "Neuer"},
-    {45843, "Van Dijk"}, {113351, "Ruben"}, {126955, "Saliba"}, {118073, "Davies"},
-    {111451, "A. Arnold"}, {41103, "Walker"}, {109265, "Kimmich"}, {118485, "Rice"},
-    {133465, "Camavinga"}, {113408, "Valverde"}, {101057, "Bernardo"}, {60587, "Bruno F."},
-    {110638, "Rashford"}, {118334, "Lautaro"}, {117765, "Osimhen"}, {126280, "Leao"},
-    {140321, "Kvaratskhelia"}, {109867, "Barella"}, {118047, "Bastoni"}, {113405, "T. Hernandez"},
-    {103445, "Dimarco"}, {47000, "Dybala"}, {44378, "Morata"}, {120281, "Enzo"},
-    {134907, "Mac Allister"}, {127179, "Julian Alvarez"}, {108919, "R. Dias"}, {100780, "Casemiro"},
-    {100688, "Marquinhos"}, {46845, "Gabriel Jesus"}, {45129, "De Gea"}, {41571, "Ter Stegen"},
-    {100236, "Odegaard"}, {114878, "Gabriel"}, {4073, "Iniesta"}, {1082, "Xavi"},
-    {2439, "Puyol"}, {133543, "Zion Suzuki"}, {134639, "Cannavaro"}, {35496, "Mertesacker"},
-    {134594, "Bonucci"}, {134632, "Suphanan"}, {137955, "Jun"}, {129961, "Tomiyasu"},
-    {44840, "Jorginho"}, {30210, "Partey"}, {137957, "Trossard"}, {110815, "Havertz"},
-    {107686, "Martinelli"}, {124266, "Zinchenko"}, {132933, "Raya"}, {983, "Beckham"},
-    {33185, "Pirlo"}, {134670, "Maldini"}, {134701, "Nedved"}, {34691, "Nedved"},
-    {45735, "Mane"}, {126343, "Rodrygo"}, {3214, "Ronaldinho"}, {15676, "Kaka"},
-    {3000, "Zidane"}, {41066, "R. Carlos"}, {3279, "Casillas"}, {3843, "Buffon"},
-    {3234, "Shevchenko"}, {3334, "Figo"}, {15886, "Gullit"}, {16369, "Van Basten"},
-    {16368, "Rijkaard"}, {136270, "Wirtz"}, {133668, "Palmer"}, {143093, "Mainoo"},
-    {105809, "Calhanoglu"}, {101097, "Calhanoglu"}, {42647, "Lukaku"},
-    {42669, "Casemiro"}, {40871, "Eriksen"}, {42659, "Eriksen"},
-    {39936, "Mkhitaryan"}, {43026, "Mkhitaryan"},
-    {133215, "Ansu Fati"}, {135760, "Ansu Fati"}
-  };
-  auto it = sMap.find(baseId);
-  return (it != sMap.end()) ? it->second : "";
-}
-
 static std::mutex sActorLock;
 static std::unordered_map<void*, int64_t> sActorPlayerId;
-
-static void sanitizeMatchPlayerNames(uint8_t* match) {
-  if (!match) return;
-  for (int side = 0; side <= 1; ++side) {
-    uint8_t* teamPlayers = match + 0x14e0 + (side * 0x5dc0);
-    for (int i = 0; i < 40; ++i) {
-      uint8_t* p = teamPlayers + (i * 0x258);
-      char* name = (char*)(p + 0x89);
-      if (name && name[0] != '\0') {
-        std::string tc = toTitleCase(name);
-        if (!tc.empty() && tc.size() < 60 && tc != name) {
-          strncpy(name, tc.c_str(), 60);
-          name[59] = '\0';
-        }
-      }
-    }
-  }
-}
 
 static int resolveActorSide(void* actor, uint8_t* match) {
   if (!actor) return -1;
@@ -275,7 +152,6 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
   if (!base) return "";
 
   uint8_t* match = base + 0x6c4c0;
-  sanitizeMatchPlayerNames(match);
 
   int preferredSide = resolveActorSide(actor, match);
 
@@ -292,12 +168,7 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
       uint16_t num2 = *(uint16_t*)(p + 0x1b4);
       uint16_t num3 = uniformNums[i];
       if (num1 == (uint16_t)uniformNumber || num2 == (uint16_t)uniformNumber || num3 == (uint16_t)uniformNumber) {
-        uint32_t baseId = *(uint32_t*)(p + 0x38);
-        const char* rawName = (const char*)(p + 0xc6);
-        if (!rawName || !rawName[0]) rawName = (const char*)(p + 0x89);
-        std::string name = sanitizeShirtName(rawName);
-        if (name.empty()) name = sanitizeShirtName((const char*)(p + 0x103));
-        if (name.empty() && baseId > 0) name = fallbackPlayerName(baseId & 0xFFFFFF);
+        std::string name = zjn::shirtName(p);
         if (!name.empty()) return name;
       }
     }
@@ -309,12 +180,7 @@ static std::string lookupShirtName(void* actor, int uniformNumber) {
       uint16_t num2 = *(uint16_t*)(p + 0x1b4);
       uint16_t num3 = uniformNums[i];
       if (num1 == (uint16_t)uniformNumber || num2 == (uint16_t)uniformNumber || num3 == (uint16_t)uniformNumber) {
-        uint32_t baseId = *(uint32_t*)(p + 0x38);
-        const char* rawName = (const char*)(p + 0xc6);
-        if (!rawName || !rawName[0]) rawName = (const char*)(p + 0x89);
-        std::string name = sanitizeShirtName(rawName);
-        if (name.empty()) name = sanitizeShirtName((const char*)(p + 0x103));
-        if (name.empty() && baseId > 0) name = fallbackPlayerName(baseId & 0xFFFFFF);
+        std::string name = zjn::shirtName(p);
         if (!name.empty()) return name;
       }
     }
@@ -335,13 +201,12 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
 
   auto getMgr = (void* (*)())(0x104bba084 + gSlide);
   void* mgr = getMgr ? getMgr() : nullptr;
-  if (!mgr) return fallbackPlayerName(targetBaseId);
+  if (!mgr) return "";
 
   uint8_t* base = *(uint8_t**)((uint8_t*)mgr + 0x48);
-  if (!base) return fallbackPlayerName(targetBaseId);
+  if (!base) return "";
 
   uint8_t* match = base + 0x6c4c0;
-  sanitizeMatchPlayerNames(match);
 
   int preferredSide = resolveActorSide(actor, match);
 
@@ -353,11 +218,7 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
       uint32_t baseId = *(uint32_t*)(p + 0x38);
       uint64_t fullPid = *(uint64_t*)(p + 0x38);
       if ((baseId & 0xFFFFFF) == targetBaseId || (fullPid & 0xFFFFFF) == (uint64_t)targetBaseId || fullPid == (uint64_t)playerId) {
-        const char* rawName = (const char*)(p + 0xc6);
-        if (!rawName || !rawName[0]) rawName = (const char*)(p + 0x89);
-        std::string name = sanitizeShirtName(rawName);
-        if (name.empty()) name = sanitizeShirtName((const char*)(p + 0x103));
-        if (name.empty()) name = fallbackPlayerName(targetBaseId);
+        std::string name = zjn::shirtName(p);
         if (!name.empty()) return name;
       }
     }
@@ -365,15 +226,11 @@ static std::string lookupShirtNameByPlayerId(void* actor, int64_t playerId) {
   };
 
   if (preferredSide >= 0) {
-    std::string res = checkSide(preferredSide);
-    if (!res.empty()) return res;
-    return fallbackPlayerName(targetBaseId);
+    return checkSide(preferredSide);
   }
   std::string res = checkSide(0);
   if (!res.empty()) return res;
-  res = checkSide(1);
-  if (!res.empty()) return res;
-  return fallbackPlayerName(targetBaseId);
+  return checkSide(1);
 }
 
 static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int uniformNumber) {
@@ -389,7 +246,7 @@ static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int 
     if (!n.empty()) return n;
   }
 
-  // 3. Try native TMPDB PlayerManager::FindPlayer with playerId
+  // 3. Try the game's own player record: tmpdb::CommonWork::GetPlayer with playerId
   if (playerId > 0 || (playerId & 0xFFFFFF) > 0) {
     auto getMgr = (void* (*)())(0x104bba084 + gSlide);
     void* mgr = getMgr ? getMgr() : nullptr;
@@ -409,9 +266,8 @@ static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int 
             }
           }
           if (pl) {
-            const char* raw = (const char*)((uint8_t*)pl + 0xc6);
-            if (!raw || !raw[0]) raw = (const char*)((uint8_t*)pl + 0x89);
-            std::string n = sanitizeShirtName(raw);
+            // A tmpdb::Player has the same name slots as a player of the match data (core/jerseyname.hpp).
+            std::string n = zjn::shirtName((const uint8_t*)pl);
             if (!n.empty()) return n;
           }
         }
@@ -419,12 +275,7 @@ static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int 
     }
   }
 
-  // 4. Try fallback player names
-  if (playerId > 0) {
-    std::string n = fallbackPlayerName((uint32_t)(playerId & 0xFFFFFF));
-    if (!n.empty()) return n;
-  }
-
+  // No name found: the callers keep the shirt name the game set (BackNumberStep only puts it in capitals).
   return "";
 }
 
@@ -512,7 +363,7 @@ static void hookedBackNumberStep(void* actor) {
       }
     } else if (curStr && len > 0) {
       std::string raw(curStr, len);
-      std::string uc = sanitizeShirtName(raw.c_str());
+      std::string uc = zjn::sanitizeShirtName(raw.c_str());
       if (!uc.empty() && uc != raw) {
         neededName = uc;
       }
