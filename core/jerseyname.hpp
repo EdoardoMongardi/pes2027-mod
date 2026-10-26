@@ -6,6 +6,9 @@
 //   kMatchNameOffset   the name shown in the match, as Konami writes it ("van Dijk", "McTominay")
 //   kShirtNameOffset   the name printed on the shirt ("VAN DIJK")
 //   kOtherNameOffset   one more name slot, read only when the first two give nothing printable
+// A player of the match data is one of the game's player records (tmpdb::Player, which
+// tmpdb::CommonWork::GetPlayer returns): tmpdb::LinkPesdb::SetPlayerData fills these slots, 61
+// bytes each, so the same rules apply to a player the jersey hook finds through GetPlayer.
 //
 // Rules:
 //  * The slots are only read. The in-match name stays exactly as the game wrote it: earlier

@@ -246,7 +246,7 @@ static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int 
     if (!n.empty()) return n;
   }
 
-  // 3. Try native TMPDB PlayerManager::FindPlayer with playerId
+  // 3. Try the game's own player record: tmpdb::CommonWork::GetPlayer with playerId
   if (playerId > 0 || (playerId & 0xFFFFFF) > 0) {
     auto getMgr = (void* (*)())(0x104bba084 + gSlide);
     void* mgr = getMgr ? getMgr() : nullptr;
@@ -266,9 +266,8 @@ static std::string lookupPlayerNameUniversal(void* actor, int64_t playerId, int 
             }
           }
           if (pl) {
-            const char* raw = (const char*)((uint8_t*)pl + 0xc6);
-            if (!raw || !raw[0]) raw = (const char*)((uint8_t*)pl + 0x89);
-            std::string n = zjn::sanitizeShirtName(raw);
+            // A tmpdb::Player has the same name slots as a player of the match data (core/jerseyname.hpp).
+            std::string n = zjn::shirtName((const uint8_t*)pl);
             if (!n.empty()) return n;
           }
         }
