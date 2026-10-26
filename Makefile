@@ -25,6 +25,10 @@ build/folderroutetest: core/folderroute.hpp test/folderroutetest.cpp
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ test/folderroutetest.cpp
 
+build/jerseynametest: core/jerseyname.hpp test/jerseynametest.cpp
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -o $@ test/jerseynametest.cpp
+
 build/datapacktest: core/datapack.cpp core/zipread.cpp core/jvalue.cpp test/datapacktest.cpp
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ core/datapack.cpp core/zipread.cpp core/jvalue.cpp test/datapacktest.cpp -lz

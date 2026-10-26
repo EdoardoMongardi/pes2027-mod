@@ -13,9 +13,11 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev zlib1g-dev libssl-dev
       - name: build host tools
-        run: make -j2 build/runcpp build/packtest build/gameplaytest build/modtest build/folderroutetest build/datapacktest
+        run: make -j2 build/runcpp build/packtest build/gameplaytest build/modtest build/folderroutetest build/jerseynametest build/datapacktest
       - name: data folder links (Documents/pak, cpk, livedata)
         run: ./build/folderroutetest
+      - name: player names in the match and on the shirt
+        run: ./build/jerseynametest
       - name: data-pack ZIP layouts and moved-aside folders
         run: python3 test/datapack_fixtures.py /tmp/datapack-test && ./build/datapacktest /tmp/datapack-test
       - name: user mod ZIP installation and recovery
