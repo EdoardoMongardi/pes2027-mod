@@ -29,6 +29,13 @@ build/jerseynametest: core/jerseyname.hpp test/jerseynametest.cpp
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ test/jerseynametest.cpp
 
+# The jersey hook itself (ios/ZiruJersey.inc) is Objective-C++, which clang builds on Linux too. With the
+# Apple runtime, as in the app, the test needs no Objective-C library: the hook's Objective-C code never runs here.
+OBJCXX ?= clang++
+build/jerseyhooktest: ios/ZiruJersey.inc core/jerseyname.hpp test/jerseyhooktest.mm
+	mkdir -p build
+	$(OBJCXX) $(CXXFLAGS) -x objective-c++ -fobjc-runtime=ios-15.0 -o $@ test/jerseyhooktest.mm
+
 build/datapacktest: core/datapack.cpp core/zipread.cpp core/jvalue.cpp test/datapacktest.cpp
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ core/datapack.cpp core/zipread.cpp core/jvalue.cpp test/datapacktest.cpp -lz
