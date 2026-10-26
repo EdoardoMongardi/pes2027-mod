@@ -182,6 +182,10 @@ python3 -m unittest discover -s test -p 'player_data_test.py' -v
 # 7. Kiểm thử tên cầu thủ trong trận và tên in trên áo (core/jerseyname.hpp): tên trong trận giữ nguyên như game ghi
 #    ("van Dijk", "McTominay"), tên trên áo là ô tên áo viết hoa ("MESSI", "Mbappé" -> "MBAPPE"), không đoán tên theo id cầu thủ:
 ./build/jerseynametest
+
+# 8. Kiểm tra bảng vá của tools/build_ipa.py: hàm ConvertAllCaps của Konami giữ nguyên, không bị vá thành kiểu
+#    chỉ viết hoa chữ đầu (kiểu đó đổi "van Dijk" thành "Van Dijk"):
+python3 -m unittest discover -s test -p 'build_ipa_test.py' -v
 ```
 
 ---
